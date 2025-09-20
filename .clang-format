@@ -1,0 +1,13 @@
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+IndentPPDirectives: None
+
+AlignEscapedNewlines: Right
+ContinuationIndentWidth: 4
+
+# Do not auto-wrap macros and break backslash positions
+ColumnLimit: 0
