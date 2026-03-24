@@ -229,7 +229,7 @@ name##_hidx(type *base, const type *p) {                                      \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE type *                                     \
 name##_hptr(type *base, unsigned i) {                                         \
-    return RIX_PTR_FROM_IDX(base, i);                                         \
+    return (type *)rix_ptr_from_idx_valid_(base, sizeof(*base), i);           \
 }                                                                             \
                                                                               \
 /* ================================================================== */      \

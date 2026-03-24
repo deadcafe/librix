@@ -96,7 +96,7 @@
         return RIX_IDX_FROM_PTR(base, (type *)p);                             \
     }                                                                         \
     static RIX_FORCE_INLINE type *name##_ptr(type *base, unsigned idx) {      \
-        return RIX_PTR_FROM_IDX(base, idx);                                   \
+        return (type *)rix_ptr_from_idx_valid_(base, sizeof(*base), idx);     \
     }                                                                         \
     static RIX_FORCE_INLINE unsigned name##_color_idx(type *base,             \
                                                       unsigned idx) {         \

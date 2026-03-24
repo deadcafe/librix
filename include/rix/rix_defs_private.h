@@ -85,6 +85,20 @@ extern "C" {
 #  define RIX_PTR_FROM_IDX(base, i) \
     (((unsigned)(i) != RIX_NIL) ? ((base) + ((unsigned)(i) - 1u)) : NULL)
 
+/* Internal helper when the caller has already proven i != RIX_NIL.
+ * Keeping this separate avoids GCC false positives from the nullable macro
+ * after aggressive inlining through generated wrappers. */
+static RIX_UNUSED RIX_FORCE_INLINE void *
+rix_ptr_from_idx_valid_(void *base, size_t elem_size, unsigned i)
+{
+    assert(i != RIX_NIL);
+#    if defined(__GNUC__) || defined(__clang__)
+    if (RIX_UNLIKELY(i == RIX_NIL))
+        __builtin_unreachable();
+#    endif
+    return (void *)((unsigned char *)base + (size_t)(i - 1u) * elem_size);
+}
+
 /* Convert 1-origin index to 0-origin offset (undefined for RIX_NIL). */
 #  define RIX_IDX_TO_OFF0(i) ((size_t)((unsigned)(i) - 1u))
 

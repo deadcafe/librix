@@ -71,7 +71,7 @@ name##_hidx(struct type *base, const struct type *p) {                        \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
 name##_hptr(struct type *base, unsigned i) {                                  \
-    return RIX_PTR_FROM_IDX(base, i);                                         \
+    return (struct type *)rix_ptr_from_idx_valid_(base, sizeof(*base), i);    \
 }                                                                             \
                                                                               \
 /* ================================================================== */      \
