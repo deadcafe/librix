@@ -240,6 +240,7 @@ static inline void                                                         \
 _FCG_INT(p, free_entry)(_FCG_CACHE_T(p) *fc,                              \
                         _FCG_ENTRY_T(p) *entry)                            \
 {                                                                          \
+    RIX_ASSUME_NONNULL(entry);                                             \
     entry->last_ts = 0u;                                                   \
     RIX_SLIST_INSERT_HEAD(&fc->free_head, fc->pool, entry, free_link);    \
 }                                                                          \
@@ -1029,7 +1030,9 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
         if (_fh != NULL)                                                   \
             rix_hash_prefetch_entry(_fh);                                 \
     }                                                                      \
-    /* 2-stage pipeline: hash+prefetch bk, then alloc+insert */            \
+    /* 2-stage pipeline: hash+prefetch both candidate buckets, then        \
+     * alloc+insert. add_bulk still performs duplicate checks inside       \
+     * insert_hashed(), so bk1 matters too. */                             \
     for (unsigned i = 0; i < total; i += step_keys) {                      \
         /* Stage 1: hash + prefetch buckets */                             \
         if (i < nb_keys) {                                                 \
@@ -1037,14 +1040,16 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 step_keys : (nb_keys - i);                                 \
             for (unsigned j = 0; j < n; j++) {                             \
                 unsigned idx = i + j;                                      \
+                unsigned _bk0;                                             \
+                unsigned _bk1;                                             \
+                u32 _fp_unused;                                            \
                 hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)] =             \
                     hash_fn(&keys[idx], fc->ht_head.rhh_mask);             \
-                {                                                          \
-                    unsigned _bk0 =                                        \
-                        hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)].val32[0] & \
-                        fc->ht_head.rhh_mask;                              \
-                    rix_hash_prefetch_bucket(&fc->buckets[_bk0]);         \
-                }                                                          \
+                _rix_hash_buckets(                                         \
+                    hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)],          \
+                    fc->ht_head.rhh_mask, &_bk0, &_bk1, &_fp_unused);      \
+                rix_hash_prefetch_bucket(&fc->buckets[_bk0]);              \
+                rix_hash_prefetch_bucket(&fc->buckets[_bk1]);              \
             }                                                              \
         }                                                                  \
         /* Stage 2: alloc + insert */                                      \

@@ -6,8 +6,10 @@ CURDIR := $(PWD)
 TOPDIR := $(shell cd ../.. && pwd)
 include $(TOPDIR)/mk/simd.mk
 
-CFLAGS       = -std=gnu11 -g -O2 $(SIMD_FLAGS) -Wall -Wextra -Wvla -Werror -I$(CURDIR) -I../../include
-BENCH_CFLAGS = -std=gnu11 -O3 $(SIMD_FLAGS) -Wall -Wextra -Wvla -Werror -I$(CURDIR) -I../../include
+EXTRA_CFLAGS ?=
+BENCH_EXTRA_CFLAGS ?= $(EXTRA_CFLAGS) -DNDEBUG
+CFLAGS       = -std=gnu11 -g -O2 $(SIMD_FLAGS) -Wall -Wextra -Wvla -Werror -I$(CURDIR) -I../../include $(EXTRA_CFLAGS)
+BENCH_CFLAGS = -std=gnu11 -O3 $(SIMD_FLAGS) -Wall -Wextra -Wvla -Werror -I$(CURDIR) -I../../include $(BENCH_EXTRA_CFLAGS)
 DEPENDS      = .depend
 
 TEST_TARGET  = hash_test

@@ -16,6 +16,8 @@
 
 .PHONY: all static shared test bench bench-full clean install
 
+BENCH_EXTRA_CFLAGS ?= -DNDEBUG
+
 all:
 	$(MAKE) -C fcache all
 	$(MAKE) -C test   all
@@ -29,11 +31,11 @@ shared:
 test: all
 	$(MAKE) -C test test
 
-bench: all
-	$(MAKE) -C test bench
+bench:
+	$(MAKE) -C test bench BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
 
-bench-full: all
-	$(MAKE) -C test bench-full
+bench-full:
+	$(MAKE) -C test bench-full BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
 
 clean:
 	$(MAKE) -C fcache clean

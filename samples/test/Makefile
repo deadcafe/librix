@@ -33,9 +33,13 @@ endif
 WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
+BENCH_EXTRA_CFLAGS ?= $(EXTRA_CFLAGS) -DNDEBUG
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include -I$(FCDIR)/include \
                $(EXTRA_CFLAGS)
+BENCH_CFLAGS = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
+               -I$(TOPDIR)/include -I$(FCDIR)/include \
+               $(BENCH_EXTRA_CFLAGS)
 
 VARIANT     ?= flow4
 
@@ -46,7 +50,7 @@ BENCH_SRC    = bench_fc.c
 BENCH_HDRS   = bench_fc_common.h bench_fc_body.h
 LIBFC        = $(FCDIR)/lib/libfcache.a
 
-.PHONY: all test bench bench-full matrix matrix-full clean
+.PHONY: all test bench-build bench bench-full matrix matrix-full clean
 
 all: $(TARGET) $(BENCH)
 
@@ -54,7 +58,7 @@ $(TARGET): $(SRC) $(LIBFC)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LIBFC)
 
 $(BENCH): $(BENCH_SRC) $(BENCH_HDRS) $(LIBFC)
-	$(CC) $(CFLAGS) -o $@ $(BENCH_SRC) $(LIBFC)
+	$(CC) $(BENCH_CFLAGS) -o $@ $(BENCH_SRC) $(LIBFC)
 
 $(LIBFC):
 	$(MAKE) -C $(FCDIR) static
@@ -62,20 +66,25 @@ $(LIBFC):
 test: $(TARGET)
 	./$(TARGET)
 
-bench: $(BENCH)
+bench-build:
+	$(MAKE) -C $(FCDIR) clean static EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
+	$(MAKE) clean
+	$(MAKE) $(BENCH) BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
+
+bench: bench-build
 	./$(BENCH) datapath
 	./$(BENCH) maint_partial
 	./run_fc_bench_matrix.sh all quick
 
-bench-full: $(BENCH)
+bench-full: bench-build
 	./$(BENCH) datapath
 	./$(BENCH) maint_partial
 	./run_fc_bench_matrix.sh all full
 
-matrix: $(BENCH)
+matrix: bench-build
 	./run_fc_bench_matrix.sh $(VARIANT) quick
 
-matrix-full: $(BENCH)
+matrix-full: bench-build
 	./run_fc_bench_matrix.sh $(VARIANT) full
 
 clean:
