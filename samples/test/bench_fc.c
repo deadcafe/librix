@@ -366,62 +366,29 @@ usage(const char *prog)
            " <timeout_ms> <soak_mul> <report_ms>"
            " <fill0> <fill1> <fill2> <fill3>"
            " <k0> <k1> <k2> <k3> [kick_scale]\n", prog);
+    printf("  %s archcmp [flow4|flow6|flowu] <mode> [args...]\n", prog);
     printf("\n");
     printf("  findadd_closed : fixed hit set + fixed miss set; miss set is deleted after each round.\n");
     printf("  findadd_open   : persistent fresh-miss stream; fill can grow without a window cap.\n");
     printf("  findadd_window : persistent fresh-miss stream with maintenance trying to hold a fill window.\n");
+    printf("  archcmp        : run the same command twice, once with auto and once with avx2.\n");
     printf("  keys_per_sec   : key rate. 1 request = %u keys.\n", FCB_QUERY);
 }
 
-int
-main(int argc, char **argv)
+static int
+run_mode(const char *variant, const char *mode, int argc, char **argv, int arg_off)
 {
-    const char *variant = "flow4";
-    const char *mode;
-    int arg_off;
-    unsigned arch_enable;
-
-    arch_enable = fc_parse_arch_args(&argc, &argv);
-    fc_arch_init(arch_enable);
-    printf("[arch: %s]\n\n", fc_arch_label(arch_enable));
-
-    if (argc < 2) {
-        usage(argv[0]);
-        return 1;
-    }
-
-    /* No-args modes */
-    if (strcmp(argv[1], "datapath") == 0) {
+    if (strcmp(mode, "datapath") == 0) {
         bench_datapath();
         return 0;
     }
-    if (strcmp(argv[1], "maint") == 0) {
+    if (strcmp(mode, "maint") == 0) {
         bench_maint();
         return 0;
     }
-    if (strcmp(argv[1], "maint_partial") == 0) {
+    if (strcmp(mode, "maint_partial") == 0) {
         bench_maint_partial();
         return 0;
-    }
-    if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0) {
-        usage(argv[0]);
-        return 0;
-    }
-
-    /* Detect optional variant argument */
-    if (strcmp(argv[1], "flow4") == 0 ||
-        strcmp(argv[1], "flow6") == 0 ||
-        strcmp(argv[1], "flowu") == 0) {
-        variant = argv[1];
-        if (argc < 3) {
-            usage(argv[0]);
-            return 1;
-        }
-        mode = argv[2];
-        arg_off = 3;
-    } else {
-        mode = argv[1];
-        arg_off = 2;
     }
 
     findadd_closed_fn fn_closed;
@@ -565,6 +532,89 @@ main(int argc, char **argv)
     fprintf(stderr, "unknown mode: %s\n", mode);
     usage(argv[0]);
     return 2;
+}
+
+int
+main(int argc, char **argv)
+{
+    const char *variant = "flow4";
+    const char *mode;
+    int arg_off;
+    unsigned arch_enable;
+
+    arch_enable = fc_parse_arch_args(&argc, &argv);
+
+    if (argc < 2) {
+        usage(argv[0]);
+        return 1;
+    }
+
+    if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0) {
+        usage(argv[0]);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "archcmp") == 0) {
+        static const struct {
+            const char *name;
+            unsigned enable;
+        } arch_runs[] = {
+            { "auto", FC_ARCH_AUTO },
+            { "avx2", FC_ARCH_SSE | FC_ARCH_AVX2 },
+        };
+        int rc = 0;
+
+        if (argc < 3) {
+            usage(argv[0]);
+            return 1;
+        }
+
+        if (strcmp(argv[2], "flow4") == 0 ||
+            strcmp(argv[2], "flow6") == 0 ||
+            strcmp(argv[2], "flowu") == 0) {
+            variant = argv[2];
+            if (argc < 4) {
+                usage(argv[0]);
+                return 1;
+            }
+            mode = argv[3];
+            arg_off = 4;
+        } else {
+            mode = argv[2];
+            arg_off = 3;
+        }
+
+        for (unsigned i = 0; i < sizeof(arch_runs) / sizeof(arch_runs[0]); i++) {
+            fc_arch_init(arch_runs[i].enable);
+            printf("[archcmp: %s]\n\n", arch_runs[i].name);
+            rc = run_mode(variant, mode, argc, argv, arg_off);
+            if (rc != 0)
+                return rc;
+            if (i + 1u < sizeof(arch_runs) / sizeof(arch_runs[0]))
+                printf("\n");
+        }
+        return rc;
+    }
+
+    fc_arch_init(arch_enable);
+    printf("[arch: %s]\n\n", fc_arch_label(arch_enable));
+
+    if (strcmp(argv[1], "flow4") == 0 ||
+        strcmp(argv[1], "flow6") == 0 ||
+        strcmp(argv[1], "flowu") == 0) {
+        variant = argv[1];
+        if (argc < 3) {
+            usage(argv[0]);
+            return 1;
+        }
+        mode = argv[2];
+        arg_off = 3;
+    } else {
+        mode = argv[1];
+        arg_off = 2;
+    }
+
+    return run_mode(variant, mode, argc, argv, arg_off);
 }
 
 /*
