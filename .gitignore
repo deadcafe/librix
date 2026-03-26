@@ -78,3 +78,4 @@ tests/hashtbl64/hash64_test
 tests/hashtbl64/hash64_bench
 samples/test/fc_test
 samples/test/fc_bench
+samples/test/fc_bench_ndebug

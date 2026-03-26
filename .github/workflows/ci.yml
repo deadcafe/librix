@@ -11,18 +11,22 @@ jobs:
       fail-fast: false
       matrix:
         cc: [gcc, clang]
+        simd: [avx2, gen]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show compiler
-        run: ${{ matrix.cc }} --version
+      - name: Show toolchain
+        run: |
+          ${{ matrix.cc }} --version
+          echo "SIMD=${{ matrix.simd }}"
 
       - name: Clean
         run: make clean
 
       - name: Run full test suite
-        run: make test CC=${{ matrix.cc }}
+        run: make test CC=${{ matrix.cc }} SIMD=${{ matrix.simd }}
 
       - name: Run flow-cache benchmark smoke test
-        run: make -C samples/test bench CC=${{ matrix.cc }}
+        if: matrix.simd == 'avx2'
+        run: make -C samples/test bench CC=${{ matrix.cc }} SIMD=${{ matrix.simd }}

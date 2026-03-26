@@ -6,7 +6,7 @@ Use this checklist before publishing a public release of `librix`.
 
 - [ ] Confirm the release scope (`librix`, `samples/fcache`, or both)
 - [ ] CI passes for `gcc` and `clang`
-- [ ] Confirm the release tag (for example `v0.1.0`)
+- [ ] Confirm the release tag (for example `v0.1.1`)
 - [ ] Confirm what is considered stable vs experimental
 
 ## Documentation
@@ -16,7 +16,7 @@ Use this checklist before publishing a public release of `librix`.
 - [ ] README includes the current validation status
 - [ ] README includes the supported sample variants (`flow4`, `flow6`, `flowu`)
 - [ ] `CHANGELOG.md` is updated for the release
-- [ ] `RELEASE_NOTES_v0.1.0.md` is updated or copied to the actual release note
+- [ ] `RELEASE_NOTES_vX.Y.Z.md` is updated or copied to the actual release note
 
 ## Validation
 

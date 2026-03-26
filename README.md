@@ -738,10 +738,10 @@ See [samples/README.md](samples/README.md) for the actual API walkthrough,
 detailed benchmark tables, backend-specific validation commands, and design
 notes. For release-facing text, see
 [CHANGELOG.md](CHANGELOG.md) and
-[RELEASE_NOTES_v0.1.0.md](RELEASE_NOTES_v0.1.0.md). For GitHub metadata and
+[RELEASE_NOTES_v0.1.1.md](RELEASE_NOTES_v0.1.1.md). For GitHub metadata and
 release preparation, see
 [GITHUB_ABOUT.md](GITHUB_ABOUT.md),
-[RELEASE_NOTES_v0.1.0_SHORT.md](RELEASE_NOTES_v0.1.0_SHORT.md), and
+[RELEASE_NOTES_v0.1.1_SHORT.md](RELEASE_NOTES_v0.1.1_SHORT.md), and
 [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md).
 
 ---
