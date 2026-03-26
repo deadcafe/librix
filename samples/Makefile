@@ -29,6 +29,7 @@ shared:
 	$(MAKE) -C fcache shared
 
 test: all
+	$(MAKE) -C test ndebug-check BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
 	$(MAKE) -C test test
 
 bench:

@@ -34,7 +34,7 @@ CFLAGS_BASE  = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
 
 SRCDIR       = src
 INCDIR       = include
-LIBDIR       = lib
+LIBDIR      ?= lib
 
 VARIANTS     = flow4 flow6 flowu
 
@@ -106,6 +106,7 @@ $(LIB_SHARED): $(OBJS)
 
 clean:
 	rm -f $(OBJS) $(LIB_STATIC) $(LIB_SHARED) *~ core core.*
+	rm -rf lib_ndebug
 
 install: $(LIB_STATIC) $(LIB_SHARED)
 	install -d $(PREFIX)/lib $(PREFIX)/include/fcache

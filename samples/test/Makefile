@@ -49,8 +49,11 @@ SRC          = test_flow_cache.c
 BENCH_SRC    = bench_fc.c
 BENCH_HDRS   = bench_fc_common.h bench_fc_body.h
 LIBFC        = $(FCDIR)/lib/libfcache.a
+NDEBUG_LIBDIR ?= lib_ndebug
+NDEBUG_LIBFC   = $(FCDIR)/$(NDEBUG_LIBDIR)/libfcache.a
+NDEBUG_BENCH   = fc_bench_ndebug
 
-.PHONY: all test bench-build bench bench-full matrix matrix-full clean
+.PHONY: all test ndebug-check bench-build bench bench-full matrix matrix-full clean
 
 all: $(TARGET) $(BENCH)
 
@@ -60,11 +63,20 @@ $(TARGET): $(SRC) $(LIBFC)
 $(BENCH): $(BENCH_SRC) $(BENCH_HDRS) $(LIBFC)
 	$(CC) $(BENCH_CFLAGS) -o $@ $(BENCH_SRC) $(LIBFC)
 
+$(NDEBUG_BENCH): $(BENCH_SRC) $(BENCH_HDRS) $(NDEBUG_LIBFC)
+	$(CC) $(BENCH_CFLAGS) -o $@ $(BENCH_SRC) $(NDEBUG_LIBFC)
+
 $(LIBFC):
 	$(MAKE) -C $(FCDIR) static
 
+$(NDEBUG_LIBFC):
+	$(MAKE) -C $(FCDIR) static LIBDIR=$(NDEBUG_LIBDIR) \
+	    EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
+
 test: $(TARGET)
 	./$(TARGET)
+
+ndebug-check: $(NDEBUG_BENCH)
 
 bench-build:
 	$(MAKE) -C $(FCDIR) clean static EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
@@ -88,4 +100,4 @@ matrix-full: bench-build
 	./run_fc_bench_matrix.sh $(VARIANT) full
 
 clean:
-	rm -f $(TARGET) $(BENCH) *.o *~ core core.*
+	rm -f $(TARGET) $(BENCH) $(NDEBUG_BENCH) *.o *~ core core.*

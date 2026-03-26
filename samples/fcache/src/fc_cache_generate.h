@@ -331,6 +331,7 @@ _FCG_INT(p, reclaim_bucket)(_FCG_CACHE_T(p) *fc,                          \
     RIX_ASSERT(removed_idx != (unsigned)RIX_NIL);                          \
     victim = _FCG_HT(p, hptr)(fc->pool, removed_idx);                      \
     RIX_ASSERT(victim != NULL);                                            \
+    RIX_ASSUME_NONNULL(victim);                                            \
     _FCG_INT(p, free_entry)(fc, victim);                                  \
     return 1;                                                              \
 }                                                                          \
@@ -356,6 +357,7 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
     victim = _FCG_HT(p, remove)(&fc->ht_head, fc->buckets, fc->pool,       \
                                 victim);                                   \
     RIX_ASSERT(victim != NULL);                                            \
+    RIX_ASSUME_NONNULL(victim);                                            \
     _FCG_INT(p, free_entry)(fc, victim);                                   \
     fc->stats.oldest_reclaim_evictions++;                                  \
     return 1;                                                              \
@@ -379,6 +381,7 @@ _FCG_INT(p, reclaim_bucket_all)(_FCG_CACHE_T(p) *fc,                      \
         RIX_ASSERT(removed_idx != (unsigned)RIX_NIL);                       \
         victim = _FCG_HT(p, hptr)(fc->pool, removed_idx);                \
         RIX_ASSERT(victim != NULL);                                        \
+        RIX_ASSUME_NONNULL(victim);                                        \
         _FCG_INT(p, free_entry)(fc, victim);                              \
     }                                                                      \
     return evicted;                                                        \
@@ -878,13 +881,16 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                             _FCG_INT(p, result_set_filled)(&results[idx], \
                                 RIX_IDX_FROM_PTR(fc->pool, entry));        \
                         } else if (_ret != entry) {                        \
+                            RIX_ASSUME_NONNULL(entry);                     \
                             _FCG_INT(p, free_entry)(fc, entry);           \
                             /* duplicate found */                          \
+                            RIX_ASSUME_NONNULL(_ret);                      \
                             _ret->last_ts = now;                           \
                             _FCG_INT(p, result_set_filled)(               \
                                 &results[idx],                              \
                                 RIX_IDX_FROM_PTR(fc->pool, _ret));         \
                         } else {                                           \
+                            RIX_ASSUME_NONNULL(entry);                     \
                             _FCG_INT(p, free_entry)(fc, entry);           \
                             /* table full */                               \
                             fc->stats.fill_full++;                         \
@@ -1092,12 +1098,15 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                             _FCG_INT(p, result_set_filled)(&results[idx], \
                                 RIX_IDX_FROM_PTR(fc->pool, entry));        \
                         } else if (_ret != entry) {                        \
+                            RIX_ASSUME_NONNULL(entry);                     \
                             _FCG_INT(p, free_entry)(fc, entry);           \
+                            RIX_ASSUME_NONNULL(_ret);                      \
                             _ret->last_ts = now;                           \
                             _FCG_INT(p, result_set_filled)(               \
                                 &results[idx],                              \
                                 RIX_IDX_FROM_PTR(fc->pool, _ret));         \
                         } else {                                           \
+                            RIX_ASSUME_NONNULL(entry);                     \
                             _FCG_INT(p, free_entry)(fc, entry);           \
                             fc->stats.fill_full++;                         \
                             _FCG_INT(p, result_set_miss)(                 \
