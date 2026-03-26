@@ -22,6 +22,105 @@
 
 #include "bench_fc_common.h"
 
+enum {
+    FCB_DP_FINDADD_HIT = 0,
+    FCB_DP_FIND_HIT,
+    FCB_DP_FINDADD_MISS,
+    FCB_DP_ADD_ONLY,
+    FCB_DP_ADD_DEL,
+    FCB_DP_DEL_BULK,
+    FCB_DP_MIXED_90_10_RESET,
+    FCB_DP_METRIC_COUNT
+};
+
+struct fcb_datapath_report {
+    unsigned desired;
+    double metrics[FCB_DP_METRIC_COUNT][3];
+};
+
+static const char *const fcb_datapath_labels[FCB_DP_METRIC_COUNT] = {
+    "findadd_hit",
+    "find_hit",
+    "findadd_miss",
+    "add_only",
+    "add+del",
+    "del_bulk",
+    "mixed_90_10_reset",
+};
+
+static inline double
+fcb_archcmp_gain_pct(double winner, double loser)
+{
+    return (winner > 0.0) ? ((loser / winner) - 1.0) * 100.0 : 0.0;
+}
+
+static void
+fcb_print_archcmp_scalar_summary(const char *mode,
+                                 const char *lhs_name,
+                                 struct fcb_run_summary lhs,
+                                 const char *rhs_name,
+                                 struct fcb_run_summary rhs)
+{
+    const char *winner_name;
+    double winner;
+    double loser;
+
+    if (lhs.cycles_per_key <= rhs.cycles_per_key) {
+        winner_name = lhs_name;
+        winner = lhs.cycles_per_key;
+        loser = rhs.cycles_per_key;
+    } else {
+        winner_name = rhs_name;
+        winner = rhs.cycles_per_key;
+        loser = lhs.cycles_per_key;
+    }
+
+    printf("[archcmp summary]\n\n");
+    printf("%s: %s=%.2f  %s=%.2f  winner=%s  (%s faster by %.1f%%)\n",
+           mode,
+           lhs_name, lhs.cycles_per_key,
+           rhs_name, rhs.cycles_per_key,
+           winner_name, winner_name,
+           fcb_archcmp_gain_pct(winner, loser));
+}
+
+static void
+fcb_print_archcmp_datapath_summary(const char *lhs_name,
+                                   const struct fcb_datapath_report *lhs,
+                                   const char *rhs_name,
+                                   const struct fcb_datapath_report *rhs,
+                                   unsigned n_reports)
+{
+    unsigned lhs_total_wins = 0u;
+    unsigned rhs_total_wins = 0u;
+
+    printf("[archcmp summary]\n\n");
+    for (unsigned r = 0; r < n_reports; r++) {
+        unsigned lhs_wins = 0u;
+        unsigned rhs_wins = 0u;
+
+        for (unsigned m = 0; m < FCB_DP_METRIC_COUNT; m++) {
+            for (unsigned v = 0; v < 3u; v++) {
+                if (lhs[r].metrics[m][v] <= rhs[r].metrics[m][v])
+                    lhs_wins++;
+                else
+                    rhs_wins++;
+            }
+        }
+        lhs_total_wins += lhs_wins;
+        rhs_total_wins += rhs_wins;
+        printf("%uK entries: %s wins=%u  %s wins=%u  winner=%s\n",
+               lhs[r].desired / 1024u,
+               lhs_name, lhs_wins,
+               rhs_name, rhs_wins,
+               (lhs_wins >= rhs_wins) ? lhs_name : rhs_name);
+    }
+    printf("overall: %s wins=%u  %s wins=%u  winner=%s\n",
+           lhs_name, lhs_total_wins,
+           rhs_name, rhs_total_wins,
+           (lhs_total_wins >= rhs_total_wins) ? lhs_name : rhs_name);
+}
+
 /*===========================================================================
  * Key generators
  *===========================================================================*/
@@ -112,8 +211,10 @@ fcb_make_keyu(unsigned i)
  * Quick 3-variant datapath comparison (no args needed)
  *===========================================================================*/
 static void
-bench_datapath_one(unsigned desired)
+bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
 {
+    struct fcb_datapath_report local_report;
+    struct fcb_datapath_report *out = report ? report : &local_report;
     unsigned max_entries = fcb_pool_count(desired);
     unsigned nb_bk = fcb_nb_bk_hint(max_entries);
     unsigned prefill_n = max_entries / 2u;
@@ -172,31 +273,54 @@ bench_datapath_one(unsigned desired)
            fc_flow6_cache_nb_entries(&ctx6.fc),
            fc_flowu_cache_nb_entries(&ctxu.fc));
 
+    memset(out, 0, sizeof(*out));
+    out->desired = desired;
+
+    {
+        out->metrics[FCB_DP_FINDADD_HIT][0] =
+            fcb_flow4_bench_hit(&ctx4, h4, FCB_QUERY, FCB_HIT_REPEAT);
+        out->metrics[FCB_DP_FINDADD_HIT][1] =
+            fcb_flow6_bench_hit(&ctx6, h6, FCB_QUERY, FCB_HIT_REPEAT);
+        out->metrics[FCB_DP_FINDADD_HIT][2] =
+            fcb_flowu_bench_hit(&ctxu, hu, FCB_QUERY, FCB_HIT_REPEAT);
+        out->metrics[FCB_DP_FIND_HIT][0] =
+            fcb_flow4_bench_find_hit(&ctx4, h4, FCB_QUERY, FCB_HIT_REPEAT);
+        out->metrics[FCB_DP_FIND_HIT][1] =
+            fcb_flow6_bench_find_hit(&ctx6, h6, FCB_QUERY, FCB_HIT_REPEAT);
+        out->metrics[FCB_DP_FIND_HIT][2] =
+            fcb_flowu_bench_find_hit(&ctxu, hu, FCB_QUERY, FCB_HIT_REPEAT);
+        out->metrics[FCB_DP_FINDADD_MISS][0] =
+            fcb_flow4_bench_miss_fill(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_FINDADD_MISS][1] =
+            fcb_flow6_bench_miss_fill(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_FINDADD_MISS][2] =
+            fcb_flowu_bench_miss_fill(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_ADD_ONLY][0] =
+            fcb_flow4_bench_add_only(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_ADD_ONLY][1] =
+            fcb_flow6_bench_add_only(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_ADD_ONLY][2] =
+            fcb_flowu_bench_add_only(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_ADD_DEL][0] =
+            fcb_flow4_bench_add_del(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_ADD_DEL][1] =
+            fcb_flow6_bench_add_del(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_ADD_DEL][2] =
+            fcb_flowu_bench_add_del(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_DEL_BULK][0] =
+            fcb_flow4_bench_del_bulk(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_DEL_BULK][1] =
+            fcb_flow6_bench_del_bulk(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT);
+        out->metrics[FCB_DP_DEL_BULK][2] =
+            fcb_flowu_bench_del_bulk(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT);
+    }
+
     printf("  pure datapath (median cycles/key across timed rounds, reset per round, no expire):\n");
-    fcb_emit3("findadd_hit",
-               fcb_flow4_bench_hit(&ctx4, h4, FCB_QUERY, FCB_HIT_REPEAT),
-               fcb_flow6_bench_hit(&ctx6, h6, FCB_QUERY, FCB_HIT_REPEAT),
-               fcb_flowu_bench_hit(&ctxu, hu, FCB_QUERY, FCB_HIT_REPEAT));
-    fcb_emit3("find_hit",
-               fcb_flow4_bench_find_hit(&ctx4, h4, FCB_QUERY, FCB_HIT_REPEAT),
-               fcb_flow6_bench_find_hit(&ctx6, h6, FCB_QUERY, FCB_HIT_REPEAT),
-               fcb_flowu_bench_find_hit(&ctxu, hu, FCB_QUERY, FCB_HIT_REPEAT));
-    fcb_emit3("findadd_miss",
-               fcb_flow4_bench_miss_fill(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flow6_bench_miss_fill(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flowu_bench_miss_fill(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
-    fcb_emit3("add_only",
-               fcb_flow4_bench_add_only(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flow6_bench_add_only(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flowu_bench_add_only(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
-    fcb_emit3("add+del",
-               fcb_flow4_bench_add_del(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flow6_bench_add_del(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flowu_bench_add_del(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
-    fcb_emit3("del_bulk",
-               fcb_flow4_bench_del_bulk(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flow6_bench_del_bulk(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT),
-               fcb_flowu_bench_del_bulk(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
+    for (unsigned m = 0; m < FCB_DP_DEL_BULK + 1u; m++) {
+        const double *row = out->metrics[m];
+        fcb_emit3(fcb_datapath_labels[m],
+                  row[0], row[1], row[2]);
+    }
 
     /* re-prefill for mixed */
     fcb_flow4_ctx_reset(&ctx4);
@@ -206,10 +330,22 @@ bench_datapath_one(unsigned desired)
     (void)fcb_flow6_prefill(&ctx6, p6, prefill_n, 1u);
     (void)fcb_flowu_prefill(&ctxu, pu, prefill_n, 1u);
 
-    fcb_emit3("mixed_90_10_reset",
-               fcb_flow4_bench_mixed(&ctx4, p4, prefill_n, x4, FCB_QUERY, FCB_MIXED_REPEAT),
-               fcb_flow6_bench_mixed(&ctx6, p6, prefill_n, x6, FCB_QUERY, FCB_MIXED_REPEAT),
-               fcb_flowu_bench_mixed(&ctxu, pu, prefill_n, xu, FCB_QUERY, FCB_MIXED_REPEAT));
+    {
+        out->metrics[FCB_DP_MIXED_90_10_RESET][0] =
+            fcb_flow4_bench_mixed(&ctx4, p4, prefill_n, x4,
+                                  FCB_QUERY, FCB_MIXED_REPEAT);
+        out->metrics[FCB_DP_MIXED_90_10_RESET][1] =
+            fcb_flow6_bench_mixed(&ctx6, p6, prefill_n, x6,
+                                  FCB_QUERY, FCB_MIXED_REPEAT);
+        out->metrics[FCB_DP_MIXED_90_10_RESET][2] =
+            fcb_flowu_bench_mixed(&ctxu, pu, prefill_n, xu,
+                                  FCB_QUERY, FCB_MIXED_REPEAT);
+    }
+
+    fcb_emit3(fcb_datapath_labels[FCB_DP_MIXED_90_10_RESET],
+              out->metrics[FCB_DP_MIXED_90_10_RESET][0],
+              out->metrics[FCB_DP_MIXED_90_10_RESET][1],
+              out->metrics[FCB_DP_MIXED_90_10_RESET][2]);
 
     free(xu); free(x6); free(x4);
     free(mu); free(m6); free(m4);
@@ -221,14 +357,14 @@ bench_datapath_one(unsigned desired)
 }
 
 static void
-bench_datapath(void)
+bench_datapath(struct fcb_datapath_report *reports)
 {
     unsigned sizes[] = { 32768u, 1048576u, 4194304u };
 
     printf("fcache variant comparison\n\n");
     for (unsigned s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
         printf("[%uK entries]\n", sizes[s] / 1024u);
-        bench_datapath_one(sizes[s]);
+        bench_datapath_one(sizes[s], reports ? &reports[s] : NULL);
         printf("\n");
     }
 }
@@ -316,6 +452,14 @@ typedef void (*findadd_open_fn)(unsigned, unsigned, unsigned, unsigned, unsigned
                                 unsigned);
 typedef void (*findadd_window_fn)(unsigned, unsigned, unsigned, unsigned,
                                   unsigned, unsigned, unsigned, unsigned);
+typedef struct fcb_run_summary
+(*findadd_closed_summary_fn)(unsigned, unsigned, unsigned, unsigned, unsigned);
+typedef struct fcb_run_summary
+(*findadd_open_summary_fn)(unsigned, unsigned, unsigned, unsigned, unsigned,
+                           unsigned);
+typedef struct fcb_run_summary
+(*findadd_window_summary_fn)(unsigned, unsigned, unsigned, unsigned,
+                             unsigned, unsigned, unsigned, unsigned);
 typedef void (*trace_open_fn)(unsigned, unsigned, unsigned, unsigned, unsigned,
                               unsigned, unsigned, unsigned, unsigned,
                               unsigned, unsigned, unsigned, unsigned,
@@ -349,6 +493,30 @@ select_variant(const char *name,
     }
 }
 
+static void
+select_variant_summary(const char *name,
+                       findadd_closed_summary_fn *out_closed,
+                       findadd_open_summary_fn *out_open,
+                       findadd_window_summary_fn *out_window)
+{
+    if (strcmp(name, "flow4") == 0) {
+        *out_closed = fcb_flow4_findadd_closed_summary;
+        *out_open   = fcb_flow4_findadd_open_summary;
+        *out_window = fcb_flow4_findadd_window_summary;
+    } else if (strcmp(name, "flow6") == 0) {
+        *out_closed = fcb_flow6_findadd_closed_summary;
+        *out_open   = fcb_flow6_findadd_open_summary;
+        *out_window = fcb_flow6_findadd_window_summary;
+    } else if (strcmp(name, "flowu") == 0) {
+        *out_closed = fcb_flowu_findadd_closed_summary;
+        *out_open   = fcb_flowu_findadd_open_summary;
+        *out_window = fcb_flowu_findadd_window_summary;
+    } else {
+        fprintf(stderr, "unknown variant: %s (use flow4/flow6/flowu)\n", name);
+        exit(2);
+    }
+}
+
 /*===========================================================================
  * main
  *===========================================================================*/
@@ -372,6 +540,7 @@ usage(const char *prog)
     printf("  findadd_open   : persistent fresh-miss stream; fill can grow without a window cap.\n");
     printf("  findadd_window : persistent fresh-miss stream with maintenance trying to hold a fill window.\n");
     printf("  archcmp        : run the same command twice, once with auto and once with avx2.\n");
+    printf("                   winner summary is printed for datapath and findadd_* modes.\n");
     printf("  keys_per_sec   : key rate. 1 request = %u keys.\n", FCB_QUERY);
 }
 
@@ -379,7 +548,7 @@ static int
 run_mode(const char *variant, const char *mode, int argc, char **argv, int arg_off)
 {
     if (strcmp(mode, "datapath") == 0) {
-        bench_datapath();
+        bench_datapath(NULL);
         return 0;
     }
     if (strcmp(mode, "maint") == 0) {
@@ -562,7 +731,11 @@ main(int argc, char **argv)
             { "auto", FC_ARCH_AUTO },
             { "avx2", FC_ARCH_SSE | FC_ARCH_AVX2 },
         };
+        struct fcb_datapath_report datapath_reports[2][3];
+        struct fcb_run_summary scalar_reports[2];
         int rc = 0;
+        int have_scalar_summary = 0;
+        int have_datapath_summary = 0;
 
         if (argc < 3) {
             usage(argv[0]);
@@ -587,11 +760,185 @@ main(int argc, char **argv)
         for (unsigned i = 0; i < sizeof(arch_runs) / sizeof(arch_runs[0]); i++) {
             fc_arch_init(arch_runs[i].enable);
             printf("[archcmp: %s]\n\n", arch_runs[i].name);
-            rc = run_mode(variant, mode, argc, argv, arg_off);
+
+            if (strcmp(mode, "datapath") == 0) {
+                bench_datapath(datapath_reports[i]);
+                have_datapath_summary = 1;
+                rc = 0;
+            } else if (strcmp(mode, "findadd_closed") == 0) {
+                findadd_closed_summary_fn fn_closed;
+                findadd_open_summary_fn fn_open;
+                findadd_window_summary_fn fn_window;
+                unsigned desired;
+                unsigned fill_pct;
+                unsigned hit;
+                unsigned rounds;
+                unsigned nb_bk;
+
+                select_variant_summary(variant, &fn_closed, &fn_open, &fn_window);
+                (void)fn_open;
+                (void)fn_window;
+                if (argc - arg_off < 4) {
+                    fprintf(stderr, "findadd_closed requires: <desired> <fill%%> <hit%%> [rounds]\n");
+                    return 2;
+                }
+                desired  = (unsigned)strtoul(argv[arg_off + 0], NULL, 10);
+                fill_pct = (unsigned)strtoul(argv[arg_off + 1], NULL, 10);
+                hit      = (unsigned)strtoul(argv[arg_off + 2], NULL, 10);
+                rounds   = (argc - arg_off >= 4)
+                           ? (unsigned)strtoul(argv[arg_off + 3], NULL, 10)
+                           : 200000u;
+                nb_bk    = fcb_nb_bk_hint(fcb_pool_count(desired));
+                printf("\n%s closed-set findadd\n", variant);
+                printf("fill=%u%%  hit_target=%u%%  rounds=%u  query=%u  nb_bk=%u  pool=%u\n",
+                       fill_pct, hit, rounds, FCB_QUERY, nb_bk, fcb_pool_count(desired));
+                scalar_reports[i] = fn_closed(desired, nb_bk, fill_pct, hit, rounds);
+                printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
+                       "  relief=%" PRIu64 "  oldest=%" PRIu64
+                       "  fill=%.1f%%  rounds=%u\n",
+                       scalar_reports[i].cycles_per_key,
+                       scalar_reports[i].hit_pct,
+                       scalar_reports[i].misses,
+                       scalar_reports[i].relief_evictions,
+                       scalar_reports[i].oldest_reclaim_evictions,
+                       scalar_reports[i].fill_end_pct,
+                       scalar_reports[i].rounds);
+                have_scalar_summary = 1;
+                rc = 0;
+            } else if (strcmp(mode, "findadd_open") == 0) {
+                findadd_closed_summary_fn fn_closed;
+                findadd_open_summary_fn fn_open;
+                findadd_window_summary_fn fn_window;
+                unsigned desired;
+                unsigned sfill;
+                unsigned hit;
+                unsigned keys_per_sec;
+                unsigned timeout_ms;
+                unsigned nb_bk;
+
+                select_variant_summary(variant, &fn_closed, &fn_open, &fn_window);
+                (void)fn_closed;
+                (void)fn_window;
+                if (argc - arg_off < 4) {
+                    fprintf(stderr, "findadd_open requires: <desired> <start_fill%%> <hit%%> <keys_per_sec> [timeout_ms]\n");
+                    return 2;
+                }
+                desired      = (unsigned)strtoul(argv[arg_off + 0], NULL, 10);
+                sfill        = (unsigned)strtoul(argv[arg_off + 1], NULL, 10);
+                hit          = (unsigned)strtoul(argv[arg_off + 2], NULL, 10);
+                keys_per_sec = (unsigned)strtoul(argv[arg_off + 3], NULL, 10);
+                timeout_ms   = (argc - arg_off >= 5)
+                               ? (unsigned)strtoul(argv[arg_off + 4], NULL, 10)
+                               : 1000u;
+                nb_bk        = fcb_nb_bk_hint(fcb_pool_count(desired));
+                if (keys_per_sec == 0u) {
+                    fprintf(stderr, "findadd_open requires keys_per_sec > 0\n");
+                    return 2;
+                }
+                printf("\n%s open-set findadd\n", variant);
+                printf("keys/s=%u  req/s=%.1f  hit_target=%u%%  start_fill=%u%%  timeout=%ums"
+                       "  query=%u  nb_bk=%u  pool=%u\n",
+                       keys_per_sec, (double)keys_per_sec / (double)FCB_QUERY,
+                       hit, sfill, timeout_ms, FCB_QUERY, nb_bk, fcb_pool_count(desired));
+                scalar_reports[i] =
+                    fn_open(desired, nb_bk, sfill, hit, keys_per_sec, timeout_ms);
+                printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
+                       "  relief=%" PRIu64 "  oldest=%" PRIu64
+                       "  start_fill=%.1f%%  end_fill=%.1f%%  max_fill=%.1f%%\n",
+                       scalar_reports[i].cycles_per_key,
+                       scalar_reports[i].hit_pct,
+                       scalar_reports[i].misses,
+                       scalar_reports[i].relief_evictions,
+                       scalar_reports[i].oldest_reclaim_evictions,
+                       scalar_reports[i].fill_start_pct,
+                       scalar_reports[i].fill_end_pct,
+                       scalar_reports[i].fill_max_pct);
+                have_scalar_summary = 1;
+                rc = 0;
+            } else if (strcmp(mode, "findadd_window") == 0) {
+                findadd_closed_summary_fn fn_closed;
+                findadd_open_summary_fn fn_open;
+                findadd_window_summary_fn fn_window;
+                unsigned desired;
+                unsigned low_fill;
+                unsigned high_fill;
+                unsigned hit;
+                unsigned keys_per_sec;
+                unsigned ttl_ms;
+                unsigned duration_ms;
+                unsigned nb_bk;
+
+                select_variant_summary(variant, &fn_closed, &fn_open, &fn_window);
+                (void)fn_closed;
+                (void)fn_open;
+                if (argc - arg_off < 6) {
+                    fprintf(stderr,
+                            "findadd_window requires: <desired> <low_fill%%> <high_fill%%> <hit%%> <keys_per_sec> <ttl_ms> [duration_ms]\n");
+                    return 2;
+                }
+                desired      = (unsigned)strtoul(argv[arg_off + 0], NULL, 10);
+                low_fill     = (unsigned)strtoul(argv[arg_off + 1], NULL, 10);
+                high_fill    = (unsigned)strtoul(argv[arg_off + 2], NULL, 10);
+                hit          = (unsigned)strtoul(argv[arg_off + 3], NULL, 10);
+                keys_per_sec = (unsigned)strtoul(argv[arg_off + 4], NULL, 10);
+                ttl_ms       = (unsigned)strtoul(argv[arg_off + 5], NULL, 10);
+                duration_ms  = (argc - arg_off >= 7)
+                               ? (unsigned)strtoul(argv[arg_off + 6], NULL, 10)
+                               : 1000u;
+                nb_bk        = fcb_nb_bk_hint(fcb_pool_count(desired));
+                if (keys_per_sec == 0u) {
+                    fprintf(stderr, "findadd_window requires keys_per_sec > 0\n");
+                    return 2;
+                }
+                printf("\n%s windowed open-set findadd\n", variant);
+                printf("window=%u-%u%%  hit_target=%u%%  keys/s=%u  req/s=%.1f  ttl=%ums  duration=%ums"
+                       "  query=%u  nb_bk=%u  pool=%u\n",
+                       low_fill, high_fill, hit, keys_per_sec,
+                       (double)keys_per_sec / (double)FCB_QUERY,
+                       ttl_ms, duration_ms, FCB_QUERY, nb_bk, fcb_pool_count(desired));
+                scalar_reports[i] =
+                    fn_window(desired, nb_bk, low_fill, high_fill, hit,
+                              keys_per_sec, ttl_ms, duration_ms);
+                printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
+                       "  relief=%" PRIu64 "  oldest=%" PRIu64
+                       "  maint_calls=%" PRIu64 "  maint_evict=%" PRIu64
+                       "  avg_fill=%.1f%%  min_fill=%.1f%%  max_fill=%.1f%%  over_high=%u/%u\n",
+                       scalar_reports[i].cycles_per_key,
+                       scalar_reports[i].hit_pct,
+                       scalar_reports[i].misses,
+                       scalar_reports[i].relief_evictions,
+                       scalar_reports[i].oldest_reclaim_evictions,
+                       scalar_reports[i].maint_calls,
+                       scalar_reports[i].maint_evictions,
+                       scalar_reports[i].fill_avg_pct,
+                       scalar_reports[i].fill_min_pct,
+                       scalar_reports[i].fill_max_pct,
+                       scalar_reports[i].over_high_rounds,
+                       scalar_reports[i].rounds);
+                have_scalar_summary = 1;
+                rc = 0;
+            } else {
+                rc = run_mode(variant, mode, argc, argv, arg_off);
+            }
             if (rc != 0)
                 return rc;
             if (i + 1u < sizeof(arch_runs) / sizeof(arch_runs[0]))
                 printf("\n");
+        }
+        if (have_datapath_summary) {
+            printf("\n");
+            fcb_print_archcmp_datapath_summary(arch_runs[0].name,
+                                              datapath_reports[0],
+                                              arch_runs[1].name,
+                                              datapath_reports[1],
+                                              3u);
+        } else if (have_scalar_summary) {
+            printf("\n");
+            fcb_print_archcmp_scalar_summary(mode,
+                                             arch_runs[0].name,
+                                             scalar_reports[0],
+                                             arch_runs[1].name,
+                                             scalar_reports[1]);
         }
         return rc;
     }

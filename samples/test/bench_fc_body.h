@@ -413,16 +413,17 @@ FCB_FN(bench_mixed)(struct FCB_FN(ctx) *ctx,
  *   - fixed non-resident miss set
  *   - miss set is deleted after each timed round to restore state
  *===========================================================================*/
-static void
-FCB_FN(findadd_closed)(unsigned desired_entries, unsigned nb_bk,
-                       unsigned fill_pct, unsigned hit_pct,
-                       unsigned rounds)
+static struct fcb_run_summary
+FCB_FN(findadd_closed_summary)(unsigned desired_entries, unsigned nb_bk,
+                               unsigned fill_pct, unsigned hit_pct,
+                               unsigned rounds)
 {
     struct FCB_FN(ctx) ctx;
     FCB_KEY_T *prefill_keys;
     FCB_KEY_T *query;
     FCB_RESULT_T *results;
     struct FCB_FN(stats_delta) before, after, delta;
+    struct fcb_run_summary out;
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
     unsigned fill_n = (unsigned)(((uint64_t)total_slots * fill_pct) / 100u);
@@ -431,6 +432,8 @@ FCB_FN(findadd_closed)(unsigned desired_entries, unsigned nb_bk,
     unsigned active;
     uint64_t now = 1u;
     uint64_t t0, t1;
+
+    memset(&out, 0, sizeof(out));
 
     if (rounds == 0u)
         rounds = 1u;
@@ -478,29 +481,47 @@ FCB_FN(findadd_closed)(unsigned desired_entries, unsigned nb_bk,
     after = FCB_FN(stats_snapshot)(&ctx);
     delta = FCB_FN(stats_diff)(after, before);
     active = FCB_FN(active_scan)(&ctx);
-
-    printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
-           "  relief=%" PRIu64 "  oldest=%" PRIu64
-           "  fill=%.1f%%  rounds=%u\n",
-           (double)(t1 - t0) / (double)(rounds * FCB_QUERY),
-           delta.lookups ? (100.0 * (double)delta.hits / (double)delta.lookups) : 0.0,
-           delta.misses, delta.relief_evictions,
-           delta.oldest_reclaim_evictions,
-           100.0 * (double)active / (double)total_slots, rounds);
+    out.cycles_per_key = (double)(t1 - t0) / (double)(rounds * FCB_QUERY);
+    out.hit_pct = delta.lookups
+        ? (100.0 * (double)delta.hits / (double)delta.lookups)
+        : 0.0;
+    out.misses = delta.misses;
+    out.relief_evictions = delta.relief_evictions;
+    out.oldest_reclaim_evictions = delta.oldest_reclaim_evictions;
+    out.fill_end_pct = 100.0 * (double)active / (double)total_slots;
+    out.rounds = rounds;
 
     free(results);
     free(query);
     free(prefill_keys);
     FCB_FN(ctx_free)(&ctx);
+    return out;
+}
+
+static void
+FCB_FN(findadd_closed)(unsigned desired_entries, unsigned nb_bk,
+                       unsigned fill_pct, unsigned hit_pct,
+                       unsigned rounds)
+{
+    struct fcb_run_summary s =
+        FCB_FN(findadd_closed_summary)(desired_entries, nb_bk,
+                                       fill_pct, hit_pct, rounds);
+
+    printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
+           "  relief=%" PRIu64 "  oldest=%" PRIu64
+           "  fill=%.1f%%  rounds=%u\n",
+           s.cycles_per_key, s.hit_pct, s.misses,
+           s.relief_evictions, s.oldest_reclaim_evictions,
+           s.fill_end_pct, s.rounds);
 }
 
 /*===========================================================================
  * Persistent open-set path: fresh miss stream, no maintenance
  *===========================================================================*/
-static void
-FCB_FN(findadd_open)(unsigned desired_entries, unsigned nb_bk,
-                     unsigned start_fill_pct, unsigned hit_pct,
-                     unsigned keys_per_sec, unsigned timeout_ms)
+static struct fcb_run_summary
+FCB_FN(findadd_open_summary)(unsigned desired_entries, unsigned nb_bk,
+                             unsigned start_fill_pct, unsigned hit_pct,
+                             unsigned keys_per_sec, unsigned timeout_ms)
 {
     struct FCB_FN(ctx) ctx;
     FCB_CONFIG_T cfg;
@@ -508,6 +529,7 @@ FCB_FN(findadd_open)(unsigned desired_entries, unsigned nb_bk,
     FCB_KEY_T *query;
     FCB_RESULT_T *results;
     struct FCB_FN(stats_delta) before, after, delta;
+    struct fcb_run_summary out;
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
     unsigned start_entries = (unsigned)(((uint64_t)total_slots * start_fill_pct) / 100u);
@@ -515,6 +537,8 @@ FCB_FN(findadd_open)(unsigned desired_entries, unsigned nb_bk,
     unsigned start_active, active, max_seen;
     uint64_t tsc_hz, tsc_per_key, now;
     uint64_t total_cycles = 0u;
+
+    memset(&out, 0, sizeof(out));
 
     if (start_entries > max_entries)
         start_entries = max_entries;
@@ -570,22 +594,41 @@ FCB_FN(findadd_open)(unsigned desired_entries, unsigned nb_bk,
 
     after = FCB_FN(stats_snapshot)(&ctx);
     delta = FCB_FN(stats_diff)(after, before);
-
-    printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
-           "  relief=%" PRIu64 "  oldest=%" PRIu64
-           "  start_fill=%.1f%%  end_fill=%.1f%%  max_fill=%.1f%%\n",
-           (double)total_cycles / (double)(rounds * FCB_QUERY),
-           delta.lookups ? (100.0 * (double)delta.hits / (double)delta.lookups) : 0.0,
-           delta.misses, delta.relief_evictions,
-           delta.oldest_reclaim_evictions,
-           100.0 * (double)start_active / (double)total_slots,
-           100.0 * (double)active / (double)total_slots,
-           100.0 * (double)max_seen / (double)total_slots);
+    out.cycles_per_key = (double)total_cycles / (double)(rounds * FCB_QUERY);
+    out.hit_pct = delta.lookups
+        ? (100.0 * (double)delta.hits / (double)delta.lookups)
+        : 0.0;
+    out.misses = delta.misses;
+    out.relief_evictions = delta.relief_evictions;
+    out.oldest_reclaim_evictions = delta.oldest_reclaim_evictions;
+    out.fill_start_pct = 100.0 * (double)start_active / (double)total_slots;
+    out.fill_end_pct = 100.0 * (double)active / (double)total_slots;
+    out.fill_max_pct = 100.0 * (double)max_seen / (double)total_slots;
+    out.rounds = rounds;
 
     free(results);
     free(query);
     free(prefill_keys);
     FCB_FN(ctx_free)(&ctx);
+    return out;
+}
+
+static void
+FCB_FN(findadd_open)(unsigned desired_entries, unsigned nb_bk,
+                     unsigned start_fill_pct, unsigned hit_pct,
+                     unsigned keys_per_sec, unsigned timeout_ms)
+{
+    struct fcb_run_summary s =
+        FCB_FN(findadd_open_summary)(desired_entries, nb_bk,
+                                     start_fill_pct, hit_pct,
+                                     keys_per_sec, timeout_ms);
+
+    printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
+           "  relief=%" PRIu64 "  oldest=%" PRIu64
+           "  start_fill=%.1f%%  end_fill=%.1f%%  max_fill=%.1f%%\n",
+           s.cycles_per_key, s.hit_pct, s.misses,
+           s.relief_evictions, s.oldest_reclaim_evictions,
+           s.fill_start_pct, s.fill_end_pct, s.fill_max_pct);
 }
 
 /*===========================================================================
@@ -594,11 +637,11 @@ FCB_FN(findadd_open)(unsigned desired_entries, unsigned nb_bk,
  *   - maintenance runs only when fill exceeds high watermark
  *   - tries to pull fill back toward low watermark
  *===========================================================================*/
-static void
-FCB_FN(findadd_window)(unsigned desired_entries, unsigned nb_bk,
-                       unsigned low_fill_pct, unsigned high_fill_pct,
-                       unsigned hit_pct, unsigned keys_per_sec,
-                       unsigned ttl_ms, unsigned duration_ms)
+static struct fcb_run_summary
+FCB_FN(findadd_window_summary)(unsigned desired_entries, unsigned nb_bk,
+                               unsigned low_fill_pct, unsigned high_fill_pct,
+                               unsigned hit_pct, unsigned keys_per_sec,
+                               unsigned ttl_ms, unsigned duration_ms)
 {
     struct FCB_FN(ctx) ctx;
     FCB_CONFIG_T cfg;
@@ -606,6 +649,7 @@ FCB_FN(findadd_window)(unsigned desired_entries, unsigned nb_bk,
     FCB_KEY_T *query;
     FCB_RESULT_T *results;
     struct FCB_FN(stats_delta) before, after, delta;
+    struct fcb_run_summary out;
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
     unsigned start_fill_pct = (low_fill_pct + high_fill_pct) / 2u;
@@ -621,6 +665,8 @@ FCB_FN(findadd_window)(unsigned desired_entries, unsigned nb_bk,
     uint64_t total_cycles = 0u;
     uint64_t maint_calls_sum = 0u;
     uint64_t maint_evictions_sum = 0u;
+
+    memset(&out, 0, sizeof(out));
 
     if (low_fill_pct > high_fill_pct || high_fill_pct > 100u) {
         fprintf(stderr, "findadd_window requires 0 <= low_fill <= high_fill <= 100\n");
@@ -758,25 +804,50 @@ FCB_FN(findadd_window)(unsigned desired_entries, unsigned nb_bk,
 
     after = FCB_FN(stats_snapshot)(&ctx);
     delta = FCB_FN(stats_diff)(after, before);
-
-    printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
-           "  relief=%" PRIu64 "  oldest=%" PRIu64
-           "  maint_calls=%" PRIu64 "  maint_evict=%" PRIu64
-           "  avg_fill=%.1f%%  min_fill=%.1f%%  max_fill=%.1f%%  over_high=%u/%u\n",
-           (double)total_cycles / (double)(rounds * FCB_QUERY),
-           delta.lookups ? (100.0 * (double)delta.hits / (double)delta.lookups) : 0.0,
-           delta.misses, delta.relief_evictions,
-           delta.oldest_reclaim_evictions,
-           maint_calls_sum, maint_evictions_sum,
-           100.0 * (double)fill_sum / (double)((uint64_t)(rounds + 1u) * total_slots),
-           100.0 * (double)min_seen / (double)total_slots,
-           100.0 * (double)max_seen / (double)total_slots,
-           over_high_rounds, rounds);
+    out.cycles_per_key = (double)total_cycles / (double)(rounds * FCB_QUERY);
+    out.hit_pct = delta.lookups
+        ? (100.0 * (double)delta.hits / (double)delta.lookups)
+        : 0.0;
+    out.misses = delta.misses;
+    out.relief_evictions = delta.relief_evictions;
+    out.oldest_reclaim_evictions = delta.oldest_reclaim_evictions;
+    out.maint_calls = maint_calls_sum;
+    out.maint_evictions = maint_evictions_sum;
+    out.fill_avg_pct =
+        100.0 * (double)fill_sum / (double)((uint64_t)(rounds + 1u) * total_slots);
+    out.fill_min_pct = 100.0 * (double)min_seen / (double)total_slots;
+    out.fill_max_pct = 100.0 * (double)max_seen / (double)total_slots;
+    out.over_high_rounds = over_high_rounds;
+    out.rounds = rounds;
 
     free(results);
     free(query);
     free(prefill_keys);
     FCB_FN(ctx_free)(&ctx);
+    return out;
+}
+
+static void
+FCB_FN(findadd_window)(unsigned desired_entries, unsigned nb_bk,
+                       unsigned low_fill_pct, unsigned high_fill_pct,
+                       unsigned hit_pct, unsigned keys_per_sec,
+                       unsigned ttl_ms, unsigned duration_ms)
+{
+    struct fcb_run_summary s =
+        FCB_FN(findadd_window_summary)(desired_entries, nb_bk,
+                                       low_fill_pct, high_fill_pct,
+                                       hit_pct, keys_per_sec,
+                                       ttl_ms, duration_ms);
+
+    printf("fc : cycles/key=%8.2f  hit=%.1f%%  misses=%" PRIu64
+           "  relief=%" PRIu64 "  oldest=%" PRIu64
+           "  maint_calls=%" PRIu64 "  maint_evict=%" PRIu64
+           "  avg_fill=%.1f%%  min_fill=%.1f%%  max_fill=%.1f%%  over_high=%u/%u\n",
+           s.cycles_per_key, s.hit_pct, s.misses,
+           s.relief_evictions, s.oldest_reclaim_evictions,
+           s.maint_calls, s.maint_evictions,
+           s.fill_avg_pct, s.fill_min_pct, s.fill_max_pct,
+           s.over_high_rounds, s.rounds);
 }
 
 /*===========================================================================

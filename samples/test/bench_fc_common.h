@@ -31,6 +31,23 @@ enum {
     FCB_MIXED_REPEAT    = 80u
 };
 
+struct fcb_run_summary {
+    double cycles_per_key;
+    double hit_pct;
+    uint64_t misses;
+    uint64_t relief_evictions;
+    uint64_t oldest_reclaim_evictions;
+    uint64_t maint_calls;
+    uint64_t maint_evictions;
+    double fill_start_pct;
+    double fill_end_pct;
+    double fill_avg_pct;
+    double fill_min_pct;
+    double fill_max_pct;
+    unsigned over_high_rounds;
+    unsigned rounds;
+};
+
 /*===========================================================================
  * TSC helpers (no v1 dependency)
  *===========================================================================*/
