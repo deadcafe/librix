@@ -17,7 +17,7 @@
 .PHONY: all static shared test bench bench-full clean install
 
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
-BENCH_FC_OPTS ?= --pin-core 0 --raw-repeat 7 --keep-n 5
+BENCH_FC_OPTS ?= --pin-core 0 --raw-repeat 11 --keep-n 7
 
 all:
 	$(MAKE) -C fcache all

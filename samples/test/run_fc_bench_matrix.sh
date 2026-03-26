@@ -5,8 +5,8 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BENCH="$SCRIPT_DIR/fc_bench"
 BENCH_DIR="$SCRIPT_DIR"
 VARIANT="${1:-flow4}"
-BENCH_SAMPLES="${BENCH_SAMPLES:-3}"
-BENCH_FC_OPTS="${BENCH_FC_OPTS:---pin-core 0 --raw-repeat 7 --keep-n 5}"
+BENCH_SAMPLES="${BENCH_SAMPLES:-1}"
+BENCH_FC_OPTS="${BENCH_FC_OPTS:---pin-core 0 --raw-repeat 11 --keep-n 7}"
 
 if [ ! -x "$BENCH" ]; then
     make -C "$BENCH_DIR" fc_bench
@@ -44,7 +44,11 @@ run_bench_median() {
     run_idx=1
 
     echo
-    echo ">>> $VARIANT $*  (median of ${BENCH_SAMPLES} runs)"
+    if [ "$BENCH_SAMPLES" -le 1 ]; then
+        echo ">>> $VARIANT $*  (1 run)"
+    else
+        echo ">>> $VARIANT $*  (median of ${BENCH_SAMPLES} runs)"
+    fi
 
     while [ "$run_idx" -le "$BENCH_SAMPLES" ]; do
         # shellcheck disable=SC2086
@@ -67,7 +71,10 @@ run_bench_median() {
         END {
             mid = int((n + 1) / 2)
             split(rows[mid], a, "\t")
-            printf("median[%d]: %s\n", n, a[2])
+            if (n <= 1)
+                printf("run[1]: %s\n", a[2])
+            else
+                printf("median[%d]: %s\n", n, a[2])
         }'
     rm -f "$tmp_file"
 }
