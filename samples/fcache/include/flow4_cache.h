@@ -347,6 +347,25 @@ void fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
                                   struct fc_flow4_result *results);
 
 /**
+ * @brief Small-burst lookup + automatic miss insertion, specialized for up to 32 keys.
+ *
+ * This API keeps the same semantics as @c fc_flow4_cache_findadd_bulk but uses
+ * a shorter lookahead pipeline that was introduced for DPDK-style small bursts.
+ * It is valid for any @p nb_keys and is intended for algorithm comparison
+ * against the regular bulk path.
+ *
+ * @param[in,out] fc        Cache instance.
+ * @param[in]     keys      Array of @p nb_keys lookup keys.
+ * @param[in]     nb_keys   Number of keys.
+ * @param[in]     now       Current TSC timestamp.
+ * @param[out]    results   Per-key results.
+ */
+void fc_flow4_cache_findadd_burst32(struct fc_flow4_cache *fc,
+                                     const struct fc_flow4_key *keys,
+                                     unsigned nb_keys, uint64_t now,
+                                     struct fc_flow4_result *results);
+
+/**
  * @brief Pipelined batch insert (no duplicate check).
  *
  * 2-stage pipeline (hash+prefetch -> alloc+insert).  Always inserts

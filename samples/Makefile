@@ -17,6 +17,7 @@
 .PHONY: all static shared test bench bench-full clean install
 
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
+BENCH_FC_OPTS ?= --pin-core 0 --raw-repeat 7 --keep-n 5
 
 all:
 	$(MAKE) -C fcache all
@@ -33,10 +34,12 @@ test: all
 	$(MAKE) -C test test
 
 bench:
-	$(MAKE) -C test bench BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
+	$(MAKE) -C test bench BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
+	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
 
 bench-full:
-	$(MAKE) -C test bench-full BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
+	$(MAKE) -C test bench-full BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
+	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
 
 clean:
 	$(MAKE) -C fcache clean

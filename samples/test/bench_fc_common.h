@@ -25,11 +25,20 @@
  *===========================================================================*/
 enum {
     FCB_ALIGN           = 64u,
-    FCB_QUERY           = 256u,
+    FCB_QUERY_DEFAULT   = 256u,
     FCB_HIT_REPEAT      = 200u,
     FCB_MISS_REPEAT     = 80u,
     FCB_MIXED_REPEAT    = 80u
 };
+
+extern unsigned fcb_query;
+enum {
+    FCB_FINDADD_API_BULK = 0u,
+    FCB_FINDADD_API_BURST32 = 1u
+};
+extern unsigned fcb_findadd_api_mode;
+
+#define FCB_QUERY (fcb_query)
 
 struct fcb_run_summary {
     double cycles_per_key;

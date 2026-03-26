@@ -34,6 +34,7 @@ WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 BENCH_EXTRA_CFLAGS ?= $(EXTRA_CFLAGS) -DNDEBUG
+BENCH_FC_OPTS ?= --pin-core 0 --raw-repeat 7 --keep-n 5
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include -I$(FCDIR)/include \
                $(EXTRA_CFLAGS)
@@ -84,20 +85,20 @@ bench-build:
 	$(MAKE) $(BENCH) BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
 
 bench: bench-build
-	./$(BENCH) datapath
-	./$(BENCH) maint_partial
-	./run_fc_bench_matrix.sh all quick
+	./$(BENCH) $(BENCH_FC_OPTS) datapath
+	./$(BENCH) $(BENCH_FC_OPTS) maint_partial
+	BENCH_FC_OPTS="$(BENCH_FC_OPTS)" ./run_fc_bench_matrix.sh all quick
 
 bench-full: bench-build
-	./$(BENCH) datapath
-	./$(BENCH) maint_partial
-	./run_fc_bench_matrix.sh all full
+	./$(BENCH) $(BENCH_FC_OPTS) datapath
+	./$(BENCH) $(BENCH_FC_OPTS) maint_partial
+	BENCH_FC_OPTS="$(BENCH_FC_OPTS)" ./run_fc_bench_matrix.sh all full
 
 matrix: bench-build
-	./run_fc_bench_matrix.sh $(VARIANT) quick
+	BENCH_FC_OPTS="$(BENCH_FC_OPTS)" ./run_fc_bench_matrix.sh $(VARIANT) quick
 
 matrix-full: bench-build
-	./run_fc_bench_matrix.sh $(VARIANT) full
+	BENCH_FC_OPTS="$(BENCH_FC_OPTS)" ./run_fc_bench_matrix.sh $(VARIANT) full
 
 clean:
 	rm -f $(TARGET) $(BENCH) $(NDEBUG_BENCH) *.o *~ core core.*

@@ -5,7 +5,8 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BENCH="$SCRIPT_DIR/fc_bench"
 BENCH_DIR="$SCRIPT_DIR"
 VARIANT="${1:-flow4}"
-BENCH_SAMPLES="${BENCH_SAMPLES:-5}"
+BENCH_SAMPLES="${BENCH_SAMPLES:-3}"
+BENCH_FC_OPTS="${BENCH_FC_OPTS:---pin-core 0 --raw-repeat 7 --keep-n 5}"
 
 if [ ! -x "$BENCH" ]; then
     make -C "$BENCH_DIR" fc_bench
@@ -24,13 +25,18 @@ variants:
 profiles:
   quick   representative open-set window matrix (default)
   full    full trace matrix including long-running trace_open_custom cases
+
+environment:
+  BENCH_FC_OPTS  extra fc_bench options (default: "$BENCH_FC_OPTS")
+  BENCH_SAMPLES  outer repeated-run count (default: $BENCH_SAMPLES)
 EOF
 }
 
 run_bench() {
     echo
-    echo ">>> $VARIANT $*"
-    "$BENCH" "$VARIANT" "$@"
+    echo ">>> $VARIANT $*  [opts: $BENCH_FC_OPTS]"
+    # shellcheck disable=SC2086
+    "$BENCH" $BENCH_FC_OPTS "$VARIANT" "$@"
 }
 
 run_bench_median() {
@@ -41,7 +47,8 @@ run_bench_median() {
     echo ">>> $VARIANT $*  (median of ${BENCH_SAMPLES} runs)"
 
     while [ "$run_idx" -le "$BENCH_SAMPLES" ]; do
-        output=$("$BENCH" "$VARIANT" "$@")
+        # shellcheck disable=SC2086
+        output=$("$BENCH" $BENCH_FC_OPTS "$VARIANT" "$@")
         summary=$(printf '%s\n' "$output" | awk '/^(fc :|summary:)/{line=$0} END{print line}')
         cycles=$(printf '%s\n' "$summary" \
             | sed -n 's/.*cycles\/key= *\([0-9.][0-9.]*\).*/\1/p')

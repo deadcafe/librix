@@ -17,15 +17,20 @@ TEST_SRC     = test_rix_hash.c
 
 BENCH_TARGET = hash_bench
 BENCH_SRC    = bench_rix_hash.c
+SLOT_SWEEP_TARGET = slot_query_sweep
+SLOT_SWEEP_SRC = bench_slot_query_sweep.c
 
 .PHONY: all clean depend test bench
-all: $(TEST_TARGET) $(BENCH_TARGET)
+all: $(TEST_TARGET) $(BENCH_TARGET) $(SLOT_SWEEP_TARGET)
 
 $(TEST_TARGET): $(TEST_SRC) rix_hash.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_SRC)
 
 $(BENCH_TARGET): $(BENCH_SRC) rix_hash.h
 	$(CC) $(BENCH_CFLAGS) -o $@ $(BENCH_SRC)
+
+$(SLOT_SWEEP_TARGET): $(SLOT_SWEEP_SRC) rix_hash.h
+	$(CC) $(BENCH_CFLAGS) -o $@ $(SLOT_SWEEP_SRC)
 
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
@@ -34,9 +39,9 @@ bench: $(BENCH_TARGET)
 	./$(BENCH_TARGET)
 
 clean:
-	rm -f $(TEST_TARGET) $(BENCH_TARGET) $(DEPENDS) *~ core core.*
+	rm -f $(TEST_TARGET) $(BENCH_TARGET) $(SLOT_SWEEP_TARGET) $(DEPENDS) *~ core core.*
 
-depend: $(TEST_SRC) $(BENCH_SRC) Makefile
-	-@ $(CC) $(CFLAGS) -MM -MG $(TEST_SRC) $(BENCH_SRC) > $(DEPENDS)
+depend: $(TEST_SRC) $(BENCH_SRC) $(SLOT_SWEEP_SRC) Makefile
+	-@ $(CC) $(CFLAGS) -MM -MG $(TEST_SRC) $(BENCH_SRC) $(SLOT_SWEEP_SRC) > $(DEPENDS)
 
 -include $(DEPENDS)
