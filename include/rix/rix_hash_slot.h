@@ -53,6 +53,18 @@
                                     _RIX_HASH_DEFAULT_HASH_FN_NAME(name),      \
                                     RIX_UNUSED static)
 
+#  ifndef RIX_HASH_SLOT_DEFINE_INDEXERS
+#    define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                          \
+static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
+name##_hidx(struct type *base, const struct type *p) {                        \
+    return RIX_IDX_FROM_PTR(base, (struct type *)(uintptr_t)p);               \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
+name##_hptr(struct type *base, unsigned i) {                                  \
+    return (struct type *)rix_ptr_from_idx_valid_(base, sizeof(*base), i);    \
+}
+#  endif
+
 #  define RIX_HASH_GENERATE_SLOT_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
                                                                               \
 /* ================================================================== */      \
@@ -69,14 +81,7 @@ name##_init(struct name *head,                                                \
 /* ------------------------------------------------------------------ */      \
 /* Internal helpers: 1-origin index <-> pointer                       */      \
 /* ------------------------------------------------------------------ */      \
-static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
-name##_hidx(struct type *base, const struct type *p) {                        \
-    return RIX_IDX_FROM_PTR(base, (struct type *)(uintptr_t)p);               \
-}                                                                             \
-static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_hptr(struct type *base, unsigned i) {                                  \
-    return (struct type *)rix_ptr_from_idx_valid_(base, sizeof(*base), i);    \
-}                                                                             \
+RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                                     \
                                                                               \
 /* ================================================================== */      \
 /* Staged find - x1                                                   */      \

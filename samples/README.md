@@ -1046,7 +1046,7 @@ fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
 void
 fc_flow4_cache_init(struct fc_flow4_cache *fc, ...)
 {
-    fc_flow4_ops_gen.init(fc, ...);
+    fc_flow4_cache_init_ex_gen(fc, ..., sizeof(struct fc_flow4_entry), 0u, ...);
 }
 ```
 
@@ -1063,6 +1063,19 @@ int main(void) {
     /* ... use fc_flow4_cache_init(), fc_flow4_cache_findadd_bulk(), etc. */
 }
 ```
+
+For intrusive layouts, `fc_flow4_cache_init_ex()` accepts any fixed-stride
+record array. The library only consumes the embedded `fc_flow4_entry`; other
+record bytes remain user-defined payload and can be recovered through
+`fc_flow4_cache_record_ptr()` / `fc_flow4_cache_entry_ptr()`.
+
+Performance caveats:
+
+- keep the embedded entry cache-line aligned; misaligned entries showed a
+  clear regression in local validation
+- larger user records raise cache/TLB pressure even when callbacks are off
+- `fc_flow4_cache_set_event_cb()` runs on alloc/free paths, so callbacks that
+  touch cold or bulky payload state can dominate miss-heavy workloads
 
 ### 17.8 Portability Notes
 

@@ -186,6 +186,20 @@ struct fc_flow4_stats {
     uint64_t maint_step_skipped_bks;/**< Buckets skipped by SIMD empty check. */
 };
 
+enum fc_flow4_event {
+    FC_FLOW4_EVENT_ALLOC = 1u,
+    FC_FLOW4_EVENT_FREE_DELETE,
+    FC_FLOW4_EVENT_FREE_TIMEOUT,
+    FC_FLOW4_EVENT_FREE_PRESSURE,
+    FC_FLOW4_EVENT_FREE_OLDEST,
+    FC_FLOW4_EVENT_FREE_FLUSH,
+    FC_FLOW4_EVENT_FREE_ROLLBACK,
+};
+
+typedef void (*fc_flow4_event_cb)(enum fc_flow4_event event,
+                                  uint32_t entry_idx,
+                                  void *arg);
+
 /**
  * @brief Flow cache instance.
  *
@@ -197,6 +211,9 @@ struct fc_flow4_cache {
     /* --- CL0: lookup / fill hot path --- */
     struct rix_hash_bucket_s  *buckets;
     struct fc_flow4_entry    *pool;
+    unsigned char            *pool_base;
+    size_t                    pool_stride;
+    size_t                    pool_entry_offset;
     struct fc_flow4_ht        ht_head;
     uint64_t                   timeout_tsc;
     uint64_t                   eff_timeout_tsc;
@@ -218,6 +235,8 @@ struct fc_flow4_cache {
     unsigned                   maint_fill_threshold;
     unsigned                   last_maint_start_bk;  /**< Start bk of last sweep. */
     unsigned                   last_maint_sweep_bk;   /**< Buckets swept last time. */
+    fc_flow4_event_cb          event_cb;
+    void                      *event_cb_arg;
     struct rix_hash_find_ctx_s *bulk_ctx;            /**< Optional external scratch. */
     unsigned                   bulk_ctx_count;        /**< Scratch ctx count. */
     struct fc_flow4_free_head free_head;
@@ -266,6 +285,106 @@ void fc_flow4_cache_init(struct fc_flow4_cache *fc,
                           struct fc_flow4_entry *pool,
                           unsigned max_entries,
                           const struct fc_flow4_config *cfg);
+
+void fc_flow4_cache_init_ex(struct fc_flow4_cache *fc,
+                            struct rix_hash_bucket_s *buckets,
+                            unsigned nb_bk,
+                            void *array,
+                            unsigned max_entries,
+                            size_t stride,
+                            size_t entry_offset,
+                            const struct fc_flow4_config *cfg);
+
+void fc_flow4_cache_set_event_cb(struct fc_flow4_cache *fc,
+                                 fc_flow4_event_cb cb,
+                                 void *arg);
+
+/**
+ * @brief Return the base address of the user record that owns @p entry_idx.
+ *
+ * For @c fc_flow4_cache_init(), this is equivalent to
+ * @c &pool[entry_idx-1].  For @c fc_flow4_cache_init_ex(), this returns the
+ * fixed-stride record base passed by the caller.  Any bytes outside the
+ * embedded @c struct fc_flow4_entry are opaque to the library and may be
+ * freely interpreted by the user.
+ *
+ * @param[in] fc         Cache instance.
+ * @param[in] entry_idx  1-based entry index.
+ * @return Record base, or NULL on invalid input.
+ */
+static inline void *
+fc_flow4_cache_record_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
+{
+    if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
+        return NULL;
+    return (void *)(fc->pool_base
+                    + ((size_t)(entry_idx - 1u) * fc->pool_stride));
+}
+
+static inline const void *
+fc_flow4_cache_record_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
+{
+    if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
+        return NULL;
+    return (const void *)(fc->pool_base
+                          + ((size_t)(entry_idx - 1u) * fc->pool_stride));
+}
+
+/**
+ * @brief Return the embedded flow-cache entry for @p entry_idx.
+ *
+ * This is the public counterpart of the layout indirection used internally by
+ * @c fc_flow4_cache_init_ex().
+ *
+ * @param[in] fc         Cache instance.
+ * @param[in] entry_idx  1-based entry index.
+ * @return Entry pointer, or NULL on invalid input.
+ */
+static inline struct fc_flow4_entry *
+fc_flow4_cache_entry_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
+{
+    unsigned char *rec = (unsigned char *)fc_flow4_cache_record_ptr(fc,
+                                                                    entry_idx);
+    void *entryp;
+
+    if (rec == NULL)
+        return NULL;
+    entryp = __builtin_assume_aligned(rec + fc->pool_entry_offset,
+                                      _Alignof(struct fc_flow4_entry));
+    return (struct fc_flow4_entry *)entryp;
+}
+
+static inline const struct fc_flow4_entry *
+fc_flow4_cache_entry_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
+{
+    const unsigned char *rec =
+        (const unsigned char *)fc_flow4_cache_record_cptr(fc, entry_idx);
+    const void *entryp;
+
+    if (rec == NULL)
+        return NULL;
+    entryp = __builtin_assume_aligned(rec + fc->pool_entry_offset,
+                                      _Alignof(struct fc_flow4_entry));
+    return (const struct fc_flow4_entry *)entryp;
+}
+
+static inline size_t
+fc_flow4_cache_record_stride(const struct fc_flow4_cache *fc)
+{
+    return fc != NULL ? fc->pool_stride : 0u;
+}
+
+static inline size_t
+fc_flow4_cache_entry_offset(const struct fc_flow4_cache *fc)
+{
+    return fc != NULL ? fc->pool_entry_offset : 0u;
+}
+
+#define FC_FLOW4_CACHE_RECORD_PTR_AS(fc, type, entry_idx) \
+    ((type *)fc_flow4_cache_record_ptr((fc), (entry_idx)))
+
+#define FC_FLOW4_CACHE_RECORD_CPTR_AS(fc, type, entry_idx) \
+    ((const type *)fc_flow4_cache_record_cptr((fc), (entry_idx)))
 
 static inline int
 fc_flow4_cache_init_attr(struct fc_cache_size_attr *attr,

@@ -1088,7 +1088,7 @@ fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
 void
 fc_flow4_cache_init(struct fc_flow4_cache *fc, ...)
 {
-    fc_flow4_ops_gen.init(fc, ...);
+    fc_flow4_cache_init_ex_gen(fc, ..., sizeof(struct fc_flow4_entry), 0u, ...);
 }
 ```
 
@@ -1105,6 +1105,20 @@ int main(void) {
     /* ... fc_flow4_cache_init(), fc_flow4_cache_findadd_bulk() 等を使用 */
 }
 ```
+
+intrusive な layout では `fc_flow4_cache_init_ex()` に固定 stride の record
+配列を渡せます。library が使うのは embedded `fc_flow4_entry` だけで、
+record の残りは user payload のままです。record base / entry は
+`fc_flow4_cache_record_ptr()` / `fc_flow4_cache_entry_ptr()` で取得できます。
+
+性能上の注意:
+
+- embedded entry は cache-line 境界に置く。local bench では misaligned entry
+  が明確に悪化した
+- user record が大きいほど callback 無効時でも cache/TLB 圧で遅くなる
+- `fc_flow4_cache_set_event_cb()` は alloc/free path で呼ばれるため、cold な
+  payload や大きい payload に触る callback は miss-heavy workload で支配的に
+  なり得る
 
 ### 16.8 移植性に関する注意
 

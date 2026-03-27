@@ -1128,6 +1128,485 @@ DEFINE_TESTS(flowu, struct fc_flowu_key, struct fc_flowu_result,
              struct fc_flowu_config, struct fc_flowu_stats,
              make_keyu_v4)
 
+struct test_flow4_user {
+    struct fc_flow4_entry entry;
+    struct {
+        uint32_t cookie;
+        uint32_t allocs;
+        uint32_t frees;
+        uint32_t last_event;
+        uint64_t touch;
+    } body;
+} __attribute__((aligned(FC_CACHE_LINE_SIZE)));
+
+RIX_STATIC_ASSERT(offsetof(struct test_flow4_user, body) == FC_CACHE_LINE_SIZE,
+                  "test_flow4_user body must start on the 2nd cache line");
+
+struct test_flow4_event_log {
+    struct test_flow4_user *users;
+    unsigned alloc_count;
+    unsigned free_count;
+    unsigned last_idx;
+    enum fc_flow4_event last_event;
+};
+
+static void
+test_flow4_event_cb(enum fc_flow4_event event, uint32_t entry_idx, void *arg)
+{
+    struct test_flow4_event_log *log = (struct test_flow4_event_log *)arg;
+    struct test_flow4_user *user = &log->users[entry_idx - 1u];
+
+    log->last_idx = entry_idx;
+    log->last_event = event;
+    if (event == FC_FLOW4_EVENT_ALLOC) {
+        log->alloc_count++;
+        user->body.allocs++;
+    } else {
+        log->free_count++;
+        user->body.frees++;
+    }
+    user->body.last_event = (uint32_t)event;
+    user->body.touch = user->body.touch * UINT64_C(1315423911)
+                       + (uint64_t)entry_idx
+                       + ((uint64_t)event << 32);
+}
+
+static void
+test_flow4_init_ex_and_event_cb(void)
+{
+    enum { NB_BK = 8u, MAX_ENTRIES = 16u };
+    struct rix_hash_bucket_s buckets[NB_BK];
+    struct test_flow4_user users[MAX_ENTRIES];
+    struct fc_flow4_cache fc;
+    struct fc_flow4_result result;
+    struct test_flow4_event_log log = { .users = users };
+    struct fc_flow4_key key;
+
+    printf("[T] fc flow4 init_ex/event_cb\n");
+    for (unsigned i = 0; i < MAX_ENTRIES; i++) {
+        users[i].body.cookie = 0xabc00000u + i;
+        users[i].body.allocs = 0u;
+        users[i].body.frees = 0u;
+        users[i].body.last_event = 0u;
+        users[i].body.touch = 0u;
+    }
+
+    fc_flow4_cache_init_ex(&fc, buckets, NB_BK, users, MAX_ENTRIES,
+                           sizeof(users[0]),
+                           offsetof(struct test_flow4_user, entry), NULL);
+    for (unsigned i = 0; i < MAX_ENTRIES; i++) {
+        if (users[i].body.cookie != 0xabc00000u + i)
+            FAILF("init_ex cookie[%u]=0x%08x expected 0x%08x",
+                  i, users[i].body.cookie, 0xabc00000u + i);
+        if (users[i].body.allocs != 0u || users[i].body.frees != 0u
+            || users[i].body.last_event != 0u || users[i].body.touch != 0u)
+            FAIL("init_ex should not touch user body counters");
+    }
+
+    fc_flow4_cache_set_event_cb(&fc, test_flow4_event_cb, &log);
+    key = make_key4(32000u);
+    fc_flow4_cache_findadd_bulk(&fc, &key, 1u, 100u, &result);
+    if (result.entry_idx == 0u)
+        FAIL("init_ex findadd should allocate an entry");
+    if (log.alloc_count != 1u || log.free_count != 0u)
+        FAILF("event counts after alloc: alloc=%u free=%u expected 1/0",
+              log.alloc_count, log.free_count);
+    if (log.last_event != FC_FLOW4_EVENT_ALLOC ||
+        log.last_idx != result.entry_idx)
+        FAIL("event callback should report alloc idx");
+    if (users[result.entry_idx - 1u].body.allocs != 1u)
+        FAIL("alloc callback should touch the matching user slot");
+    if (users[result.entry_idx - 1u].body.last_event != FC_FLOW4_EVENT_ALLOC ||
+        users[result.entry_idx - 1u].body.touch == 0u)
+        FAIL("alloc callback should write user body state");
+
+    if (!fc_flow4_cache_del_idx(&fc, result.entry_idx))
+        FAIL("del_idx on init_ex entry should succeed");
+    if (log.free_count != 1u)
+        FAILF("free count=%u expected 1", log.free_count);
+    if (log.last_event != FC_FLOW4_EVENT_FREE_DELETE ||
+        log.last_idx != result.entry_idx)
+        FAIL("delete should report FREE_DELETE for the same idx");
+    if (users[result.entry_idx - 1u].body.frees != 1u)
+        FAIL("free callback should touch the matching user slot");
+    if (users[result.entry_idx - 1u].body.last_event != FC_FLOW4_EVENT_FREE_DELETE)
+        FAIL("free callback should update last_event in user body");
+
+    fc_flow4_cache_findadd_bulk(&fc, &key, 1u, 200u, &result);
+    if (result.entry_idx == 0u)
+        FAIL("reinsert after delete should succeed");
+    fc_flow4_cache_flush(&fc);
+    if (log.free_count < 2u)
+        FAILF("flush should report at least one additional free, got %u",
+              log.free_count);
+    if (log.last_event != FC_FLOW4_EVENT_FREE_FLUSH)
+        FAIL("flush should report FREE_FLUSH");
+    if (users[result.entry_idx - 1u].body.cookie !=
+        0xabc00000u + (result.entry_idx - 1u))
+        FAIL("flush should not clobber user body");
+}
+
+enum {
+    TEST_FLOW4_VAR_HDR_OFF = FC_CACHE_LINE_SIZE,
+    TEST_FLOW4_VAR_BODY_OFF = FC_CACHE_LINE_SIZE * 2u,
+    TEST_FLOW4_VAR_BODY_SZ = 96u,
+    TEST_FLOW4_VAR_STRIDE = FC_CACHE_LINE_SIZE * 4u,
+    TEST_FLOW4_VAR_NB_BK = 8u,
+    TEST_FLOW4_VAR_MAX_ENTRIES = 16u
+};
+
+struct test_flow4_var_hdr {
+    uint32_t cookie;
+    uint32_t allocs;
+    uint32_t frees;
+    uint32_t last_event;
+    uint64_t touch;
+};
+
+struct test_flow4_var_ctx {
+    struct fc_flow4_cache *fc;
+    unsigned alloc_count;
+    unsigned free_count;
+    unsigned last_idx;
+    enum fc_flow4_event last_event;
+};
+
+static inline struct test_flow4_var_hdr *
+test_flow4_var_hdr_ptr(unsigned char *rec)
+{
+    void *p = __builtin_assume_aligned(rec + TEST_FLOW4_VAR_BODY_OFF,
+                                       _Alignof(struct test_flow4_var_hdr));
+    return (struct test_flow4_var_hdr *)p;
+}
+
+static void
+test_flow4_var_event_cb(enum fc_flow4_event event, uint32_t entry_idx, void *arg)
+{
+    struct test_flow4_var_ctx *ctx = (struct test_flow4_var_ctx *)arg;
+    unsigned char *rec =
+        FC_FLOW4_CACHE_RECORD_PTR_AS(ctx->fc, unsigned char, entry_idx);
+    struct test_flow4_var_hdr *hdr;
+    uint8_t *body;
+
+    if (rec == NULL)
+        return;
+    hdr = test_flow4_var_hdr_ptr(rec);
+    body = rec + TEST_FLOW4_VAR_BODY_OFF;
+    ctx->last_idx = entry_idx;
+    ctx->last_event = event;
+    if (event == FC_FLOW4_EVENT_ALLOC) {
+        ctx->alloc_count++;
+        hdr->allocs++;
+    } else {
+        ctx->free_count++;
+        hdr->frees++;
+    }
+    hdr->last_event = (uint32_t)event;
+    hdr->touch = hdr->touch * UINT64_C(11400714819323198485)
+                 + (uint64_t)entry_idx
+                 + ((uint64_t)event << 32);
+    body[TEST_FLOW4_VAR_BODY_SZ - 1u] ^= (uint8_t)entry_idx;
+}
+
+static void
+test_flow4_init_ex_varbody_mapping(void)
+{
+    struct rix_hash_bucket_s buckets[TEST_FLOW4_VAR_NB_BK];
+    unsigned char
+        records[TEST_FLOW4_VAR_MAX_ENTRIES][TEST_FLOW4_VAR_STRIDE]
+        __attribute__((aligned(FC_CACHE_LINE_SIZE)));
+    struct fc_flow4_cache fc;
+    struct fc_flow4_result result;
+    struct test_flow4_var_ctx ctx;
+    struct fc_flow4_key key;
+
+    printf("[T] fc flow4 init_ex/varbody mapping\n");
+    memset(records, 0, sizeof(records));
+    for (unsigned i = 0; i < TEST_FLOW4_VAR_MAX_ENTRIES; i++) {
+        struct test_flow4_var_hdr *hdr = test_flow4_var_hdr_ptr(records[i]);
+
+        hdr->cookie = 0xdef00000u + i;
+    }
+
+    fc_flow4_cache_init_ex(&fc, buckets, TEST_FLOW4_VAR_NB_BK, records,
+                           TEST_FLOW4_VAR_MAX_ENTRIES,
+                           TEST_FLOW4_VAR_STRIDE,
+                           TEST_FLOW4_VAR_HDR_OFF, NULL);
+    if (fc_flow4_cache_record_stride(&fc) != TEST_FLOW4_VAR_STRIDE)
+        FAIL("record stride should match init_ex stride");
+    if (fc_flow4_cache_entry_offset(&fc) != TEST_FLOW4_VAR_HDR_OFF)
+        FAIL("entry offset should match init_ex entry_offset");
+    if (fc_flow4_cache_record_ptr(&fc, 1u) != (void *)&records[0][0])
+        FAIL("record_ptr(1) should point at record base");
+    if ((void *)fc_flow4_cache_entry_ptr(&fc, 1u) !=
+        (void *)&records[0][TEST_FLOW4_VAR_HDR_OFF])
+        FAIL("entry_ptr(1) should point at embedded entry");
+
+    ctx.fc = &fc;
+    ctx.alloc_count = 0u;
+    ctx.free_count = 0u;
+    ctx.last_idx = 0u;
+    ctx.last_event = 0u;
+    fc_flow4_cache_set_event_cb(&fc, test_flow4_var_event_cb, &ctx);
+
+    key = make_key4(33000u);
+    fc_flow4_cache_findadd_bulk(&fc, &key, 1u, 100u, &result);
+    if (result.entry_idx == 0u)
+        FAIL("varbody findadd should allocate an entry");
+    {
+        unsigned char *rec =
+            FC_FLOW4_CACHE_RECORD_PTR_AS(&fc, unsigned char, result.entry_idx);
+        struct test_flow4_var_hdr *hdr;
+
+        if (rec == NULL)
+            FAIL("record pointer should not be NULL for live entry");
+        hdr = test_flow4_var_hdr_ptr(rec);
+
+        if (hdr->cookie != 0xdef00000u + (result.entry_idx - 1u))
+            FAIL("varbody cookie should survive init_ex");
+        if (hdr->allocs != 1u || hdr->last_event != FC_FLOW4_EVENT_ALLOC
+            || hdr->touch == 0u)
+            FAIL("varbody alloc callback should update mapped body");
+        if (rec[TEST_FLOW4_VAR_BODY_OFF + TEST_FLOW4_VAR_BODY_SZ - 1u]
+            != (uint8_t)result.entry_idx)
+            FAIL("varbody callback should be able to write arbitrary payload");
+    }
+
+    fc_flow4_cache_flush(&fc);
+    if (ctx.free_count == 0u || ctx.last_event != FC_FLOW4_EVENT_FREE_FLUSH)
+        FAIL("varbody flush should emit free event");
+}
+
+struct test_flow6_user {
+    struct fc_flow6_entry entry;
+    struct {
+        uint32_t cookie;
+        uint32_t allocs;
+        uint32_t frees;
+        uint32_t last_event;
+        uint64_t touch;
+    } body;
+} __attribute__((aligned(FC_CACHE_LINE_SIZE)));
+
+RIX_STATIC_ASSERT(offsetof(struct test_flow6_user, body) == FC_CACHE_LINE_SIZE,
+                  "test_flow6_user body must start on the 2nd cache line");
+
+struct test_flow6_event_log {
+    struct test_flow6_user *users;
+    unsigned alloc_count;
+    unsigned free_count;
+    unsigned last_idx;
+    enum fc_flow6_event last_event;
+};
+
+static void
+test_flow6_event_cb(enum fc_flow6_event event, uint32_t entry_idx, void *arg)
+{
+    struct test_flow6_event_log *log = (struct test_flow6_event_log *)arg;
+    struct test_flow6_user *user = &log->users[entry_idx - 1u];
+
+    log->last_idx = entry_idx;
+    log->last_event = event;
+    if (event == FC_FLOW6_EVENT_ALLOC) {
+        log->alloc_count++;
+        user->body.allocs++;
+    } else {
+        log->free_count++;
+        user->body.frees++;
+    }
+    user->body.last_event = (uint32_t)event;
+    user->body.touch = user->body.touch * UINT64_C(1315423911)
+                       + (uint64_t)entry_idx
+                       + ((uint64_t)event << 32);
+}
+
+static void
+test_flow6_init_ex_and_event_cb(void)
+{
+    enum { NB_BK = 8u, MAX_ENTRIES = 16u };
+    struct rix_hash_bucket_s buckets[NB_BK];
+    struct test_flow6_user users[MAX_ENTRIES];
+    struct fc_flow6_cache fc;
+    struct fc_flow6_result result;
+    struct test_flow6_event_log log = { .users = users };
+    struct fc_flow6_key key;
+
+    printf("[T] fc flow6 init_ex/event_cb\n");
+    for (unsigned i = 0; i < MAX_ENTRIES; i++) {
+        users[i].body.cookie = 0xdef00000u + i;
+        users[i].body.allocs = 0u;
+        users[i].body.frees = 0u;
+        users[i].body.last_event = 0u;
+        users[i].body.touch = 0u;
+    }
+
+    fc_flow6_cache_init_ex(&fc, buckets, NB_BK, users, MAX_ENTRIES,
+                           sizeof(users[0]),
+                           offsetof(struct test_flow6_user, entry), NULL);
+    for (unsigned i = 0; i < MAX_ENTRIES; i++) {
+        if (users[i].body.cookie != 0xdef00000u + i)
+            FAILF("flow6 init_ex cookie[%u]=0x%08x expected 0x%08x",
+                  i, users[i].body.cookie, 0xdef00000u + i);
+        if (users[i].body.allocs != 0u || users[i].body.frees != 0u
+            || users[i].body.last_event != 0u || users[i].body.touch != 0u)
+            FAIL("flow6 init_ex should not touch user body counters");
+    }
+
+    fc_flow6_cache_set_event_cb(&fc, test_flow6_event_cb, &log);
+    key = make_key6(32000u);
+    fc_flow6_cache_findadd_bulk(&fc, &key, 1u, 100u, &result);
+    if (result.entry_idx == 0u)
+        FAIL("flow6 init_ex findadd should allocate an entry");
+    if (log.alloc_count != 1u || log.free_count != 0u)
+        FAILF("flow6 event counts after alloc: alloc=%u free=%u expected 1/0",
+              log.alloc_count, log.free_count);
+    if (log.last_event != FC_FLOW6_EVENT_ALLOC ||
+        log.last_idx != result.entry_idx)
+        FAIL("flow6 event callback should report alloc idx");
+    if (users[result.entry_idx - 1u].body.allocs != 1u)
+        FAIL("flow6 alloc callback should touch the matching user slot");
+    if (users[result.entry_idx - 1u].body.last_event != FC_FLOW6_EVENT_ALLOC ||
+        users[result.entry_idx - 1u].body.touch == 0u)
+        FAIL("flow6 alloc callback should write user body state");
+
+    if (!fc_flow6_cache_del_idx(&fc, result.entry_idx))
+        FAIL("flow6 del_idx on init_ex entry should succeed");
+    if (log.free_count != 1u)
+        FAILF("flow6 free count=%u expected 1", log.free_count);
+    if (log.last_event != FC_FLOW6_EVENT_FREE_DELETE ||
+        log.last_idx != result.entry_idx)
+        FAIL("flow6 delete should report FREE_DELETE for the same idx");
+    if (users[result.entry_idx - 1u].body.frees != 1u)
+        FAIL("flow6 free callback should touch the matching user slot");
+    if (users[result.entry_idx - 1u].body.last_event != FC_FLOW6_EVENT_FREE_DELETE)
+        FAIL("flow6 free callback should update last_event in user body");
+
+    fc_flow6_cache_findadd_bulk(&fc, &key, 1u, 200u, &result);
+    if (result.entry_idx == 0u)
+        FAIL("flow6 reinsert after delete should succeed");
+    fc_flow6_cache_flush(&fc);
+    if (log.free_count < 2u)
+        FAILF("flow6 flush should report at least one additional free, got %u",
+              log.free_count);
+    if (log.last_event != FC_FLOW6_EVENT_FREE_FLUSH)
+        FAIL("flow6 flush should report FREE_FLUSH");
+}
+
+struct test_flowu_user {
+    struct fc_flowu_entry entry;
+    struct {
+        uint32_t cookie;
+        uint32_t allocs;
+        uint32_t frees;
+        uint32_t last_event;
+        uint64_t touch;
+    } body;
+} __attribute__((aligned(FC_CACHE_LINE_SIZE)));
+
+RIX_STATIC_ASSERT(offsetof(struct test_flowu_user, body) == FC_CACHE_LINE_SIZE,
+                  "test_flowu_user body must start on the 2nd cache line");
+
+struct test_flowu_event_log {
+    struct test_flowu_user *users;
+    unsigned alloc_count;
+    unsigned free_count;
+    unsigned last_idx;
+    enum fc_flowu_event last_event;
+};
+
+static void
+test_flowu_event_cb(enum fc_flowu_event event, uint32_t entry_idx, void *arg)
+{
+    struct test_flowu_event_log *log = (struct test_flowu_event_log *)arg;
+    struct test_flowu_user *user = &log->users[entry_idx - 1u];
+
+    log->last_idx = entry_idx;
+    log->last_event = event;
+    if (event == FC_FLOWU_EVENT_ALLOC) {
+        log->alloc_count++;
+        user->body.allocs++;
+    } else {
+        log->free_count++;
+        user->body.frees++;
+    }
+    user->body.last_event = (uint32_t)event;
+    user->body.touch = user->body.touch * UINT64_C(1315423911)
+                       + (uint64_t)entry_idx
+                       + ((uint64_t)event << 32);
+}
+
+static void
+test_flowu_init_ex_and_event_cb(void)
+{
+    enum { NB_BK = 8u, MAX_ENTRIES = 16u };
+    struct rix_hash_bucket_s buckets[NB_BK];
+    struct test_flowu_user users[MAX_ENTRIES];
+    struct fc_flowu_cache fc;
+    struct fc_flowu_result result;
+    struct test_flowu_event_log log = { .users = users };
+    struct fc_flowu_key key;
+
+    printf("[T] fc flowu init_ex/event_cb\n");
+    for (unsigned i = 0; i < MAX_ENTRIES; i++) {
+        users[i].body.cookie = 0x12340000u + i;
+        users[i].body.allocs = 0u;
+        users[i].body.frees = 0u;
+        users[i].body.last_event = 0u;
+        users[i].body.touch = 0u;
+    }
+
+    fc_flowu_cache_init_ex(&fc, buckets, NB_BK, users, MAX_ENTRIES,
+                           sizeof(users[0]),
+                           offsetof(struct test_flowu_user, entry), NULL);
+    for (unsigned i = 0; i < MAX_ENTRIES; i++) {
+        if (users[i].body.cookie != 0x12340000u + i)
+            FAILF("flowu init_ex cookie[%u]=0x%08x expected 0x%08x",
+                  i, users[i].body.cookie, 0x12340000u + i);
+        if (users[i].body.allocs != 0u || users[i].body.frees != 0u
+            || users[i].body.last_event != 0u || users[i].body.touch != 0u)
+            FAIL("flowu init_ex should not touch user body counters");
+    }
+
+    fc_flowu_cache_set_event_cb(&fc, test_flowu_event_cb, &log);
+    key = make_keyu_v4(32000u);
+    fc_flowu_cache_findadd_bulk(&fc, &key, 1u, 100u, &result);
+    if (result.entry_idx == 0u)
+        FAIL("flowu init_ex findadd should allocate an entry");
+    if (log.alloc_count != 1u || log.free_count != 0u)
+        FAILF("flowu event counts after alloc: alloc=%u free=%u expected 1/0",
+              log.alloc_count, log.free_count);
+    if (log.last_event != FC_FLOWU_EVENT_ALLOC ||
+        log.last_idx != result.entry_idx)
+        FAIL("flowu event callback should report alloc idx");
+    if (users[result.entry_idx - 1u].body.allocs != 1u)
+        FAIL("flowu alloc callback should touch the matching user slot");
+    if (users[result.entry_idx - 1u].body.last_event != FC_FLOWU_EVENT_ALLOC ||
+        users[result.entry_idx - 1u].body.touch == 0u)
+        FAIL("flowu alloc callback should write user body state");
+
+    if (!fc_flowu_cache_del_idx(&fc, result.entry_idx))
+        FAIL("flowu del_idx on init_ex entry should succeed");
+    if (log.free_count != 1u)
+        FAILF("flowu free count=%u expected 1", log.free_count);
+    if (log.last_event != FC_FLOWU_EVENT_FREE_DELETE ||
+        log.last_idx != result.entry_idx)
+        FAIL("flowu delete should report FREE_DELETE for the same idx");
+    if (users[result.entry_idx - 1u].body.frees != 1u)
+        FAIL("flowu free callback should touch the matching user slot");
+    if (users[result.entry_idx - 1u].body.last_event != FC_FLOWU_EVENT_FREE_DELETE)
+        FAIL("flowu free callback should update last_event in user body");
+
+    fc_flowu_cache_findadd_bulk(&fc, &key, 1u, 200u, &result);
+    if (result.entry_idx == 0u)
+        FAIL("flowu reinsert after delete should succeed");
+    fc_flowu_cache_flush(&fc);
+    if (log.free_count < 2u)
+        FAILF("flowu flush should report at least one additional free, got %u",
+              log.free_count);
+    if (log.last_event != FC_FLOWU_EVENT_FREE_FLUSH)
+        FAIL("flowu flush should report FREE_FLUSH");
+}
+
 /*===========================================================================
  * flowu-specific: v4/v6 coexistence
  *===========================================================================*/
@@ -1245,8 +1724,12 @@ main(int argc, char **argv)
     printf("[arch: %s]\n", arch_label(arch_enable));
 
     RUN_TESTS(flow4);
+    test_flow4_init_ex_and_event_cb();
+    test_flow4_init_ex_varbody_mapping();
     RUN_TESTS(flow6);
+    test_flow6_init_ex_and_event_cb();
     RUN_TESTS(flowu);
+    test_flowu_init_ex_and_event_cb();
     test_flowu_v4_v6_coexist();
 
     printf("ALL FCACHE TESTS PASSED (flow4 + flow6 + flowu)\n");

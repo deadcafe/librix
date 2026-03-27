@@ -23,10 +23,6 @@
 #define FC_OPS_DEFINE(prefix)                                                  \
 struct fc_##prefix##_ops {                                                     \
     /* cold-path */                                                            \
-    void (*init)(struct fc_##prefix##_cache *fc,                               \
-                 struct rix_hash_bucket_s *buckets, unsigned nb_bk,            \
-                 struct fc_##prefix##_entry *pool, unsigned max_entries,        \
-                 const struct fc_##prefix##_config *cfg);                      \
     void (*flush)(struct fc_##prefix##_cache *fc);                             \
     unsigned (*nb_entries)(const struct fc_##prefix##_cache *fc);               \
     int (*remove_idx)(struct fc_##prefix##_cache *fc, uint32_t entry_idx);     \

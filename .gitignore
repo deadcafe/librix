@@ -79,3 +79,6 @@ tests/hashtbl64/hash64_bench
 samples/test/fc_test
 samples/test/fc_bench
 samples/test/fc_bench_ndebug
+samples/test/out/
+tests/hashtbl/slot_query_sweep
+tests/hashtbl/out/

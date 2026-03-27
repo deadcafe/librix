@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "flow4_cache.h"
-#include "fc_cache_generate.h"
 
 /*
  * Direct CRC32C hash for 24B flow4 key -- bypasses rix_hash_arch->hash_bytes
@@ -63,8 +62,154 @@ fc_flow4_cmp(const struct fc_flow4_key *a, const struct fc_flow4_key *b)
     return ((a0 ^ b0) | (a1 ^ b1) | (a2 ^ b2)) ? 1 : 0;
 }
 
+static inline struct fc_flow4_entry *
+fc_flow4_layout_entry_ptr_(const struct fc_flow4_cache *fc, unsigned idx)
+{
+    if (idx == RIX_NIL)
+        return NULL;
+    return (struct fc_flow4_entry *)(void *)
+        (fc->pool_base + (size_t)(idx - 1u) * fc->pool_stride +
+         fc->pool_entry_offset);
+}
+
+static inline unsigned
+fc_flow4_layout_entry_idx_(const struct fc_flow4_cache *fc,
+                           const struct fc_flow4_entry *entry)
+{
+    const unsigned char *entry_bytes;
+    ptrdiff_t delta;
+
+    if (entry == NULL)
+        return RIX_NIL;
+    entry_bytes = (const unsigned char *)(const void *)entry;
+    delta = (ptrdiff_t)(entry_bytes -
+                        (fc->pool_base + fc->pool_entry_offset));
+    RIX_ASSERT(delta >= 0);
+    RIX_ASSERT(fc->pool_stride != 0u);
+    RIX_ASSERT(((size_t)delta % fc->pool_stride) == 0u);
+    return (unsigned)((size_t)delta / fc->pool_stride) + 1u;
+}
+
+static inline void
+fc_flow4_event_emit_idx_(struct fc_flow4_cache *fc,
+                         enum fc_flow4_event event,
+                         unsigned idx)
+{
+    if (RIX_UNLIKELY(fc->event_cb != NULL) && idx != RIX_NIL)
+        fc->event_cb(event, idx, fc->event_cb_arg);
+}
+
+#define FCG_LAYOUT_INIT_STORAGE(fc, array, stride, entry_offset)               \
+    do {                                                                       \
+        (fc)->pool_base = (unsigned char *)(array);                            \
+        (fc)->pool_stride = (stride);                                          \
+        (fc)->pool_entry_offset = (entry_offset);                              \
+        (fc)->pool = (struct fc_flow4_entry *)(void *)                         \
+            ((fc)->pool_base + (fc)->pool_entry_offset);                       \
+    } while (0)
+
+#define FCG_LAYOUT_HASH_BASE(fc)                                               \
+    ((struct fc_flow4_entry *)(void *)(fc))
+
+#define FCG_LAYOUT_ENTRY_PTR(fc, idx) fc_flow4_layout_entry_ptr_((fc), (idx))
+#define FCG_LAYOUT_ENTRY_INDEX(fc, entry)                                      \
+    fc_flow4_layout_entry_idx_((fc), (entry))
+
+#define FCG_LAYOUT_ENTRY_AT(fc, off0)                                          \
+    fc_flow4_layout_entry_ptr_((fc), (unsigned)(off0) + 1u)
+
+#define FCG_EVENT_EMIT_ALLOC(fc, idx)                                          \
+    fc_flow4_event_emit_idx_((fc), FC_FLOW4_EVENT_ALLOC, (idx))
+
+#define FCG_EVENT_EMIT_FREE(fc, idx, reason)                                   \
+    fc_flow4_event_emit_idx_((fc), (enum fc_flow4_event)(reason), (idx))
+
+#define FCG_EVENT_REASON_DELETE   FC_FLOW4_EVENT_FREE_DELETE
+#define FCG_EVENT_REASON_TIMEOUT  FC_FLOW4_EVENT_FREE_TIMEOUT
+#define FCG_EVENT_REASON_PRESSURE FC_FLOW4_EVENT_FREE_PRESSURE
+#define FCG_EVENT_REASON_OLDEST   FC_FLOW4_EVENT_FREE_OLDEST
+#define FCG_EVENT_REASON_FLUSH    FC_FLOW4_EVENT_FREE_FLUSH
+#define FCG_EVENT_REASON_ROLLBACK FC_FLOW4_EVENT_FREE_ROLLBACK
+
+#undef RIX_HASH_SLOT_DEFINE_INDEXERS
+#define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
+static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
+name##_hidx(struct type *base, const struct type *p)                          \
+{                                                                             \
+    const struct fc_flow4_cache *fc =                                         \
+        (const struct fc_flow4_cache *)(const void *)base;                    \
+    return fc_flow4_layout_entry_idx_(fc, p);                                 \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                               \
+name##_hptr(struct type *base, unsigned i)                                     \
+{                                                                             \
+    const struct fc_flow4_cache *fc =                                         \
+        (const struct fc_flow4_cache *)(const void *)base;                    \
+    return fc_flow4_layout_entry_ptr_(fc, i);                                 \
+}
+
+#include "fc_cache_generate.h"
+
 FC_CACHE_GENERATE(flow4, FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS,
                    fc_flow4_hash_fn, fc_flow4_cmp)
+
+void _FCG_API(flow4, init_ex)(struct fc_flow4_cache *fc,
+                              struct rix_hash_bucket_s *buckets,
+                              unsigned nb_bk,
+                              void *array,
+                              unsigned max_entries,
+                              size_t stride,
+                              size_t entry_offset,
+                              const struct fc_flow4_config *cfg);
+
+void
+_FCG_API(flow4, init_ex)(struct fc_flow4_cache *fc,
+                         struct rix_hash_bucket_s *buckets,
+                         unsigned nb_bk,
+                         void *array,
+                         unsigned max_entries,
+                         size_t stride,
+                         size_t entry_offset,
+                         const struct fc_flow4_config *cfg)
+{
+    struct fc_flow4_config defcfg = {
+        .timeout_tsc = UINT64_C(1000000),
+        .pressure_empty_slots = FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS,
+    };
+
+    if (cfg == NULL)
+        cfg = &defcfg;
+    RIX_ASSERT(stride >= sizeof(struct fc_flow4_entry));
+    RIX_ASSERT(entry_offset + sizeof(struct fc_flow4_entry) <= stride);
+    RIX_ASSERT((((uintptr_t)array + entry_offset)
+                & (uintptr_t)(_Alignof(struct fc_flow4_entry) - 1u)) == 0u);
+
+    memset(fc, 0, sizeof(*fc));
+    memset(buckets, 0, (size_t)nb_bk * sizeof(*buckets));
+    FCG_LAYOUT_INIT_STORAGE(fc, array, stride, entry_offset);
+    fc->buckets = buckets;
+    fc->nb_bk = nb_bk;
+    fc->max_entries = max_entries;
+    fc->total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
+    fc->timeout_tsc = cfg->timeout_tsc;
+    fc->eff_timeout_tsc = cfg->timeout_tsc ? cfg->timeout_tsc : 1u;
+    fc->pressure_empty_slots = cfg->pressure_empty_slots ?
+        cfg->pressure_empty_slots : FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS;
+    fc->maint_interval_tsc = cfg->maint_interval_tsc;
+    fc->maint_base_bk = cfg->maint_base_bk ? cfg->maint_base_bk : nb_bk;
+    fc->maint_fill_threshold = cfg->maint_fill_threshold;
+    _FCG_INT(flow4, init_thresholds)(fc);
+    RIX_SLIST_INIT(&fc->free_head);
+    _FCG_HT(flow4, init)(&fc->ht_head, nb_bk);
+    for (unsigned i = max_entries; i > 0u; i--) {
+        struct fc_flow4_entry *entry = FCG_LAYOUT_ENTRY_PTR(fc, i);
+
+        RIX_ASSUME_NONNULL(entry);
+        FCG_LAYOUT_ENTRY_CLEAR(fc, entry);
+        entry->free_link.rsle_next = fc->free_head.rslh_first;
+        fc->free_head.rslh_first = i;
+    }
+}
 
 static inline void
 fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
@@ -80,11 +225,11 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
     unsigned bk1i = (unsigned)(ctx->bk[1] - fc->buckets);
     struct fc_flow4_entry *entry;
 
-    entry = _FCG_HT(flow4, cmp_key_empties)(ctx, fc->pool);
+    entry = _FCG_HT(flow4, cmp_key_empties)(ctx, FCG_LAYOUT_HASH_BASE(fc));
     if (RIX_LIKELY(entry != NULL)) {
         entry->last_ts = now;
         _FCG_INT(flow4, result_set_hit)(&results[idx],
-                                        RIX_IDX_FROM_PTR(fc->pool, entry));
+                                        FCG_LAYOUT_ENTRY_INDEX(fc, entry));
         (*hit_count)++;
         return;
     }
@@ -101,14 +246,16 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
             _FCG_INT(flow4, update_eff_timeout)(fc);
             expire_before = (now > fc->eff_timeout_tsc)
                 ? (now - fc->eff_timeout_tsc) : 0u;
-            if (_FCG_INT(flow4, reclaim_bucket)(fc, bk0i, expire_before)) {
+            if (_FCG_INT(flow4, reclaim_bucket)(fc, bk0i, expire_before,
+                                                FCG_EVENT_REASON_PRESSURE)) {
                 fc->stats.relief_evictions++;
                 fc->stats.relief_bk0_evictions++;
             } else {
                 fc->stats.relief_bucket_checks++;
                 if ((unsigned)__builtin_popcount(ctx->empties[1]) <= pressure_empty &&
                     bk1i != bk0i &&
-                    _FCG_INT(flow4, reclaim_bucket)(fc, bk1i, expire_before)) {
+                    _FCG_INT(flow4, reclaim_bucket)(fc, bk1i, expire_before,
+                                                    FCG_EVENT_REASON_PRESSURE)) {
                     fc->stats.relief_evictions++;
                     fc->stats.relief_bk1_evictions++;
                 }
@@ -118,7 +265,8 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
 
     entry = _FCG_INT(flow4, alloc_entry)(fc);
     if (RIX_UNLIKELY(entry == NULL) &&
-        _FCG_INT(flow4, reclaim_oldest_global)(fc, now)) {
+        _FCG_INT(flow4, reclaim_oldest_global)(fc, now,
+                                               FCG_EVENT_REASON_OLDEST)) {
         entry = _FCG_INT(flow4, alloc_entry)(fc);
     }
     if (RIX_UNLIKELY(entry == NULL)) {
@@ -133,32 +281,37 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
         struct fc_flow4_entry *ret;
 
         ret = _FCG_HT(flow4, insert_hashed)(&fc->ht_head, fc->buckets,
-                                            fc->pool, entry, ctx->hash);
+                                            FCG_LAYOUT_HASH_BASE(fc),
+                                            entry, ctx->hash);
         if (RIX_LIKELY(ret == NULL)) {
             fc->stats.fills++;
             _FCG_INT(flow4, result_set_filled)(
-                &results[idx], RIX_IDX_FROM_PTR(fc->pool, entry));
+                &results[idx], FCG_LAYOUT_ENTRY_INDEX(fc, entry));
         } else {
             if (ret == entry &&
-                _FCG_INT(flow4, reclaim_oldest_global)(fc, now)) {
+                _FCG_INT(flow4, reclaim_oldest_global)(fc, now,
+                                                       FCG_EVENT_REASON_OLDEST)) {
                 ret = _FCG_HT(flow4, insert_hashed)(&fc->ht_head,
-                                                    fc->buckets, fc->pool,
+                                                    fc->buckets,
+                                                    FCG_LAYOUT_HASH_BASE(fc),
                                                     entry, ctx->hash);
             }
             if (ret == NULL) {
                 fc->stats.fills++;
                 _FCG_INT(flow4, result_set_filled)(
-                    &results[idx], RIX_IDX_FROM_PTR(fc->pool, entry));
+                    &results[idx], FCG_LAYOUT_ENTRY_INDEX(fc, entry));
             } else if (ret != entry) {
                 RIX_ASSUME_NONNULL(entry);
-                _FCG_INT(flow4, free_entry)(fc, entry);
+                _FCG_INT(flow4, free_entry)(fc, entry,
+                                            FCG_EVENT_REASON_ROLLBACK);
                 RIX_ASSUME_NONNULL(ret);
                 ret->last_ts = now;
                 _FCG_INT(flow4, result_set_filled)(
-                    &results[idx], RIX_IDX_FROM_PTR(fc->pool, ret));
+                    &results[idx], FCG_LAYOUT_ENTRY_INDEX(fc, ret));
             } else {
                 RIX_ASSUME_NONNULL(entry);
-                _FCG_INT(flow4, free_entry)(fc, entry);
+                _FCG_INT(flow4, free_entry)(fc, entry,
+                                            FCG_EVENT_REASON_ROLLBACK);
                 fc->stats.fill_full++;
                 _FCG_INT(flow4, result_set_miss)(&results[idx]);
             }
@@ -166,8 +319,8 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
     }
 
     {
-        struct fc_flow4_entry *next_free =
-            RIX_SLIST_FIRST(&fc->free_head, fc->pool);
+        struct fc_flow4_entry *next_free = FCG_LAYOUT_ENTRY_PTR(
+            fc, fc->free_head.rslh_first);
         if (next_free != NULL)
             rix_hash_prefetch_entry(next_free);
     }
@@ -201,8 +354,8 @@ _FCG_API(flow4, findadd_burst32)(struct fc_flow4_cache *fc,
         return;
 
     {
-        struct fc_flow4_entry *free_head =
-            RIX_SLIST_FIRST(&fc->free_head, fc->pool);
+        struct fc_flow4_entry *free_head = FCG_LAYOUT_ENTRY_PTR(
+            fc, fc->free_head.rslh_first);
         if (free_head != NULL)
             rix_hash_prefetch_entry(free_head);
     }
@@ -247,7 +400,8 @@ _FCG_API(flow4, findadd_burst32)(struct fc_flow4_cache *fc,
 
             for (unsigned j = 0; j < n; j++)
                 _FCG_HT(flow4, prefetch_node)(
-                    &ctx[(base + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)], fc->pool);
+                    &ctx[(base + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],
+                    FCG_LAYOUT_HASH_BASE(fc));
         }
         if (i >= 3u * ahead_keys && i - 3u * ahead_keys < nb_keys) {
             unsigned base = i - 3u * ahead_keys;

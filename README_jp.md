@@ -706,6 +706,52 @@ entry64 *ht64_remove(&head, buckets, pool, key_value);
 flow cache バリアント (`flow4`, `flow6`, `flowu`) では、allocator 非依存で
 hugepage 配置にも向く size-query ベースの初期化 API を追加しています。
 
+さらに intrusive な統合向けに、`*_cache_init_ex()` は単純な
+`fc_flow*_entry[]` ではなく、呼び出し側が持つ固定 stride の record 配列を
+受けられます。library が必要とするのは次の 2 つだけです。
+
+- `stride`: record 間のバイト間隔
+- `entry_offset`: 各 record 内で embedded `fc_flow*_entry` が始まる位置
+
+record の残りの領域は librix にとって opaque であり、user が自由に payload
+として使えます。record base / entry 取得には次を使います。
+
+- `fc_flow*_cache_record_ptr()`
+- `fc_flow*_cache_entry_ptr()`
+
+典型的には次のような形です。
+
+```c
+struct my_flow_rec {
+    struct fc_flow4_entry entry;   /* 先頭でなくてもよい */
+    uint8_t body[];
+};
+```
+
+あるいは raw byte record として
+
+```c
+unsigned char *rec =
+    FC_FLOW4_CACHE_RECORD_PTR_AS(&fc, unsigned char, entry_idx);
+void *my_body = rec + my_body_offset;
+```
+
+`*_init_ex()` の性能上の指針:
+
+- `entry_offset` は `FC_CACHE_LINE_SIZE` 境界に合わせる
+- embedded entry が cache line を跨がないようにする
+- `entry` は先頭 member でなくてもよいが、datapath 性能を重視するなら
+  cache-line 境界で始める
+- record を大きくしすぎると footprint が増え、cache/TLB 圧で lookup/add/remove
+  が遅くなる。`*_init_ex()` 自体のコストは小さいが、巨大な user record は
+  別問題として性能低下要因になる
+- `fc_flow*_cache_set_event_cb()` を有効にすると alloc/free path で caller code
+  が走る。軽い counter 更新程度なら許容されやすいが、大きい payload や cold
+  な領域へ触る callback は throughput をかなり落とし得る
+
+この record/entry accessor は `flow4`, `flow6`, `flowu` のすべてで利用できます。
+一方で、従来の `fc_flow*_cache_init()` API もそのまま維持しています。
+
 この flow cache は単なるサンプルではなく、このリポジトリにおける主要な
 性能アピール対象です。直近の再計測では `AMD Ryzen 9 8945HS`
 （`avx512`, 2026-03-23）上で、`flow4` の `findadd_hit` が `32K` entries で

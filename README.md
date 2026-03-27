@@ -734,6 +734,53 @@ The flow-cache variants also support an allocator-independent, hugepage-friendly
 size-query initialization flow via `fc_*_cache_size_query()` and
 `fc_cache_size_bind()`.
 
+For intrusive integration, the `*_cache_init_ex()` APIs accept a caller-owned
+fixed-stride record array instead of a plain `fc_flow*_entry[]` pool. The
+library only needs to know:
+
+- `stride`: bytes between records
+- `entry_offset`: where the embedded `fc_flow*_entry` lives inside each record
+
+Everything else in the record is opaque to librix. This lets the caller attach
+arbitrary per-entry payload bytes and interpret them freely from the record
+base returned by:
+
+- `fc_flow*_cache_record_ptr()`
+- `fc_flow*_cache_entry_ptr()`
+
+Typical shape:
+
+```c
+struct my_flow_rec {
+    struct fc_flow4_entry entry;   /* or place it later with entry_offset */
+    uint8_t body[];
+};
+```
+
+or a raw fixed-stride byte record:
+
+```c
+unsigned char *rec =
+    FC_FLOW4_CACHE_RECORD_PTR_AS(&fc, unsigned char, entry_idx);
+void *my_body = rec + my_body_offset;
+```
+
+Performance guidance for `*_init_ex()`:
+
+- keep `entry_offset` aligned to `FC_CACHE_LINE_SIZE`
+- do not let the embedded entry cross a cache-line boundary
+- `entry` does not have to be the first member, but it should start at a
+  cache-line boundary if datapath performance matters
+- large record sizes increase footprint, cache pressure, and TLB pressure;
+  `*_init_ex()` itself is cheap, but oversized user records can still slow
+  lookup/add/remove paths
+- enabling `fc_flow*_cache_set_event_cb()` puts caller code on alloc/free
+  paths; lightweight counters are usually fine, but touching large or cold
+  payload regions in the callback can materially reduce throughput
+
+The library now exposes record/entry accessors for `flow4`, `flow6`, and
+`flowu`, while keeping the original `fc_flow*_cache_init()` API intact.
+
 See [samples/README.md](samples/README.md) for the actual API walkthrough,
 detailed benchmark tables, backend-specific validation commands, and design
 notes. For release-facing text, see

@@ -21,6 +21,30 @@ extern void fc_flow4_cache_findadd_burst32_gen(struct fc_flow4_cache *fc,
                                                const struct fc_flow4_key *keys,
                                                unsigned nb_keys, uint64_t now,
                                                struct fc_flow4_result *results);
+extern void fc_flow4_cache_init_ex_gen(struct fc_flow4_cache *fc,
+                                       struct rix_hash_bucket_s *buckets,
+                                       unsigned nb_bk,
+                                       void *array,
+                                       unsigned max_entries,
+                                       size_t stride,
+                                       size_t entry_offset,
+                                       const struct fc_flow4_config *cfg);
+extern void fc_flow6_cache_init_ex_gen(struct fc_flow6_cache *fc,
+                                       struct rix_hash_bucket_s *buckets,
+                                       unsigned nb_bk,
+                                       void *array,
+                                       unsigned max_entries,
+                                       size_t stride,
+                                       size_t entry_offset,
+                                       const struct fc_flow6_config *cfg);
+extern void fc_flowu_cache_init_ex_gen(struct fc_flowu_cache *fc,
+                                       struct rix_hash_bucket_s *buckets,
+                                       unsigned nb_bk,
+                                       void *array,
+                                       unsigned max_entries,
+                                       size_t stride,
+                                       size_t entry_offset,
+                                       const struct fc_flowu_config *cfg);
 extern void fc_flow4_cache_findadd_burst32_sse(struct fc_flow4_cache *fc,
                                                const struct fc_flow4_key *keys,
                                                unsigned nb_keys, uint64_t now,
@@ -66,7 +90,31 @@ fc_flow4_cache_init(struct fc_flow4_cache *fc,
                     unsigned max_entries,
                     const struct fc_flow4_config *cfg)
 {
-    fc_flow4_ops_gen.init(fc, buckets, nb_bk, pool, max_entries, cfg);
+    fc_flow4_cache_init_ex_gen(fc, buckets, nb_bk, pool, max_entries,
+                               sizeof(*pool), 0u, cfg);
+}
+
+void
+fc_flow4_cache_init_ex(struct fc_flow4_cache *fc,
+                       struct rix_hash_bucket_s *buckets,
+                       unsigned nb_bk,
+                       void *array,
+                       unsigned max_entries,
+                       size_t stride,
+                       size_t entry_offset,
+                       const struct fc_flow4_config *cfg)
+{
+    fc_flow4_cache_init_ex_gen(fc, buckets, nb_bk, array, max_entries,
+                               stride, entry_offset, cfg);
+}
+
+void
+fc_flow4_cache_set_event_cb(struct fc_flow4_cache *fc,
+                            fc_flow4_event_cb cb,
+                            void *arg)
+{
+    fc->event_cb = cb;
+    fc->event_cb_arg = arg;
 }
 
 void
@@ -104,7 +152,31 @@ fc_flow6_cache_init(struct fc_flow6_cache *fc,
                     unsigned max_entries,
                     const struct fc_flow6_config *cfg)
 {
-    fc_flow6_ops_gen.init(fc, buckets, nb_bk, pool, max_entries, cfg);
+    fc_flow6_cache_init_ex_gen(fc, buckets, nb_bk, pool, max_entries,
+                               sizeof(*pool), 0u, cfg);
+}
+
+void
+fc_flow6_cache_init_ex(struct fc_flow6_cache *fc,
+                       struct rix_hash_bucket_s *buckets,
+                       unsigned nb_bk,
+                       void *array,
+                       unsigned max_entries,
+                       size_t stride,
+                       size_t entry_offset,
+                       const struct fc_flow6_config *cfg)
+{
+    fc_flow6_cache_init_ex_gen(fc, buckets, nb_bk, array, max_entries,
+                               stride, entry_offset, cfg);
+}
+
+void
+fc_flow6_cache_set_event_cb(struct fc_flow6_cache *fc,
+                            fc_flow6_event_cb cb,
+                            void *arg)
+{
+    fc->event_cb = cb;
+    fc->event_cb_arg = arg;
 }
 
 void
@@ -142,7 +214,31 @@ fc_flowu_cache_init(struct fc_flowu_cache *fc,
                     unsigned max_entries,
                     const struct fc_flowu_config *cfg)
 {
-    fc_flowu_ops_gen.init(fc, buckets, nb_bk, pool, max_entries, cfg);
+    fc_flowu_cache_init_ex_gen(fc, buckets, nb_bk, pool, max_entries,
+                               sizeof(*pool), 0u, cfg);
+}
+
+void
+fc_flowu_cache_init_ex(struct fc_flowu_cache *fc,
+                       struct rix_hash_bucket_s *buckets,
+                       unsigned nb_bk,
+                       void *array,
+                       unsigned max_entries,
+                       size_t stride,
+                       size_t entry_offset,
+                       const struct fc_flowu_config *cfg)
+{
+    fc_flowu_cache_init_ex_gen(fc, buckets, nb_bk, array, max_entries,
+                               stride, entry_offset, cfg);
+}
+
+void
+fc_flowu_cache_set_event_cb(struct fc_flowu_cache *fc,
+                            fc_flowu_event_cb cb,
+                            void *arg)
+{
+    fc->event_cb = cb;
+    fc->event_cb_arg = arg;
 }
 
 void

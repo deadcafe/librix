@@ -51,6 +51,78 @@
 #define _FCG_CONFIG_T(p)    struct _FCG_CAT(fc_, _FCG_CAT(p, _config))
 #define _FCG_STATS_T(p)     struct _FCG_CAT(fc_, _FCG_CAT(p, _stats))
 
+#ifndef FCG_LAYOUT_INIT_STORAGE
+#define FCG_LAYOUT_INIT_STORAGE(fc, array, stride, entry_offset)               \
+    do {                                                                       \
+        (void)(stride);                                                        \
+        (void)(entry_offset);                                                  \
+        (fc)->pool = (array);                                                  \
+    } while (0)
+#endif
+
+#ifndef FCG_LAYOUT_HASH_BASE
+#define FCG_LAYOUT_HASH_BASE(fc) ((fc)->pool)
+#endif
+
+#ifndef FCG_LAYOUT_ENTRY_PTR
+#define FCG_LAYOUT_ENTRY_PTR(fc, idx)                                          \
+    (((unsigned)(idx) != RIX_NIL) ? &((fc)->pool[(unsigned)(idx) - 1u]) : NULL)
+#endif
+
+#ifndef FCG_LAYOUT_ENTRY_INDEX
+#define FCG_LAYOUT_ENTRY_INDEX(fc, entry) RIX_IDX_FROM_PTR((fc)->pool, (entry))
+#endif
+
+#ifndef FCG_LAYOUT_ENTRY_AT
+#define FCG_LAYOUT_ENTRY_AT(fc, off0) (&((fc)->pool[(off0)]))
+#endif
+
+#ifndef FCG_LAYOUT_ENTRY_CLEAR
+#define FCG_LAYOUT_ENTRY_CLEAR(fc, entry)                                      \
+    memset((entry), 0, sizeof(*(entry)))
+#endif
+
+#ifndef FCG_EVENT_EMIT_ALLOC
+#define FCG_EVENT_EMIT_ALLOC(fc, idx)                                          \
+    do {                                                                       \
+        (void)(fc);                                                            \
+        (void)(idx);                                                           \
+    } while (0)
+#endif
+
+#ifndef FCG_EVENT_EMIT_FREE
+#define FCG_EVENT_EMIT_FREE(fc, idx, reason)                                   \
+    do {                                                                       \
+        (void)(fc);                                                            \
+        (void)(idx);                                                           \
+        (void)(reason);                                                        \
+    } while (0)
+#endif
+
+#ifndef FCG_EVENT_REASON_DELETE
+#define FCG_EVENT_REASON_DELETE 0u
+#endif
+
+#ifndef FCG_EVENT_REASON_TIMEOUT
+#define FCG_EVENT_REASON_TIMEOUT 0u
+#endif
+
+#ifndef FCG_EVENT_REASON_PRESSURE
+#define FCG_EVENT_REASON_PRESSURE 0u
+#endif
+
+#ifndef FCG_EVENT_REASON_OLDEST
+#define FCG_EVENT_REASON_OLDEST 0u
+#endif
+
+#ifndef FCG_EVENT_REASON_FLUSH
+#define FCG_EVENT_REASON_FLUSH 0u
+#endif
+
+#ifndef FCG_EVENT_REASON_ROLLBACK
+#define FCG_EVENT_REASON_ROLLBACK 0u
+#endif
+
 /*===========================================================================
  * SIMD helper binding (file scope, applied to all GENERATE expansions)
  * Prefer AVX-512 helpers in AVX-512 tiers, otherwise fall back to AVX2.
@@ -229,20 +301,30 @@ _FCG_INT(p, relief_empty_slots)(const _FCG_CACHE_T(p) *fc)                \
 static inline _FCG_ENTRY_T(p) *                                            \
 _FCG_INT(p, alloc_entry)(_FCG_CACHE_T(p) *fc)                             \
 {                                                                          \
-    _FCG_ENTRY_T(p) *entry =                                               \
-        RIX_SLIST_FIRST(&fc->free_head, fc->pool);                        \
-    if (RIX_LIKELY(entry != NULL))                                         \
-        RIX_SLIST_REMOVE_HEAD(&fc->free_head, fc->pool, free_link);       \
+    unsigned idx = fc->free_head.rslh_first;                               \
+    _FCG_ENTRY_T(p) *entry;                                                \
+    if (RIX_UNLIKELY(idx == RIX_NIL))                                       \
+        return NULL;                                                       \
+    entry = FCG_LAYOUT_ENTRY_PTR(fc, idx);                                 \
+    RIX_ASSUME_NONNULL(entry);                                             \
+    fc->free_head.rslh_first = entry->free_link.rsle_next;                 \
+    entry->free_link.rsle_next = RIX_NIL;                                  \
+    FCG_EVENT_EMIT_ALLOC(fc, idx);                                         \
     return entry;                                                          \
 }                                                                          \
                                                                            \
 static inline void                                                         \
 _FCG_INT(p, free_entry)(_FCG_CACHE_T(p) *fc,                              \
-                        _FCG_ENTRY_T(p) *entry)                            \
+                        _FCG_ENTRY_T(p) *entry,                            \
+                        unsigned reason)                                   \
 {                                                                          \
+    unsigned idx;                                                          \
     RIX_ASSUME_NONNULL(entry);                                             \
+    idx = FCG_LAYOUT_ENTRY_INDEX(fc, entry);                               \
     entry->last_ts = 0u;                                                   \
-    RIX_SLIST_INSERT_HEAD(&fc->free_head, fc->pool, entry, free_link);    \
+    entry->free_link.rsle_next = fc->free_head.rslh_first;                 \
+    fc->free_head.rslh_first = idx;                                        \
+    FCG_EVENT_EMIT_FREE(fc, idx, reason);                                  \
 }                                                                          \
                                                                            \
 static unsigned                                                            \
@@ -270,7 +352,7 @@ _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
         _FCG_ENTRY_T(p) *entry;                                          \
         if (idx == (unsigned)RIX_NIL)                                      \
             continue;                                                      \
-        entry = _FCG_HT(p, hptr)(fc->pool, idx);                         \
+        entry = FCG_LAYOUT_ENTRY_PTR(fc, idx);                            \
         slots[used] = slot;                                                \
         entries[used] = entry;                                             \
         used++;                                                            \
@@ -315,7 +397,8 @@ _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
 static int                                                                 \
 _FCG_INT(p, reclaim_bucket)(_FCG_CACHE_T(p) *fc,                          \
                             unsigned bk_idx,                               \
-                            uint64_t expire_before)                        \
+                            uint64_t expire_before,                        \
+                            unsigned free_reason)                          \
 {                                                                          \
     _FCG_ENTRY_T(p) *victim;                                              \
     unsigned removed_idx;                                                  \
@@ -329,22 +412,23 @@ _FCG_INT(p, reclaim_bucket)(_FCG_CACHE_T(p) *fc,                          \
     removed_idx = _FCG_HT(p, remove_at)(&fc->ht_head, fc->buckets,         \
                                          bk_idx, (unsigned)victim_slot);   \
     RIX_ASSERT(removed_idx != (unsigned)RIX_NIL);                          \
-    victim = _FCG_HT(p, hptr)(fc->pool, removed_idx);                      \
+    victim = FCG_LAYOUT_ENTRY_PTR(fc, removed_idx);                        \
     RIX_ASSERT(victim != NULL);                                            \
     RIX_ASSUME_NONNULL(victim);                                            \
-    _FCG_INT(p, free_entry)(fc, victim);                                  \
+    _FCG_INT(p, free_entry)(fc, victim, free_reason);                     \
     return 1;                                                              \
 }                                                                          \
                                                                            \
 static int                                                                 \
 _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
-                                   uint64_t now)                           \
+                                   uint64_t now,                           \
+                                   unsigned free_reason)                   \
 {                                                                          \
     uint64_t best_ts = UINT64_MAX;                                         \
     _FCG_ENTRY_T(p) *victim = NULL;                                        \
     fc->stats.oldest_reclaim_calls++;                                      \
     for (unsigned i = 0; i < fc->max_entries; i++) {                       \
-        _FCG_ENTRY_T(p) *entry = &fc->pool[i];                             \
+        _FCG_ENTRY_T(p) *entry = FCG_LAYOUT_ENTRY_AT(fc, i);               \
         if (entry->last_ts == 0u || entry->last_ts == now)                 \
             continue;                                                      \
         if (entry->last_ts < best_ts) {                                    \
@@ -354,11 +438,11 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
     }                                                                      \
     if (victim == NULL)                                                    \
         return 0;                                                          \
-    victim = _FCG_HT(p, remove)(&fc->ht_head, fc->buckets, fc->pool,       \
-                                victim);                                   \
+    victim = _FCG_HT(p, remove)(&fc->ht_head, fc->buckets,                 \
+                                FCG_LAYOUT_HASH_BASE(fc), victim);         \
     RIX_ASSERT(victim != NULL);                                            \
     RIX_ASSUME_NONNULL(victim);                                            \
-    _FCG_INT(p, free_entry)(fc, victim);                                   \
+    _FCG_INT(p, free_entry)(fc, victim, free_reason);                      \
     fc->stats.oldest_reclaim_evictions++;                                  \
     return 1;                                                              \
 }                                                                          \
@@ -366,7 +450,8 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
 static unsigned                                                            \
 _FCG_INT(p, reclaim_bucket_all)(_FCG_CACHE_T(p) *fc,                      \
                                 unsigned bk_idx,                           \
-                                uint64_t expire_before)                    \
+                                uint64_t expire_before,                    \
+                                unsigned free_reason)                      \
 {                                                                          \
     unsigned expired_slots[RIX_HASH_BUCKET_ENTRY_SZ];                      \
     unsigned evicted;                                                      \
@@ -379,10 +464,10 @@ _FCG_INT(p, reclaim_bucket_all)(_FCG_CACHE_T(p) *fc,                      \
         removed_idx = _FCG_HT(p, remove_at)(&fc->ht_head, fc->buckets,     \
                                              bk_idx, expired_slots[i]);    \
         RIX_ASSERT(removed_idx != (unsigned)RIX_NIL);                       \
-        victim = _FCG_HT(p, hptr)(fc->pool, removed_idx);                \
+        victim = FCG_LAYOUT_ENTRY_PTR(fc, removed_idx);                   \
         RIX_ASSERT(victim != NULL);                                        \
         RIX_ASSUME_NONNULL(victim);                                        \
-        _FCG_INT(p, free_entry)(fc, victim);                              \
+        _FCG_INT(p, free_entry)(fc, victim, free_reason);                 \
     }                                                                      \
     return evicted;                                                        \
 }                                                                          \
@@ -411,7 +496,8 @@ _FCG_INT(p, maintain_grouped)(_FCG_CACHE_T(p) *fc,                        \
         rix_hash_prefetch_bucket_idx(&fc->buckets[next_bk]);              \
         fc->stats.maint_bucket_checks++;                                   \
         reclaimed = _FCG_INT(p, reclaim_bucket_all)(fc, cur_bk,           \
-                                                     expire_before);       \
+                                                     expire_before,        \
+                                                     FCG_EVENT_REASON_TIMEOUT); \
         fc->stats.maint_evictions += reclaimed;                            \
         evicted += reclaimed;                                              \
     }                                                                      \
@@ -465,7 +551,8 @@ _FCG_INT(p, maintain_step_filter_reclaim)(                                 \
             rix_hash_prefetch_bucket(                                      \
                 &fc->buckets[work[i + _FC_MAINT_STEP_PREFETCH_AHEAD]]);   \
         reclaimed = _FCG_INT(p, reclaim_bucket_all)(fc, work[i],           \
-                                                     expire_before);       \
+                                                     expire_before,        \
+                                                     FCG_EVENT_REASON_TIMEOUT); \
         fc->stats.maint_evictions += reclaimed;                            \
         evicted += reclaimed;                                              \
     }                                                                      \
@@ -529,7 +616,8 @@ _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
     (void)hits_fp;                                                         \
     if ((unsigned)__builtin_popcount(hits_zero) <=                         \
             pressure_empty_slots &&                                        \
-        _FCG_INT(p, reclaim_bucket)(fc, bk0, expire_before)) {             \
+        _FCG_INT(p, reclaim_bucket)(fc, bk0, expire_before,                \
+                                    FCG_EVENT_REASON_PRESSURE)) {          \
         fc->stats.relief_evictions++;                                      \
         fc->stats.relief_bk0_evictions++;                                  \
         return;                                                            \
@@ -540,7 +628,8 @@ _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
                                      &hits_fp, &hits_zero);                \
         if ((unsigned)__builtin_popcount(hits_zero) <=                     \
                 pressure_empty_slots &&                                    \
-            _FCG_INT(p, reclaim_bucket)(fc, bk1, expire_before)) {         \
+            _FCG_INT(p, reclaim_bucket)(fc, bk1, expire_before,            \
+                                        FCG_EVENT_REASON_PRESSURE)) {      \
             fc->stats.relief_evictions++;                                  \
             fc->stats.relief_bk1_evictions++;                              \
         }                                                                  \
@@ -556,10 +645,6 @@ _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
  *===========================================================================*/
 #ifdef FC_ARCH_SUFFIX
 #define _FC_GENERATE_API_DECLS(p)                                          \
-static void _FCG_API(p, init)(_FCG_CACHE_T(p) *,                           \
-                              struct rix_hash_bucket_s *, unsigned,         \
-                              _FCG_ENTRY_T(p) *, unsigned,                 \
-                              const _FCG_CONFIG_T(p) *);                   \
 static void _FCG_API(p, flush)(_FCG_CACHE_T(p) *);                         \
 static unsigned _FCG_API(p, nb_entries)(const _FCG_CACHE_T(p) *);          \
 static void _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *,                      \
@@ -597,54 +682,19 @@ static int _FCG_API(p, walk)(_FCG_CACHE_T(p) *,                            \
 _FC_GENERATE_API_DECLS(p)                                                  \
                                                                            \
 static void                                                                \
-_FCG_API(p, init)(_FCG_CACHE_T(p) *fc,                                    \
-                  struct rix_hash_bucket_s *buckets,                       \
-                  unsigned nb_bk,                                          \
-                  _FCG_ENTRY_T(p) *pool,                                   \
-                  unsigned max_entries,                                    \
-                  const _FCG_CONFIG_T(p) *cfg)                             \
-{                                                                          \
-    _FCG_CONFIG_T(p) defcfg = {                                            \
-        .timeout_tsc = UINT64_C(1000000),                                  \
-        .pressure_empty_slots = (pressure)                                 \
-    };                                                                     \
-    if (cfg == NULL)                                                       \
-        cfg = &defcfg;                                                     \
-    memset(fc, 0, sizeof(*fc));                                            \
-    memset(buckets, 0, (size_t)nb_bk * sizeof(*buckets));                  \
-    memset(pool, 0, (size_t)max_entries * sizeof(*pool));                  \
-    fc->buckets = buckets;                                                 \
-    fc->pool = pool;                                                       \
-    fc->nb_bk = nb_bk;                                                     \
-    fc->max_entries = max_entries;                                         \
-    fc->total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;                    \
-    fc->timeout_tsc = cfg->timeout_tsc;                                    \
-    fc->eff_timeout_tsc = cfg->timeout_tsc ? cfg->timeout_tsc : 1u;        \
-    fc->pressure_empty_slots = cfg->pressure_empty_slots ?                 \
-        cfg->pressure_empty_slots : (pressure);                            \
-    fc->maint_interval_tsc = cfg->maint_interval_tsc;                      \
-    fc->maint_base_bk = cfg->maint_base_bk ? cfg->maint_base_bk : nb_bk;   \
-    fc->maint_fill_threshold = cfg->maint_fill_threshold;                  \
-    fc->last_maint_tsc = 0u;                                               \
-    fc->last_maint_fills = 0u;                                             \
-    _FCG_INT(p, init_thresholds)(fc);                                     \
-    RIX_SLIST_INIT(&fc->free_head);                                        \
-    _FCG_HT(p, init)(&fc->ht_head, nb_bk);                                 \
-    for (unsigned i = 0; i < max_entries; i++)                             \
-        RIX_SLIST_INSERT_HEAD(&fc->free_head, fc->pool,                    \
-                              &fc->pool[i], free_link);                    \
-}                                                                          \
-                                                                           \
-static void                                                                \
 _FCG_API(p, flush)(_FCG_CACHE_T(p) *fc)                                    \
 {                                                                          \
     memset(fc->buckets, 0, (size_t)fc->nb_bk * sizeof(*fc->buckets));      \
     RIX_SLIST_INIT(&fc->free_head);                                        \
     _FCG_HT(p, init)(&fc->ht_head, fc->nb_bk);                             \
-    for (unsigned i = 0; i < fc->max_entries; i++) {                       \
-        fc->pool[i].last_ts = 0u;                                         \
-        RIX_SLIST_INSERT_HEAD(&fc->free_head, fc->pool,                    \
-                              &fc->pool[i], free_link);                    \
+    for (unsigned i = fc->max_entries; i > 0u; i--) {                      \
+        _FCG_ENTRY_T(p) *entry = FCG_LAYOUT_ENTRY_PTR(fc, i);              \
+        RIX_ASSUME_NONNULL(entry);                                         \
+        if (entry->last_ts != 0u)                                          \
+            FCG_EVENT_EMIT_FREE(fc, i, FCG_EVENT_REASON_FLUSH);            \
+        FCG_LAYOUT_ENTRY_CLEAR(fc, entry);                                 \
+        entry->free_link.rsle_next = fc->free_head.rslh_first;             \
+        fc->free_head.rslh_first = i;                                      \
     }                                                                      \
 }                                                                          \
                                                                            \
@@ -701,7 +751,7 @@ _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *fc,                                \
             for (unsigned j = 0; j < n; j++)                               \
                 _FCG_HT(p, prefetch_node)(                                 \
                     &ctx[(base + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],     \
-                    fc->pool);                                              \
+                    FCG_LAYOUT_HASH_BASE(fc));                              \
         }                                                                  \
         /* Stage 4: cmp_key - hit or miss, no insert */                    \
         if (i >= 3u * ahead_keys &&                                        \
@@ -714,12 +764,12 @@ _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *fc,                                \
                 _FCG_ENTRY_T(p) *entry;                                   \
                 entry = _FCG_HT(p, cmp_key)(                               \
                     &ctx[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)],            \
-                    fc->pool);                                              \
+                    FCG_LAYOUT_HASH_BASE(fc));                              \
                 if (RIX_LIKELY(entry != NULL)) {                           \
                     if (now)                                                \
                         entry->last_ts = now;                              \
                     _FCG_INT(p, result_set_hit)(&results[idx],            \
-                        RIX_IDX_FROM_PTR(fc->pool, entry));                \
+                        FCG_LAYOUT_ENTRY_INDEX(fc, entry));                \
                     hit_count++;                                           \
                 } else {                                                   \
                     _FCG_INT(p, result_set_miss)(&results[idx]);          \
@@ -754,7 +804,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
     /* Prefetch free list head so first miss insert is warm */             \
     {                                                                      \
         _FCG_ENTRY_T(p) *_fh =                                             \
-            RIX_SLIST_FIRST(&fc->free_head, fc->pool);                     \
+            FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first);            \
         if (_fh != NULL)                                                   \
             rix_hash_prefetch_entry(_fh);                                 \
     }                                                                      \
@@ -788,7 +838,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
             for (unsigned j = 0; j < n; j++)                               \
                 _FCG_HT(p, prefetch_node)(                                 \
                     &ctx[(base + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],     \
-                    fc->pool);                                              \
+                    FCG_LAYOUT_HASH_BASE(fc));                              \
         }                                                                  \
         /* Stage 4: cmp_key_empties + inline insert on miss */             \
         if (i >= 3u * ahead_keys &&                                        \
@@ -807,12 +857,12 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                 _FCG_ENTRY_T(p) *entry;                                   \
                 entry = _FCG_HT(p, cmp_key_empties)(                       \
                     &ctx[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)],            \
-                    fc->pool);                                              \
+                    FCG_LAYOUT_HASH_BASE(fc));                              \
                 if (RIX_LIKELY(entry != NULL)) {                           \
                     /* --- HIT --- */                                      \
                     entry->last_ts = now;                                  \
                     _FCG_INT(p, result_set_hit)(&results[idx],            \
-                        RIX_IDX_FROM_PTR(fc->pool, entry));                \
+                        FCG_LAYOUT_ENTRY_INDEX(fc, entry));                \
                     hit_count++;                                           \
                     continue;                                              \
                 }                                                          \
@@ -830,7 +880,8 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                         uint64_t _eb = (now > fc->eff_timeout_tsc) ?       \
                             (now - fc->eff_timeout_tsc) : 0u;             \
                         if (_FCG_INT(p, reclaim_bucket)(               \
-                                fc, _bk0i, _eb)) {                        \
+                                fc, _bk0i, _eb,                          \
+                                FCG_EVENT_REASON_PRESSURE)) {             \
                             fc->stats.relief_evictions++;                  \
                             fc->stats.relief_bk0_evictions++;              \
                         } else {                                           \
@@ -839,7 +890,8 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                                     ctx[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)].empties[1]) <= _pe && \
                                 _bk1i != _bk0i &&                          \
                                 _FCG_INT(p, reclaim_bucket)(           \
-                                    fc, _bk1i, _eb)) {                     \
+                                    fc, _bk1i, _eb,                      \
+                                    FCG_EVENT_REASON_PRESSURE)) {         \
                                 fc->stats.relief_evictions++;              \
                                 fc->stats.relief_bk1_evictions++;          \
                             }                                              \
@@ -849,7 +901,8 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                 /* Alloc from free list (head already prefetched) */       \
                 entry = _FCG_INT(p, alloc_entry)(fc);                     \
                 if (RIX_UNLIKELY(entry == NULL) &&                         \
-                    _FCG_INT(p, reclaim_oldest_global)(fc, now))           \
+                    _FCG_INT(p, reclaim_oldest_global)(                    \
+                        fc, now, FCG_EVENT_REASON_OLDEST))                 \
                     entry = _FCG_INT(p, alloc_entry)(fc);                  \
                 if (RIX_UNLIKELY(entry == NULL)) {                         \
                     fc->stats.fill_full++;                                 \
@@ -863,35 +916,40 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_ret;                                \
                     _ret = _FCG_HT(p, insert_hashed)(                     \
-                        &fc->ht_head, fc->buckets, fc->pool,              \
+                        &fc->ht_head, fc->buckets,                        \
+                        FCG_LAYOUT_HASH_BASE(fc),                         \
                         entry, ctx[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)].hash); \
                     if (RIX_LIKELY(_ret == NULL)) {                        \
                         fc->stats.fills++;                                 \
                         _FCG_INT(p, result_set_filled)(&results[idx],     \
-                            RIX_IDX_FROM_PTR(fc->pool, entry));            \
+                            FCG_LAYOUT_ENTRY_INDEX(fc, entry));            \
                     } else {                                               \
                         if (_ret == entry &&                               \
-                            _FCG_INT(p, reclaim_oldest_global)(fc, now))   \
+                            _FCG_INT(p, reclaim_oldest_global)(            \
+                                fc, now, FCG_EVENT_REASON_OLDEST))         \
                             _ret = _FCG_HT(p, insert_hashed)(             \
-                                &fc->ht_head, fc->buckets, fc->pool,       \
+                                &fc->ht_head, fc->buckets,                 \
+                                FCG_LAYOUT_HASH_BASE(fc),                  \
                                 entry,                                     \
                                 ctx[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)].hash); \
                         if (_ret == NULL) {                                \
                             fc->stats.fills++;                             \
                             _FCG_INT(p, result_set_filled)(&results[idx], \
-                                RIX_IDX_FROM_PTR(fc->pool, entry));        \
+                                FCG_LAYOUT_ENTRY_INDEX(fc, entry));        \
                         } else if (_ret != entry) {                        \
                             RIX_ASSUME_NONNULL(entry);                     \
-                            _FCG_INT(p, free_entry)(fc, entry);           \
+                            _FCG_INT(p, free_entry)(fc, entry,            \
+                                                    FCG_EVENT_REASON_ROLLBACK); \
                             /* duplicate found */                          \
                             RIX_ASSUME_NONNULL(_ret);                      \
                             _ret->last_ts = now;                           \
                             _FCG_INT(p, result_set_filled)(               \
                                 &results[idx],                              \
-                                RIX_IDX_FROM_PTR(fc->pool, _ret));         \
+                                FCG_LAYOUT_ENTRY_INDEX(fc, _ret));         \
                         } else {                                           \
                             RIX_ASSUME_NONNULL(entry);                     \
-                            _FCG_INT(p, free_entry)(fc, entry);           \
+                            _FCG_INT(p, free_entry)(fc, entry,            \
+                                                    FCG_EVENT_REASON_ROLLBACK); \
                             /* table full */                               \
                             fc->stats.fill_full++;                         \
                             _FCG_INT(p, result_set_miss)(                 \
@@ -902,7 +960,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                 /* Prefetch next free list head for future miss */         \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_nf =                                \
-                        RIX_SLIST_FIRST(&fc->free_head, fc->pool);        \
+                        FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first); \
                     if (_nf != NULL)                                       \
                         rix_hash_prefetch_entry(_nf);                     \
                 }                                                          \
@@ -986,13 +1044,13 @@ _FCG_API(p, remove_idx)(_FCG_CACHE_T(p) *fc, uint32_t entry_idx)        \
     _FCG_ENTRY_T(p) *entry;                                               \
     if (RIX_UNLIKELY(entry_idx == 0u || entry_idx > fc->max_entries))      \
         return 0;                                                          \
-    entry = RIX_PTR_FROM_IDX(fc->pool, entry_idx);                         \
+    entry = FCG_LAYOUT_ENTRY_PTR(fc, entry_idx);                           \
     if (entry == NULL)                                                     \
         return 0;                                                          \
     if (_FCG_HT(p, remove)(&fc->ht_head, fc->buckets,                    \
-                            fc->pool, entry) == NULL)                      \
+                           FCG_LAYOUT_HASH_BASE(fc), entry) == NULL)       \
         return 0;                                                          \
-    _FCG_INT(p, free_entry)(fc, entry);                                   \
+    _FCG_INT(p, free_entry)(fc, entry, FCG_EVENT_REASON_DELETE);          \
     return 1;                                                              \
 }                                                                          \
                                                                            \
@@ -1008,7 +1066,7 @@ _FCG_API(p, walk)(_FCG_CACHE_T(p) *fc,                                  \
                    int (*cb)(uint32_t entry_idx, void *arg), void *arg)    \
 {                                                                          \
     for (unsigned i = 0; i < fc->max_entries; i++) {                       \
-        if (fc->pool[i].last_ts != 0u) {                                  \
+        if (FCG_LAYOUT_ENTRY_AT(fc, i)->last_ts != 0u) {                  \
             int rc = cb(i + 1u, arg);                                      \
             if (rc < 0)                                                    \
                 return rc;                                                 \
@@ -1032,7 +1090,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
     /* Prefetch free list head */                                          \
     {                                                                      \
         _FCG_ENTRY_T(p) *_fh =                                           \
-            RIX_SLIST_FIRST(&fc->free_head, fc->pool);                    \
+            FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first);           \
         if (_fh != NULL)                                                   \
             rix_hash_prefetch_entry(_fh);                                 \
     }                                                                      \
@@ -1068,7 +1126,8 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 _FCG_ENTRY_T(p) *entry =                                  \
                     _FCG_INT(p, alloc_entry)(fc);                          \
                 if (RIX_UNLIKELY(entry == NULL) &&                         \
-                    _FCG_INT(p, reclaim_oldest_global)(fc, now))           \
+                    _FCG_INT(p, reclaim_oldest_global)(                    \
+                        fc, now, FCG_EVENT_REASON_OLDEST))                 \
                     entry = _FCG_INT(p, alloc_entry)(fc);                  \
                 if (RIX_UNLIKELY(entry == NULL)) {                         \
                     fc->stats.fill_full++;                                 \
@@ -1080,34 +1139,39 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_ret;                                \
                     _ret = _FCG_HT(p, insert_hashed)(                     \
-                        &fc->ht_head, fc->buckets, fc->pool,              \
+                        &fc->ht_head, fc->buckets,                        \
+                        FCG_LAYOUT_HASH_BASE(fc),                         \
                         entry, hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)]); \
                     if (RIX_LIKELY(_ret == NULL)) {                        \
                         fc->stats.fills++;                                 \
                         _FCG_INT(p, result_set_filled)(&results[idx],     \
-                            RIX_IDX_FROM_PTR(fc->pool, entry));            \
+                            FCG_LAYOUT_ENTRY_INDEX(fc, entry));            \
                     } else {                                               \
                         if (_ret == entry &&                               \
-                            _FCG_INT(p, reclaim_oldest_global)(fc, now))   \
+                            _FCG_INT(p, reclaim_oldest_global)(            \
+                                fc, now, FCG_EVENT_REASON_OLDEST))         \
                             _ret = _FCG_HT(p, insert_hashed)(             \
-                                &fc->ht_head, fc->buckets, fc->pool,       \
+                                &fc->ht_head, fc->buckets,                 \
+                                FCG_LAYOUT_HASH_BASE(fc),                  \
                                 entry,                                     \
                                 hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)]); \
                         if (_ret == NULL) {                                \
                             fc->stats.fills++;                             \
                             _FCG_INT(p, result_set_filled)(&results[idx], \
-                                RIX_IDX_FROM_PTR(fc->pool, entry));        \
+                                FCG_LAYOUT_ENTRY_INDEX(fc, entry));        \
                         } else if (_ret != entry) {                        \
                             RIX_ASSUME_NONNULL(entry);                     \
-                            _FCG_INT(p, free_entry)(fc, entry);           \
+                            _FCG_INT(p, free_entry)(fc, entry,            \
+                                                    FCG_EVENT_REASON_ROLLBACK); \
                             RIX_ASSUME_NONNULL(_ret);                      \
                             _ret->last_ts = now;                           \
                             _FCG_INT(p, result_set_filled)(               \
                                 &results[idx],                              \
-                                RIX_IDX_FROM_PTR(fc->pool, _ret));         \
+                                FCG_LAYOUT_ENTRY_INDEX(fc, _ret));         \
                         } else {                                           \
                             RIX_ASSUME_NONNULL(entry);                     \
-                            _FCG_INT(p, free_entry)(fc, entry);           \
+                            _FCG_INT(p, free_entry)(fc, entry,            \
+                                                    FCG_EVENT_REASON_ROLLBACK); \
                             fc->stats.fill_full++;                         \
                             _FCG_INT(p, result_set_miss)(                 \
                                 &results[idx]);                             \
@@ -1117,7 +1181,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 /* Prefetch next free list head */                         \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_nf =                                \
-                        RIX_SLIST_FIRST(&fc->free_head, fc->pool);        \
+                        FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first); \
                     if (_nf != NULL)                                       \
                         rix_hash_prefetch_entry(_nf);                     \
                 }                                                          \
@@ -1170,7 +1234,7 @@ _FCG_API(p, del_bulk)(_FCG_CACHE_T(p) *fc,                              \
             for (unsigned j = 0; j < n; j++)                               \
                 _FCG_HT(p, prefetch_node)(                                 \
                     &ctx[(base + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],     \
-                    fc->pool);                                              \
+                    FCG_LAYOUT_HASH_BASE(fc));                              \
         }                                                                  \
         /* Stage 4: cmp_key + remove on hit */                             \
         if (i >= 3u * ahead_keys &&                                        \
@@ -1183,11 +1247,12 @@ _FCG_API(p, del_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 _FCG_ENTRY_T(p) *entry;                                   \
                 entry = _FCG_HT(p, cmp_key)(                               \
                     &ctx[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)],            \
-                    fc->pool);                                              \
+                    FCG_LAYOUT_HASH_BASE(fc));                              \
                 if (entry != NULL) {                                       \
                     _FCG_HT(p, remove)(&fc->ht_head, fc->buckets,        \
-                                        fc->pool, entry);                  \
-                    _FCG_INT(p, free_entry)(fc, entry);                   \
+                                        FCG_LAYOUT_HASH_BASE(fc), entry);  \
+                    _FCG_INT(p, free_entry)(fc, entry,                    \
+                                            FCG_EVENT_REASON_DELETE);      \
                 }                                                          \
             }                                                              \
         }                                                                  \
@@ -1213,7 +1278,7 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
                 if (idxs[i + j] != 0u &&                                   \
                     idxs[i + j] <= fc->max_entries)                        \
                     rix_hash_prefetch_entry(                              \
-                        RIX_PTR_FROM_IDX(fc->pool, idxs[i + j]));         \
+                        FCG_LAYOUT_ENTRY_PTR(fc, idxs[i + j]));           \
             }                                                              \
         }                                                                  \
         /* Stage 2: remove */                                              \
@@ -1226,12 +1291,13 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
                 _FCG_ENTRY_T(p) *entry;                                   \
                 if (eidx == 0u || eidx > fc->max_entries)                  \
                     continue;                                              \
-                entry = RIX_PTR_FROM_IDX(fc->pool, eidx);                  \
+                entry = FCG_LAYOUT_ENTRY_PTR(fc, eidx);                    \
                 if (entry == NULL || entry->last_ts == 0u)                 \
                     continue;                                              \
                 _FCG_HT(p, remove)(&fc->ht_head, fc->buckets,            \
-                                    fc->pool, entry);                      \
-                _FCG_INT(p, free_entry)(fc, entry);                       \
+                                    FCG_LAYOUT_HASH_BASE(fc), entry);      \
+                _FCG_INT(p, free_entry)(fc, entry,                        \
+                                        FCG_EVENT_REASON_DELETE);          \
             }                                                              \
         }                                                                  \
     }                                                                      \
@@ -1284,7 +1350,6 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
 
 #define FC_OPS_TABLE(prefix, suffix)                                           \
 const struct fc_##prefix##_ops _FC_OPS_TNAME(prefix, suffix) = {               \
-    .init             = _FC_OPS_FNAME(prefix, init),                           \
     .flush            = _FC_OPS_FNAME(prefix, flush),                          \
     .nb_entries       = _FC_OPS_FNAME(prefix, nb_entries),                     \
     .remove_idx       = _FC_OPS_FNAME(prefix, remove_idx),                     \

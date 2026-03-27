@@ -130,10 +130,27 @@ struct fc_flowu_stats {
     uint64_t maint_step_skipped_bks;
 };
 
+enum fc_flowu_event {
+    FC_FLOWU_EVENT_ALLOC = 1u,
+    FC_FLOWU_EVENT_FREE_DELETE,
+    FC_FLOWU_EVENT_FREE_TIMEOUT,
+    FC_FLOWU_EVENT_FREE_PRESSURE,
+    FC_FLOWU_EVENT_FREE_OLDEST,
+    FC_FLOWU_EVENT_FREE_FLUSH,
+    FC_FLOWU_EVENT_FREE_ROLLBACK,
+};
+
+typedef void (*fc_flowu_event_cb)(enum fc_flowu_event event,
+                                  uint32_t entry_idx,
+                                  void *arg);
+
 struct fc_flowu_cache {
     /* --- CL0: lookup / fill hot path --- */
     struct rix_hash_bucket_s  *buckets;
     struct fc_flowu_entry    *pool;
+    unsigned char            *pool_base;
+    size_t                    pool_stride;
+    size_t                    pool_entry_offset;
     struct fc_flowu_ht        ht_head;
     uint64_t                   timeout_tsc;
     uint64_t                   eff_timeout_tsc;
@@ -155,6 +172,8 @@ struct fc_flowu_cache {
     unsigned                   maint_fill_threshold;
     unsigned                   last_maint_start_bk;
     unsigned                   last_maint_sweep_bk;
+    fc_flowu_event_cb          event_cb;
+    void                      *event_cb_arg;
     struct rix_hash_find_ctx_s *bulk_ctx;
     unsigned                   bulk_ctx_count;
     struct fc_flowu_free_head free_head;
@@ -178,6 +197,81 @@ void fc_flowu_cache_init(struct fc_flowu_cache *fc,
                           struct fc_flowu_entry *pool,
                           unsigned max_entries,
                           const struct fc_flowu_config *cfg);
+void fc_flowu_cache_init_ex(struct fc_flowu_cache *fc,
+                            struct rix_hash_bucket_s *buckets,
+                            unsigned nb_bk,
+                            void *array,
+                            unsigned max_entries,
+                            size_t stride,
+                            size_t entry_offset,
+                            const struct fc_flowu_config *cfg);
+void fc_flowu_cache_set_event_cb(struct fc_flowu_cache *fc,
+                                 fc_flowu_event_cb cb,
+                                 void *arg);
+
+static inline void *
+fc_flowu_cache_record_ptr(struct fc_flowu_cache *fc, uint32_t entry_idx)
+{
+    if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
+        return NULL;
+    return (void *)(fc->pool_base
+                    + ((size_t)(entry_idx - 1u) * fc->pool_stride));
+}
+
+static inline const void *
+fc_flowu_cache_record_cptr(const struct fc_flowu_cache *fc, uint32_t entry_idx)
+{
+    if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
+        return NULL;
+    return (const void *)(fc->pool_base
+                          + ((size_t)(entry_idx - 1u) * fc->pool_stride));
+}
+
+static inline struct fc_flowu_entry *
+fc_flowu_cache_entry_ptr(struct fc_flowu_cache *fc, uint32_t entry_idx)
+{
+    unsigned char *rec = (unsigned char *)fc_flowu_cache_record_ptr(fc,
+                                                                    entry_idx);
+    void *entryp;
+
+    if (rec == NULL)
+        return NULL;
+    entryp = __builtin_assume_aligned(rec + fc->pool_entry_offset,
+                                      _Alignof(struct fc_flowu_entry));
+    return (struct fc_flowu_entry *)entryp;
+}
+
+static inline const struct fc_flowu_entry *
+fc_flowu_cache_entry_cptr(const struct fc_flowu_cache *fc, uint32_t entry_idx)
+{
+    const unsigned char *rec =
+        (const unsigned char *)fc_flowu_cache_record_cptr(fc, entry_idx);
+    const void *entryp;
+
+    if (rec == NULL)
+        return NULL;
+    entryp = __builtin_assume_aligned(rec + fc->pool_entry_offset,
+                                      _Alignof(struct fc_flowu_entry));
+    return (const struct fc_flowu_entry *)entryp;
+}
+
+static inline size_t
+fc_flowu_cache_record_stride(const struct fc_flowu_cache *fc)
+{
+    return fc != NULL ? fc->pool_stride : 0u;
+}
+
+static inline size_t
+fc_flowu_cache_entry_offset(const struct fc_flowu_cache *fc)
+{
+    return fc != NULL ? fc->pool_entry_offset : 0u;
+}
+
+#define FC_FLOWU_CACHE_RECORD_PTR_AS(fc, type, entry_idx) \
+    ((type *)fc_flowu_cache_record_ptr((fc), (entry_idx)))
+
+#define FC_FLOWU_CACHE_RECORD_CPTR_AS(fc, type, entry_idx) \
+    ((const type *)fc_flowu_cache_record_cptr((fc), (entry_idx)))
 
 static inline int
 fc_flowu_cache_init_attr(struct fc_cache_size_attr *attr,
