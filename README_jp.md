@@ -764,7 +764,8 @@ void *my_body = rec + my_body_offset;
 CPU 依存で、この Zen 4 実測でも強制 `avx512` は一部の datapath では改善し、
 別の datapath では悪化しました。README に載せる数値は Zen 4 上の参考値です。
 
-詳細な API、性能表、backend 別検証手順、設計ノートは
+helper 名の詳しい説明や `fcache` 固有の API、性能表、backend 別検証手順、
+設計ノートは
 [samples/README_JP.md](samples/README_JP.md) を参照してください。
 
 ---

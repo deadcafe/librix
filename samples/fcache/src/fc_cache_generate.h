@@ -82,6 +82,44 @@
     memset((entry), 0, sizeof(*(entry)))
 #endif
 
+#ifndef FCG_FREE_LIST_INIT
+#define FCG_FREE_LIST_INIT(fc)                                                 \
+    RIX_SLIST_INIT(&(fc)->free_head)
+#endif
+
+#ifndef FCG_FREE_LIST_FIRST_IDX
+#define FCG_FREE_LIST_FIRST_IDX(fc)                                            \
+    ((fc)->free_head.rslh_first)
+#endif
+
+#ifndef FCG_FREE_LIST_FIRST_PTR
+#define FCG_FREE_LIST_FIRST_PTR(fc)                                            \
+    FCG_LAYOUT_ENTRY_PTR((fc), FCG_FREE_LIST_FIRST_IDX(fc))
+#endif
+
+#ifndef FCG_FREE_LIST_PUSH_ENTRY
+#define FCG_FREE_LIST_PUSH_ENTRY(fc, entry, idx)                               \
+    do {                                                                       \
+        (entry)->free_link.rsle_next = FCG_FREE_LIST_FIRST_IDX(fc);            \
+        (fc)->free_head.rslh_first = (idx);                                    \
+    } while (0)
+#endif
+
+#ifndef FCG_FREE_LIST_POP_ENTRY
+#define FCG_FREE_LIST_POP_ENTRY(fc, entry, idx)                                \
+    do {                                                                       \
+        (idx) = FCG_FREE_LIST_FIRST_IDX(fc);                                   \
+        if ((idx) != RIX_NIL) {                                                \
+            (entry) = FCG_LAYOUT_ENTRY_PTR((fc), (idx));                       \
+            RIX_ASSUME_NONNULL(entry);                                         \
+            (fc)->free_head.rslh_first = (entry)->free_link.rsle_next;         \
+            (entry)->free_link.rsle_next = RIX_NIL;                            \
+        } else {                                                               \
+            (entry) = NULL;                                                    \
+        }                                                                      \
+    } while (0)
+#endif
+
 #ifndef FCG_EVENT_EMIT_ALLOC
 #define FCG_EVENT_EMIT_ALLOC(fc, idx)                                          \
     do {                                                                       \
@@ -301,14 +339,11 @@ _FCG_INT(p, relief_empty_slots)(const _FCG_CACHE_T(p) *fc)                \
 static inline _FCG_ENTRY_T(p) *                                            \
 _FCG_INT(p, alloc_entry)(_FCG_CACHE_T(p) *fc)                             \
 {                                                                          \
-    unsigned idx = fc->free_head.rslh_first;                               \
+    unsigned idx;                                                           \
     _FCG_ENTRY_T(p) *entry;                                                \
+    FCG_FREE_LIST_POP_ENTRY(fc, entry, idx);                               \
     if (RIX_UNLIKELY(idx == RIX_NIL))                                       \
         return NULL;                                                       \
-    entry = FCG_LAYOUT_ENTRY_PTR(fc, idx);                                 \
-    RIX_ASSUME_NONNULL(entry);                                             \
-    fc->free_head.rslh_first = entry->free_link.rsle_next;                 \
-    entry->free_link.rsle_next = RIX_NIL;                                  \
     FCG_EVENT_EMIT_ALLOC(fc, idx);                                         \
     return entry;                                                          \
 }                                                                          \
@@ -321,10 +356,9 @@ _FCG_INT(p, free_entry)(_FCG_CACHE_T(p) *fc,                              \
     unsigned idx;                                                          \
     RIX_ASSUME_NONNULL(entry);                                             \
     idx = FCG_LAYOUT_ENTRY_INDEX(fc, entry);                               \
-    entry->last_ts = 0u;                                                   \
-    entry->free_link.rsle_next = fc->free_head.rslh_first;                 \
-    fc->free_head.rslh_first = idx;                                        \
     FCG_EVENT_EMIT_FREE(fc, idx, reason);                                  \
+    entry->last_ts = 0u;                                                   \
+    FCG_FREE_LIST_PUSH_ENTRY(fc, entry, idx);                              \
 }                                                                          \
                                                                            \
 static unsigned                                                            \
@@ -685,7 +719,7 @@ static void                                                                \
 _FCG_API(p, flush)(_FCG_CACHE_T(p) *fc)                                    \
 {                                                                          \
     memset(fc->buckets, 0, (size_t)fc->nb_bk * sizeof(*fc->buckets));      \
-    RIX_SLIST_INIT(&fc->free_head);                                        \
+    FCG_FREE_LIST_INIT(fc);                                                \
     _FCG_HT(p, init)(&fc->ht_head, fc->nb_bk);                             \
     for (unsigned i = fc->max_entries; i > 0u; i--) {                      \
         _FCG_ENTRY_T(p) *entry = FCG_LAYOUT_ENTRY_PTR(fc, i);              \
@@ -693,8 +727,7 @@ _FCG_API(p, flush)(_FCG_CACHE_T(p) *fc)                                    \
         if (entry->last_ts != 0u)                                          \
             FCG_EVENT_EMIT_FREE(fc, i, FCG_EVENT_REASON_FLUSH);            \
         FCG_LAYOUT_ENTRY_CLEAR(fc, entry);                                 \
-        entry->free_link.rsle_next = fc->free_head.rslh_first;             \
-        fc->free_head.rslh_first = i;                                      \
+        FCG_FREE_LIST_PUSH_ENTRY(fc, entry, i);                            \
     }                                                                      \
 }                                                                          \
                                                                            \
@@ -803,8 +836,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
     const unsigned total = nb_keys + 3u * ahead_keys;                      \
     /* Prefetch free list head so first miss insert is warm */             \
     {                                                                      \
-        _FCG_ENTRY_T(p) *_fh =                                             \
-            FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first);            \
+        _FCG_ENTRY_T(p) *_fh = FCG_FREE_LIST_FIRST_PTR(fc);                \
         if (_fh != NULL)                                                   \
             rix_hash_prefetch_entry(_fh);                                 \
     }                                                                      \
@@ -959,8 +991,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                 }                                                          \
                 /* Prefetch next free list head for future miss */         \
                 {                                                          \
-                    _FCG_ENTRY_T(p) *_nf =                                \
-                        FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first); \
+                    _FCG_ENTRY_T(p) *_nf = FCG_FREE_LIST_FIRST_PTR(fc);    \
                     if (_nf != NULL)                                       \
                         rix_hash_prefetch_entry(_nf);                     \
                 }                                                          \
@@ -1089,8 +1120,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
     union rix_hash_hash_u hashes[FC_CACHE_BULK_CTX_COUNT];                 \
     /* Prefetch free list head */                                          \
     {                                                                      \
-        _FCG_ENTRY_T(p) *_fh =                                           \
-            FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first);           \
+        _FCG_ENTRY_T(p) *_fh = FCG_FREE_LIST_FIRST_PTR(fc);                \
         if (_fh != NULL)                                                   \
             rix_hash_prefetch_entry(_fh);                                 \
     }                                                                      \
@@ -1180,8 +1210,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 }                                                          \
                 /* Prefetch next free list head */                         \
                 {                                                          \
-                    _FCG_ENTRY_T(p) *_nf =                                \
-                        FCG_LAYOUT_ENTRY_PTR(fc, fc->free_head.rslh_first); \
+                    _FCG_ENTRY_T(p) *_nf = FCG_FREE_LIST_FIRST_PTR(fc);    \
                     if (_nf != NULL)                                       \
                         rix_hash_prefetch_entry(_nf);                     \
                 }                                                          \

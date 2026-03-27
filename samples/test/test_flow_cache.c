@@ -1191,9 +1191,8 @@ test_flow4_init_ex_and_event_cb(void)
         users[i].body.touch = 0u;
     }
 
-    fc_flow4_cache_init_ex(&fc, buckets, NB_BK, users, MAX_ENTRIES,
-                           sizeof(users[0]),
-                           offsetof(struct test_flow4_user, entry), NULL);
+    FC_FLOW4_CACHE_INIT_TYPED(&fc, buckets, NB_BK, users, MAX_ENTRIES,
+                              struct test_flow4_user, entry, NULL);
     for (unsigned i = 0; i < MAX_ENTRIES; i++) {
         if (users[i].body.cookie != 0xabc00000u + i)
             FAILF("init_ex cookie[%u]=0x%08x expected 0x%08x",
@@ -1216,6 +1215,13 @@ test_flow4_init_ex_and_event_cb(void)
         FAIL("event callback should report alloc idx");
     if (users[result.entry_idx - 1u].body.allocs != 1u)
         FAIL("alloc callback should touch the matching user slot");
+    if (FC_FLOW4_CACHE_RECORD_FROM_ENTRY(struct test_flow4_user, entry,
+                                         fc_flow4_cache_entry_ptr(&fc, result.entry_idx))
+        != &users[result.entry_idx - 1u])
+        FAIL("record_from_entry should recover the owning flow4 user record");
+    if (FC_FLOW4_CACHE_ENTRY_FROM_RECORD(&users[result.entry_idx - 1u], entry)
+        != fc_flow4_cache_entry_ptr(&fc, result.entry_idx))
+        FAIL("entry_from_record should return the embedded flow4 entry");
     if (users[result.entry_idx - 1u].body.last_event != FC_FLOW4_EVENT_ALLOC ||
         users[result.entry_idx - 1u].body.touch == 0u)
         FAIL("alloc callback should write user body state");
@@ -1274,7 +1280,8 @@ struct test_flow4_var_ctx {
 static inline struct test_flow4_var_hdr *
 test_flow4_var_hdr_ptr(unsigned char *rec)
 {
-    void *p = __builtin_assume_aligned(rec + TEST_FLOW4_VAR_BODY_OFF,
+    void *p = __builtin_assume_aligned(FC_BYTE_PTR_ADD(rec,
+                                                       TEST_FLOW4_VAR_BODY_OFF),
                                        _Alignof(struct test_flow4_var_hdr));
     return (struct test_flow4_var_hdr *)p;
 }
@@ -1291,7 +1298,7 @@ test_flow4_var_event_cb(enum fc_flow4_event event, uint32_t entry_idx, void *arg
     if (rec == NULL)
         return;
     hdr = test_flow4_var_hdr_ptr(rec);
-    body = rec + TEST_FLOW4_VAR_BODY_OFF;
+    body = FC_BYTE_PTR_ADD(rec, TEST_FLOW4_VAR_BODY_OFF);
     ctx->last_idx = entry_idx;
     ctx->last_event = event;
     if (event == FC_FLOW4_EVENT_ALLOC) {
@@ -1440,9 +1447,8 @@ test_flow6_init_ex_and_event_cb(void)
         users[i].body.touch = 0u;
     }
 
-    fc_flow6_cache_init_ex(&fc, buckets, NB_BK, users, MAX_ENTRIES,
-                           sizeof(users[0]),
-                           offsetof(struct test_flow6_user, entry), NULL);
+    FC_FLOW6_CACHE_INIT_TYPED(&fc, buckets, NB_BK, users, MAX_ENTRIES,
+                              struct test_flow6_user, entry, NULL);
     for (unsigned i = 0; i < MAX_ENTRIES; i++) {
         if (users[i].body.cookie != 0xdef00000u + i)
             FAILF("flow6 init_ex cookie[%u]=0x%08x expected 0x%08x",
@@ -1465,6 +1471,13 @@ test_flow6_init_ex_and_event_cb(void)
         FAIL("flow6 event callback should report alloc idx");
     if (users[result.entry_idx - 1u].body.allocs != 1u)
         FAIL("flow6 alloc callback should touch the matching user slot");
+    if (FC_FLOW6_CACHE_RECORD_FROM_ENTRY(struct test_flow6_user, entry,
+                                         fc_flow6_cache_entry_ptr(&fc, result.entry_idx))
+        != &users[result.entry_idx - 1u])
+        FAIL("record_from_entry should recover the owning flow6 user record");
+    if (FC_FLOW6_CACHE_ENTRY_FROM_RECORD(&users[result.entry_idx - 1u], entry)
+        != fc_flow6_cache_entry_ptr(&fc, result.entry_idx))
+        FAIL("entry_from_record should return the embedded flow6 entry");
     if (users[result.entry_idx - 1u].body.last_event != FC_FLOW6_EVENT_ALLOC ||
         users[result.entry_idx - 1u].body.touch == 0u)
         FAIL("flow6 alloc callback should write user body state");
@@ -1555,9 +1568,8 @@ test_flowu_init_ex_and_event_cb(void)
         users[i].body.touch = 0u;
     }
 
-    fc_flowu_cache_init_ex(&fc, buckets, NB_BK, users, MAX_ENTRIES,
-                           sizeof(users[0]),
-                           offsetof(struct test_flowu_user, entry), NULL);
+    FC_FLOWU_CACHE_INIT_TYPED(&fc, buckets, NB_BK, users, MAX_ENTRIES,
+                              struct test_flowu_user, entry, NULL);
     for (unsigned i = 0; i < MAX_ENTRIES; i++) {
         if (users[i].body.cookie != 0x12340000u + i)
             FAILF("flowu init_ex cookie[%u]=0x%08x expected 0x%08x",
@@ -1580,6 +1592,13 @@ test_flowu_init_ex_and_event_cb(void)
         FAIL("flowu event callback should report alloc idx");
     if (users[result.entry_idx - 1u].body.allocs != 1u)
         FAIL("flowu alloc callback should touch the matching user slot");
+    if (FC_FLOWU_CACHE_RECORD_FROM_ENTRY(struct test_flowu_user, entry,
+                                         fc_flowu_cache_entry_ptr(&fc, result.entry_idx))
+        != &users[result.entry_idx - 1u])
+        FAIL("record_from_entry should recover the owning flowu user record");
+    if (FC_FLOWU_CACHE_ENTRY_FROM_RECORD(&users[result.entry_idx - 1u], entry)
+        != fc_flowu_cache_entry_ptr(&fc, result.entry_idx))
+        FAIL("entry_from_record should return the embedded flowu entry");
     if (users[result.entry_idx - 1u].body.last_event != FC_FLOWU_EVENT_ALLOC ||
         users[result.entry_idx - 1u].body.touch == 0u)
         FAIL("flowu alloc callback should write user body state");

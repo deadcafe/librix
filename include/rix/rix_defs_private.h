@@ -163,7 +163,8 @@ rix_ptr_from_idx_valid_(void *base, size_t elem_size, unsigned i)
 /* container_of: get struct pointer from pointer to its member. */
 #  ifndef RIX_CONTAINER_OF
 #    define RIX_CONTAINER_OF(ptr, type, member) \
-    ((type *)((char *)(ptr) - RIX_OFFSET_OF(type, member)))
+    ((type *)__builtin_assume_aligned( \
+        (void *)((char *)(ptr) - RIX_OFFSET_OF(type, member)), _Alignof(type)))
 #  endif
 
 /* Swap two variables of the same type. */

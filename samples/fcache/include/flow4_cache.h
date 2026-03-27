@@ -299,6 +299,10 @@ void fc_flow4_cache_set_event_cb(struct fc_flow4_cache *fc,
                                  fc_flow4_event_cb cb,
                                  void *arg);
 
+#define FC_FLOW4_CACHE_INIT_TYPED(fc, buckets, nb_bk, array, max_entries, type, member, cfg) \
+    fc_flow4_cache_init_ex((fc), (buckets), (nb_bk), (array), (max_entries),  \
+                           sizeof(type), offsetof(type, member), (cfg))
+
 /**
  * @brief Return the base address of the user record that owns @p entry_idx.
  *
@@ -317,8 +321,7 @@ fc_flow4_cache_record_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
-    return (void *)(fc->pool_base
-                    + ((size_t)(entry_idx - 1u) * fc->pool_stride));
+    return FC_RECORD_PTR(fc->pool_base, fc->pool_stride, entry_idx);
 }
 
 static inline const void *
@@ -326,8 +329,7 @@ fc_flow4_cache_record_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
-    return (const void *)(fc->pool_base
-                          + ((size_t)(entry_idx - 1u) * fc->pool_stride));
+    return FC_RECORD_CPTR(fc->pool_base, fc->pool_stride, entry_idx);
 }
 
 /**
@@ -343,29 +345,20 @@ fc_flow4_cache_record_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
 static inline struct fc_flow4_entry *
 fc_flow4_cache_entry_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
 {
-    unsigned char *rec = (unsigned char *)fc_flow4_cache_record_ptr(fc,
-                                                                    entry_idx);
-    void *entryp;
-
-    if (rec == NULL)
+    if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
-    entryp = __builtin_assume_aligned(rec + fc->pool_entry_offset,
-                                      _Alignof(struct fc_flow4_entry));
-    return (struct fc_flow4_entry *)entryp;
+    return FC_RECORD_MEMBER_PTR(fc->pool_base, fc->pool_stride, entry_idx,
+                                fc->pool_entry_offset, struct fc_flow4_entry);
 }
 
 static inline const struct fc_flow4_entry *
 fc_flow4_cache_entry_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
 {
-    const unsigned char *rec =
-        (const unsigned char *)fc_flow4_cache_record_cptr(fc, entry_idx);
-    const void *entryp;
-
-    if (rec == NULL)
+    if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
-    entryp = __builtin_assume_aligned(rec + fc->pool_entry_offset,
-                                      _Alignof(struct fc_flow4_entry));
-    return (const struct fc_flow4_entry *)entryp;
+    return FC_RECORD_MEMBER_CPTR(fc->pool_base, fc->pool_stride, entry_idx,
+                                 fc->pool_entry_offset,
+                                 struct fc_flow4_entry);
 }
 
 static inline size_t
@@ -385,6 +378,12 @@ fc_flow4_cache_entry_offset(const struct fc_flow4_cache *fc)
 
 #define FC_FLOW4_CACHE_RECORD_CPTR_AS(fc, type, entry_idx) \
     ((const type *)fc_flow4_cache_record_cptr((fc), (entry_idx)))
+
+#define FC_FLOW4_CACHE_RECORD_FROM_ENTRY(type, member, entry_ptr) \
+    RIX_CONTAINER_OF((entry_ptr), type, member)
+
+#define FC_FLOW4_CACHE_ENTRY_FROM_RECORD(record_ptr, member) \
+    FC_MEMBER_PTR((record_ptr), member)
 
 static inline int
 fc_flow4_cache_init_attr(struct fc_cache_size_attr *attr,

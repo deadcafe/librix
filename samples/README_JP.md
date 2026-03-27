@@ -1120,7 +1120,37 @@ record の残りは user payload のままです。record base / entry は
   payload や大きい payload に触る callback は miss-heavy workload で支配的に
   なり得る
 
-### 16.8 移植性に関する注意
+### 16.8 `init_ex()` helper 名の意味
+
+intrusive な `init_ex()` 経路では、`fc_cache_common.h` にある汎用
+address helper を使う。
+
+- `BYTE`: 対象を byte-addressable pointer として扱う
+- `PTR`: mutable pointer を返す
+- `CPTR`: const pointer を返す。意味は "const pointer"
+- `RECORD`: caller-owned の fixed-stride record 1 件
+- `MEMBER`: その record 内に埋め込まれた member
+
+例:
+
+- `FC_RECORD_PTR(base, stride, idx)`
+  `idx` 番目 record の先頭 address を返す
+- `FC_RECORD_MEMBER_PTR(base, stride, idx, entry_offset, type)`
+  その record 内の embedded member を返す
+- `fc_record_index_from_member_ptr(base, stride, entry_offset, member_ptr)`
+  member pointer から 1-origin index を逆算する
+
+helper を置く理由:
+
+- `init_ex()` は通常の連続 `entry[]` ではなく
+  `(base, stride, entry_offset)` を受け取る
+- したがって実装は index, record 先頭, embedded entry/member の相互変換を
+  繰り返し行う
+- `base + (idx - 1) * stride + entry_offset` のような式を各所に直書きすると
+  読みにくく、監査しにくく、誤りも入りやすい
+- そのため byte-address 演算と alignment 契約を helper に集約している
+
+### 16.9 移植性に関する注意
 
 ランタイム検出は `__builtin_cpu_supports()` を使用（GCC ≥ 4.8、Clang ≥ 3.7）。
 x86_64 では内部で `cpuid` を呼び出す。AArch64 では（GCC ≥ 14）
@@ -1146,7 +1176,7 @@ x86_64 では内部で `cpuid` を呼び出す。AArch64 では（GCC ≥ 14）
 4. `src/fc_ops.h` に `FC_OPS_DECLARE(flow4, _neon)` 等を追加
 5. パイプラインコードや公開 API の変更は不要
 
-### 16.8 ファイル構成
+### 16.10 ファイル構成
 
 | ファイル | 役割 |
 |----------|------|

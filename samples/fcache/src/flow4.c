@@ -67,27 +67,19 @@ fc_flow4_layout_entry_ptr_(const struct fc_flow4_cache *fc, unsigned idx)
 {
     if (idx == RIX_NIL)
         return NULL;
-    return (struct fc_flow4_entry *)(void *)
-        (fc->pool_base + (size_t)(idx - 1u) * fc->pool_stride +
-         fc->pool_entry_offset);
+    return FC_RECORD_MEMBER_PTR(fc->pool_base, fc->pool_stride, idx,
+                                fc->pool_entry_offset,
+                                struct fc_flow4_entry);
 }
 
 static inline unsigned
 fc_flow4_layout_entry_idx_(const struct fc_flow4_cache *fc,
                            const struct fc_flow4_entry *entry)
 {
-    const unsigned char *entry_bytes;
-    ptrdiff_t delta;
-
     if (entry == NULL)
         return RIX_NIL;
-    entry_bytes = (const unsigned char *)(const void *)entry;
-    delta = (ptrdiff_t)(entry_bytes -
-                        (fc->pool_base + fc->pool_entry_offset));
-    RIX_ASSERT(delta >= 0);
-    RIX_ASSERT(fc->pool_stride != 0u);
-    RIX_ASSERT(((size_t)delta % fc->pool_stride) == 0u);
-    return (unsigned)((size_t)delta / fc->pool_stride) + 1u;
+    return fc_record_index_from_member_ptr(fc->pool_base, fc->pool_stride,
+                                           fc->pool_entry_offset, entry);
 }
 
 static inline void
@@ -104,8 +96,9 @@ fc_flow4_event_emit_idx_(struct fc_flow4_cache *fc,
         (fc)->pool_base = (unsigned char *)(array);                            \
         (fc)->pool_stride = (stride);                                          \
         (fc)->pool_entry_offset = (entry_offset);                              \
-        (fc)->pool = (struct fc_flow4_entry *)(void *)                         \
-            ((fc)->pool_base + (fc)->pool_entry_offset);                       \
+        (fc)->pool = FC_RECORD_MEMBER_PTR((fc)->pool_base, (fc)->pool_stride, \
+                                          1u, (fc)->pool_entry_offset,         \
+                                          struct fc_flow4_entry);              \
     } while (0)
 
 #define FCG_LAYOUT_HASH_BASE(fc)                                               \
@@ -179,10 +172,6 @@ _FCG_API(flow4, init_ex)(struct fc_flow4_cache *fc,
 
     if (cfg == NULL)
         cfg = &defcfg;
-    RIX_ASSERT(stride >= sizeof(struct fc_flow4_entry));
-    RIX_ASSERT(entry_offset + sizeof(struct fc_flow4_entry) <= stride);
-    RIX_ASSERT((((uintptr_t)array + entry_offset)
-                & (uintptr_t)(_Alignof(struct fc_flow4_entry) - 1u)) == 0u);
 
     memset(fc, 0, sizeof(*fc));
     memset(buckets, 0, (size_t)nb_bk * sizeof(*buckets));
@@ -199,15 +188,14 @@ _FCG_API(flow4, init_ex)(struct fc_flow4_cache *fc,
     fc->maint_base_bk = cfg->maint_base_bk ? cfg->maint_base_bk : nb_bk;
     fc->maint_fill_threshold = cfg->maint_fill_threshold;
     _FCG_INT(flow4, init_thresholds)(fc);
-    RIX_SLIST_INIT(&fc->free_head);
+    FCG_FREE_LIST_INIT(fc);
     _FCG_HT(flow4, init)(&fc->ht_head, nb_bk);
     for (unsigned i = max_entries; i > 0u; i--) {
         struct fc_flow4_entry *entry = FCG_LAYOUT_ENTRY_PTR(fc, i);
 
         RIX_ASSUME_NONNULL(entry);
         FCG_LAYOUT_ENTRY_CLEAR(fc, entry);
-        entry->free_link.rsle_next = fc->free_head.rslh_first;
-        fc->free_head.rslh_first = i;
+        FCG_FREE_LIST_PUSH_ENTRY(fc, entry, i);
     }
 }
 
@@ -319,8 +307,7 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
     }
 
     {
-        struct fc_flow4_entry *next_free = FCG_LAYOUT_ENTRY_PTR(
-            fc, fc->free_head.rslh_first);
+        struct fc_flow4_entry *next_free = FCG_FREE_LIST_FIRST_PTR(fc);
         if (next_free != NULL)
             rix_hash_prefetch_entry(next_free);
     }
@@ -354,8 +341,7 @@ _FCG_API(flow4, findadd_burst32)(struct fc_flow4_cache *fc,
         return;
 
     {
-        struct fc_flow4_entry *free_head = FCG_LAYOUT_ENTRY_PTR(
-            fc, fc->free_head.rslh_first);
+        struct fc_flow4_entry *free_head = FCG_FREE_LIST_FIRST_PTR(fc);
         if (free_head != NULL)
             rix_hash_prefetch_entry(free_head);
     }

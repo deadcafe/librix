@@ -9,6 +9,7 @@
 #define _FC_CACHE_COMMON_H_
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifndef FC_CACHE_BULK_CTX_COUNT
 #define FC_CACHE_BULK_CTX_COUNT 128u
@@ -21,6 +22,112 @@
 #ifndef FC_FLOW_FAMILY_IPV6
 #define FC_FLOW_FAMILY_IPV6  6u
 #endif
+
+#ifndef FC_MEMBER_PTR
+#define FC_MEMBER_PTR(objp, member) (&((objp)->member))
+#endif
+
+/*
+ * Generic byte-address helpers for init_ex() layouts.
+ *
+ * Naming:
+ *   BYTE   : treat the operand as a byte-addressable pointer.
+ *   PTR    : mutable pointer result.
+ *   CPTR   : const pointer result ("const pointer").
+ *   RECORD : one fixed-stride caller-owned record.
+ *   MEMBER : an embedded object inside one record.
+ *
+ * Why these helpers exist:
+ *   init_ex() accepts (base, stride, entry_offset), so the implementation
+ *   must map between
+ *
+ *     entry_idx  <->  record base  <->  embedded entry/member
+ *
+ *   without assuming a contiguous entry[] array.
+ *
+ *   Writing raw expressions such as
+ *
+ *     base + (idx - 1) * stride + entry_offset
+ *
+ *   at many call sites makes the code hard to audit and easy to get wrong.
+ *   These helpers centralize the byte-address arithmetic and alignment rules
+ *   in one place.
+ */
+#ifndef FC_BYTE_PTR
+#define FC_BYTE_PTR(ptr) ((unsigned char *)(void *)(ptr))
+#endif
+
+#ifndef FC_BYTE_CPTR
+#define FC_BYTE_CPTR(ptr) ((const unsigned char *)(const void *)(ptr))
+#endif
+
+#ifndef FC_PTR_ADDR
+#define FC_PTR_ADDR(ptr) ((uintptr_t)(const void *)(ptr))
+#endif
+
+#ifndef FC_PTR_IS_ALIGNED
+#define FC_PTR_IS_ALIGNED(ptr, align) \
+    ((FC_PTR_ADDR(ptr) & (uintptr_t)((align) - 1u)) == 0u)
+#endif
+
+#ifndef FC_BYTE_PTR_ADD
+#define FC_BYTE_PTR_ADD(base, bytes) \
+    (FC_BYTE_PTR(base) + (size_t)(bytes))
+#endif
+
+#ifndef FC_BYTE_CPTR_ADD
+#define FC_BYTE_CPTR_ADD(base, bytes) \
+    (FC_BYTE_CPTR(base) + (size_t)(bytes))
+#endif
+
+#ifndef FC_RECORD_PTR
+#define FC_RECORD_PTR(base, stride, idx)                                      \
+    ((idx) == RIX_NIL ? NULL : (void *)FC_BYTE_PTR_ADD(                      \
+        (base), RIX_IDX_TO_OFF0(idx) * (stride)))
+#endif
+
+#ifndef FC_RECORD_CPTR
+#define FC_RECORD_CPTR(base, stride, idx)                                     \
+    ((idx) == RIX_NIL ? NULL : (const void *)FC_BYTE_CPTR_ADD(               \
+        (base), RIX_IDX_TO_OFF0(idx) * (stride)))
+#endif
+
+#ifndef FC_RECORD_MEMBER_PTR
+#define FC_RECORD_MEMBER_PTR(base, stride, idx, member_offset, type)          \
+    ((type *)__builtin_assume_aligned(                                        \
+        FC_BYTE_PTR_ADD(FC_RECORD_PTR((base), (stride), (idx)),              \
+                        (member_offset)),                                     \
+        _Alignof(type)))
+#endif
+
+#ifndef FC_RECORD_MEMBER_CPTR
+#define FC_RECORD_MEMBER_CPTR(base, stride, idx, member_offset, type)         \
+    ((const type *)__builtin_assume_aligned(                                  \
+        FC_BYTE_CPTR_ADD(FC_RECORD_CPTR((base), (stride), (idx)),            \
+                         (member_offset)),                                    \
+        _Alignof(type)))
+#endif
+
+static inline unsigned
+fc_record_index_from_member_ptr(const void *base,
+                                size_t stride,
+                                size_t member_offset,
+                                const void *member_ptr)
+{
+    uintptr_t member_addr;
+    uintptr_t base_addr;
+    ptrdiff_t delta;
+
+    if (member_ptr == NULL)
+        return RIX_NIL;
+    member_addr = (uintptr_t)member_ptr;
+    base_addr = (uintptr_t)FC_BYTE_CPTR_ADD(base, member_offset);
+    delta = (ptrdiff_t)(member_addr - base_addr);
+    RIX_ASSERT(delta >= 0);
+    RIX_ASSERT(stride != 0u);
+    RIX_ASSERT(((size_t)delta % stride) == 0u);
+    return (unsigned)((size_t)delta / stride) + 1u;
+}
 
 struct fc_cache_size_attr {
     unsigned requested_entries;

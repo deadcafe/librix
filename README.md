@@ -781,9 +781,9 @@ Performance guidance for `*_init_ex()`:
 The library now exposes record/entry accessors for `flow4`, `flow6`, and
 `flowu`, while keeping the original `fc_flow*_cache_init()` API intact.
 
-See [samples/README.md](samples/README.md) for the actual API walkthrough,
-detailed benchmark tables, backend-specific validation commands, and design
-notes. For release-facing text, see
+See [samples/README.md](samples/README.md) for the `fcache`-specific helper
+naming note, API walkthrough, detailed benchmark tables, backend-specific
+validation commands, and design notes. For release-facing text, see
 [CHANGELOG.md](CHANGELOG.md) and
 [RELEASE_NOTES_v0.1.1.md](RELEASE_NOTES_v0.1.1.md). For GitHub metadata and
 release preparation, see

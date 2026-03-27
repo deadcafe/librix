@@ -14,6 +14,8 @@
  * operations.  Without init, the generic implementation is used.
  */
 
+#include <stdint.h>
+
 #include <rix/rix_hash_arch.h>
 #include "fc_ops.h"
 
@@ -104,6 +106,10 @@ fc_flow4_cache_init_ex(struct fc_flow4_cache *fc,
                        size_t entry_offset,
                        const struct fc_flow4_config *cfg)
 {
+    RIX_ASSERT(stride >= sizeof(struct fc_flow4_entry));
+    RIX_ASSERT(entry_offset + sizeof(struct fc_flow4_entry) <= stride);
+    RIX_ASSERT(FC_PTR_IS_ALIGNED(FC_BYTE_PTR_ADD(array, entry_offset),
+                                 _Alignof(struct fc_flow4_entry)));
     fc_flow4_cache_init_ex_gen(fc, buckets, nb_bk, array, max_entries,
                                stride, entry_offset, cfg);
 }
@@ -166,6 +172,10 @@ fc_flow6_cache_init_ex(struct fc_flow6_cache *fc,
                        size_t entry_offset,
                        const struct fc_flow6_config *cfg)
 {
+    RIX_ASSERT(stride >= sizeof(struct fc_flow6_entry));
+    RIX_ASSERT(entry_offset + sizeof(struct fc_flow6_entry) <= stride);
+    RIX_ASSERT(FC_PTR_IS_ALIGNED(FC_BYTE_PTR_ADD(array, entry_offset),
+                                 _Alignof(struct fc_flow6_entry)));
     fc_flow6_cache_init_ex_gen(fc, buckets, nb_bk, array, max_entries,
                                stride, entry_offset, cfg);
 }
@@ -228,6 +238,10 @@ fc_flowu_cache_init_ex(struct fc_flowu_cache *fc,
                        size_t entry_offset,
                        const struct fc_flowu_config *cfg)
 {
+    RIX_ASSERT(stride >= sizeof(struct fc_flowu_entry));
+    RIX_ASSERT(entry_offset + sizeof(struct fc_flowu_entry) <= stride);
+    RIX_ASSERT(FC_PTR_IS_ALIGNED(FC_BYTE_PTR_ADD(array, entry_offset),
+                                 _Alignof(struct fc_flowu_entry)));
     fc_flowu_cache_init_ex_gen(fc, buckets, nb_bk, array, max_entries,
                                stride, entry_offset, cfg);
 }

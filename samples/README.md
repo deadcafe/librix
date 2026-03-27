@@ -1077,7 +1077,38 @@ Performance caveats:
 - `fc_flow4_cache_set_event_cb()` runs on alloc/free paths, so callbacks that
   touch cold or bulky payload state can dominate miss-heavy workloads
 
-### 17.8 Portability Notes
+### 17.8 Helper Naming For `init_ex()`
+
+The intrusive `init_ex()` path uses a small set of generic address helpers in
+`fc_cache_common.h`.
+
+- `BYTE`: treat the operand as a byte-addressable pointer
+- `PTR`: mutable pointer result
+- `CPTR`: const pointer result, short for "const pointer"
+- `RECORD`: one fixed-stride caller-owned record
+- `MEMBER`: an embedded object inside one record
+
+Examples:
+
+- `FC_RECORD_PTR(base, stride, idx)`
+  Returns the base address of record `idx`.
+- `FC_RECORD_MEMBER_PTR(base, stride, idx, entry_offset, type)`
+  Returns the embedded member pointer inside that record.
+- `fc_record_index_from_member_ptr(base, stride, entry_offset, member_ptr)`
+  Performs the reverse mapping from member pointer back to the 1-based index.
+
+Why the helpers exist:
+
+- `init_ex()` accepts `(base, stride, entry_offset)` instead of a plain
+  contiguous `entry[]` pool.
+- The implementation therefore must convert between index, record base, and
+  embedded entry/member repeatedly.
+- Raw expressions such as `base + (idx - 1) * stride + entry_offset` are easy
+  to duplicate incorrectly and hard to audit.
+- The helpers keep that byte-address arithmetic and alignment contract in one
+  place.
+
+### 17.9 Portability Notes
 
 The runtime detection uses `__builtin_cpu_supports()` (GCC ≥ 4.8,
 Clang ≥ 3.7).  On x86_64, this calls `cpuid` internally.  On AArch64
@@ -1104,7 +1135,7 @@ To port to a new platform:
 4. Add `FC_OPS_DECLARE(flow4, _neon)` etc. in `src/fc_ops.h`
 5. No changes to pipeline code or public API
 
-### 17.8 File Summary
+### 17.10 File Summary
 
 | File | Role |
 |------|------|
