@@ -1,0 +1,81 @@
+/*-
+ * SPDX-License-Identifier: BSD 3-Clause License
+ *
+ * Copyright (c) 2026 deadcafe.beef@gmail.com
+ * All rights reserved.
+ */
+
+#ifndef _FT_OPS_H_
+#define _FT_OPS_H_
+
+#include "flow_table.h"
+
+#define FT_OPS_DEFINE(prefix)                                                  \
+struct ft_##prefix##_ops {                                                     \
+    uint32_t (*find)(struct ft_##prefix##_table *ft,                           \
+                     const struct ft_##prefix##_key *key);                     \
+    uint32_t (*add)(struct ft_##prefix##_table *ft,                            \
+                    const struct ft_##prefix##_key *key);                      \
+    uint32_t (*add_idx)(struct ft_##prefix##_table *ft,                        \
+                        uint32_t entry_idx);                                   \
+    uint32_t (*add_entry)(struct ft_##prefix##_table *ft,                      \
+                          struct ft_##prefix##_entry *entry);                  \
+    uint32_t (*del)(struct ft_##prefix##_table *ft,                            \
+                    const struct ft_##prefix##_key *key);                      \
+    void (*find_bulk)(struct ft_##prefix##_table *ft,                          \
+                      const struct ft_##prefix##_key *keys,                    \
+                      unsigned nb_keys,                                        \
+                      struct ft_##prefix##_result *results);                   \
+    void (*add_bulk)(struct ft_##prefix##_table *ft,                           \
+                     const struct ft_##prefix##_key *keys,                     \
+                     unsigned nb_keys,                                         \
+                     struct ft_##prefix##_result *results);                    \
+    void (*add_idx_bulk)(struct ft_##prefix##_table *ft,                       \
+                         const uint32_t *entry_idxv,                           \
+                         unsigned nb_keys,                                     \
+                         struct ft_##prefix##_result *results);                \
+    void (*add_entry_bulk)(struct ft_##prefix##_table *ft,                     \
+                           struct ft_##prefix##_entry *const *entries,         \
+                           unsigned nb_keys,                                   \
+                           struct ft_##prefix##_result *results);              \
+    void (*del_bulk)(struct ft_##prefix##_table *ft,                           \
+                     const struct ft_##prefix##_key *keys,                     \
+                     unsigned nb_keys,                                         \
+                     struct ft_##prefix##_result *results);                    \
+}
+
+FT_OPS_DEFINE(flow4);
+
+#define FT_OPS_DECLARE(prefix, suffix)                                         \
+    extern const struct ft_##prefix##_ops ft_##prefix##_ops##suffix
+
+FT_OPS_DECLARE(flow4, _gen);
+FT_OPS_DECLARE(flow4, _sse);
+FT_OPS_DECLARE(flow4, _avx2);
+FT_OPS_DECLARE(flow4, _avx512);
+
+#define FT_OPS_SELECT(prefix, arch_enable, out_ops)                            \
+do {                                                                           \
+    *(out_ops) = &ft_##prefix##_ops_gen;                                       \
+    _FT_OPS_SELECT_BODY(prefix, arch_enable, out_ops)                          \
+} while (0)
+
+#if defined(__x86_64__)
+#define _FT_OPS_SELECT_BODY(prefix, arch_enable, out_ops)                      \
+    __builtin_cpu_init();                                                      \
+    if (((arch_enable) & FT_ARCH_AVX512) &&                                    \
+        __builtin_cpu_supports("avx512f")) {                                   \
+        *(out_ops) = &ft_##prefix##_ops_avx512;                                \
+    } else if (((arch_enable) & (FT_ARCH_AVX2 | FT_ARCH_AVX512)) &&            \
+               __builtin_cpu_supports("avx2")) {                               \
+        *(out_ops) = &ft_##prefix##_ops_avx2;                                  \
+    } else if (((arch_enable) & (FT_ARCH_SSE | FT_ARCH_AVX2 |                  \
+                                  FT_ARCH_AVX512)) &&                          \
+               __builtin_cpu_supports("sse4.2")) {                             \
+        *(out_ops) = &ft_##prefix##_ops_sse;                                   \
+    }
+#else
+#define _FT_OPS_SELECT_BODY(prefix, arch_enable, out_ops) (void)(arch_enable)
+#endif
+
+#endif /* _FT_OPS_H_ */
