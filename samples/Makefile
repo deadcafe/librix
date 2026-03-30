@@ -14,10 +14,15 @@
 #   install PREFIX=/path - install library and headers
 #
 
-.PHONY: all static shared test bench bench-full clean install
+.DEFAULT_GOAL := build
+
+.PHONY: all build static shared test bench bench-full clean install
 
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
-BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
+BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
+
+build: static shared
+
 all:
 	$(MAKE) -C fcache all
 
@@ -27,7 +32,7 @@ static:
 shared:
 	$(MAKE) -C fcache shared
 
-test: all
+test: static shared
 	$(MAKE) -C fcache/test ndebug-check BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
 	$(MAKE) -C fcache/test test
 

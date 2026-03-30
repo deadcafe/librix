@@ -24,9 +24,10 @@
 #define _GNU_SOURCE 1
 #endif
 
-#include "bench_fc_common.h"
 #include <errno.h>
 #include <sched.h>
+
+#include "bench_fc_common.h"
 
 unsigned fcb_query = FCB_QUERY_DEFAULT;
 unsigned fcb_dp_hit_repeat = 96u;
@@ -471,6 +472,33 @@ fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
     }
 }
 
+struct fcb_flow4_record {
+    struct fc_flow4_entry entry;
+    struct {
+        uint64_t touch;
+        uint32_t cookie;
+        uint32_t last_event;
+    } __attribute__((aligned(8))) body;
+};
+
+struct fcb_flow6_record {
+    struct fc_flow6_entry entry;
+    struct {
+        uint64_t touch;
+        uint32_t cookie;
+        uint32_t last_event;
+    } __attribute__((aligned(8))) body;
+};
+
+struct fcb_flowu_record {
+    struct fc_flowu_entry entry;
+    struct {
+        uint64_t touch;
+        uint32_t cookie;
+        uint32_t last_event;
+    } __attribute__((aligned(8))) body;
+};
+
 /*===========================================================================
  * Instantiate per-variant bench functions via include-template
  *===========================================================================*/
@@ -480,39 +508,60 @@ fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
 #define FCB_KEY_T     struct flow4_key
 #define FCB_RESULT_T  struct fc_flow4_result
 #define FCB_ENTRY_T   struct fc_flow4_entry
+#define FCB_RECORD_T  struct fcb_flow4_record
 #define FCB_CACHE_T   struct fc_flow4_cache
 #define FCB_CONFIG_T  struct fc_flow4_config
 #define FCB_STATS_T   struct fc_flow4_stats
 #define FCB_PRESSURE  FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS
+#define FCB_INIT_TYPED(fc, buckets, nb_bk, pool, max_entries, cfg) \
+    FC_FLOW4_CACHE_INIT_TYPED((fc), (buckets), (nb_bk), (pool), \
+                              (max_entries), struct fcb_flow4_record, entry, \
+                              (cfg))
 #define FCB_MAKE_KEY(i) fcb_make_key4(i)
 #define FCB_CALL_FINDADD(fc, keys, n, now, results) \
     fcb_flow4_call_findadd((fc), (keys), (n), (now), (results))
 #include "bench_fc_body.h"
 #undef FCB_CALL_FINDADD
+#undef FCB_RECORD_T
+#undef FCB_INIT_TYPED
 
 /* --- flow6 --- */
 #define FCB_PREFIX    flow6
 #define FCB_KEY_T     struct flow6_key
 #define FCB_RESULT_T  struct fc_flow6_result
 #define FCB_ENTRY_T   struct fc_flow6_entry
+#define FCB_RECORD_T  struct fcb_flow6_record
 #define FCB_CACHE_T   struct fc_flow6_cache
 #define FCB_CONFIG_T  struct fc_flow6_config
 #define FCB_STATS_T   struct fc_flow6_stats
 #define FCB_PRESSURE  FC_FLOW6_DEFAULT_PRESSURE_EMPTY_SLOTS
+#define FCB_INIT_TYPED(fc, buckets, nb_bk, pool, max_entries, cfg) \
+    FC_FLOW6_CACHE_INIT_TYPED((fc), (buckets), (nb_bk), (pool), \
+                              (max_entries), struct fcb_flow6_record, entry, \
+                              (cfg))
 #define FCB_MAKE_KEY(i) fcb_make_key6(i)
 #include "bench_fc_body.h"
+#undef FCB_RECORD_T
+#undef FCB_INIT_TYPED
 
 /* --- flowu --- */
 #define FCB_PREFIX    flowu
 #define FCB_KEY_T     struct flowu_key
 #define FCB_RESULT_T  struct fc_flowu_result
 #define FCB_ENTRY_T   struct fc_flowu_entry
+#define FCB_RECORD_T  struct fcb_flowu_record
 #define FCB_CACHE_T   struct fc_flowu_cache
 #define FCB_CONFIG_T  struct fc_flowu_config
 #define FCB_STATS_T   struct fc_flowu_stats
 #define FCB_PRESSURE  FC_FLOWU_DEFAULT_PRESSURE_EMPTY_SLOTS
+#define FCB_INIT_TYPED(fc, buckets, nb_bk, pool, max_entries, cfg) \
+    FC_FLOWU_CACHE_INIT_TYPED((fc), (buckets), (nb_bk), (pool), \
+                              (max_entries), struct fcb_flowu_record, entry, \
+                              (cfg))
 #define FCB_MAKE_KEY(i) fcb_make_keyu(i)
 #include "bench_fc_body.h"
+#undef FCB_RECORD_T
+#undef FCB_INIT_TYPED
 
 /*===========================================================================
  * Quick 3-variant datapath comparison (no args needed)

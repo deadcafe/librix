@@ -34,7 +34,7 @@ WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 BENCH_EXTRA_CFLAGS ?= $(EXTRA_CFLAGS) -DNDEBUG
-BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
+BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
                -I$(FCDIR)/include \
@@ -56,7 +56,7 @@ NDEBUG_LIBDIR ?= lib_ndebug
 NDEBUG_LIBFC   = $(FCDIR)/$(NDEBUG_LIBDIR)/libfcache.a
 NDEBUG_BENCH   = fc_bench_ndebug
 
-.PHONY: all test ndebug-check bench-build bench-short bench bench-full matrix matrix-full clean
+.PHONY: all test ndebug-check bench-build bench-build-short bench-short bench bench-full matrix matrix-full clean
 
 all: test bench-short
 
@@ -86,10 +86,11 @@ bench-build:
 	$(MAKE) clean
 	$(MAKE) $(BENCH) BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
 
-bench-short: bench-build
-	./$(BENCH) $(BENCH_FC_OPTS) datapath
-	./$(BENCH) $(BENCH_FC_OPTS) maint_partial
-	BENCH_FC_OPTS="$(BENCH_FC_OPTS)" ./run_fc_bench_matrix.sh all quick
+bench-build-short: $(BENCH)
+
+bench-short: bench-build-short
+	@echo "== representative short datapath bench (1M) =="
+	./$(BENCH) $(BENCH_FC_OPTS) datapath 1048576
 
 bench: bench-short
 

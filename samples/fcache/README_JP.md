@@ -529,7 +529,6 @@ samples/
     Makefile
     include/
       fc_cache_common.h
-      flow_cache.h
       flow4_cache.h
       flow6_cache.h
       flowu_cache.h
@@ -759,6 +758,11 @@ query 幅は 256。
   cache-cold touch を行ってから、bulk API call だけを計測する。
   `findadd_hit`, `find_hit`, `findadd_miss`, `add_only`, `add+del`,
   `del_bulk`, reset-per-round の `90/10` mixed を比較する。
+- `datapath` は raw な `fc_flowX_entry[]` 配列ではなく、typed な
+  user-record layout を使って測る。これは実運用で caller-owned payload が
+  embedded entry の隣に置かれる前提を反映するためであり、その配置は実際に
+  datapath 値へ影響する。特に `flow4` は body が追加の cache line へ
+  spill するかどうかに敏感である。
 - `maint`: 全 entry 期限切れ前提の full-table sweep。fill 依存性や飽和時コストを見る補助 bench で、既定の representative path には含めない。
 - `maint_partial`: fill 75%、全 entry 期限切れ条件で `maintain_step()` の部分 sweep コストを測る。
 - `findadd_closed`: 固定集合ベンチ。固定 hit 集合と固定 miss 集合で `findadd_bulk()` を測り、miss 集合は round ごとに削除して fill を一定に保つ。
@@ -767,10 +771,12 @@ query 幅は 256。
 
 既定の bench 実行経路:
 
-- `make bench`: 代表セット。`datapath`, `maint_partial`, quick な `findadd_window` matrix のみを実行する。
 - `make all`: ライブラリをビルドし、test と `bench-short` を実行する。
 - `make bench`: `bench-short` の alias。
-- `make bench-full`: full 長時間セット。重い `trace_open_custom` matrix を追加する。
+- `make bench-short`: 代表 short セット。現在は `datapath` の `1M`
+  比較だけを回し、最後の出力を短く比較しやすく保つ。
+- `make bench-full`: full 長時間セット。full `datapath`, `maint_partial`,
+  長時間 trace を含む full matrix を実行する。
 - `./run_fc_bench_matrix.sh <variant> quick`: quick な windowed open-set matrix。
 - `./run_fc_bench_matrix.sh <variant> full`: 長時間の trace case を含む full matrix。
 
@@ -792,6 +798,22 @@ current の `avx2` build で `1M` entries を測ると:
 
 したがって、`short` は cold path の quick screening に向き、cold bench の
 比較基準としては `full` を使うのがよい。
+
+実務上重要なのは、benchmark 値を user-record layout と切り離して読めない
+ことだ。直近の `flow4`, `1M`, `avx2`, `--bench short`,
+`--raw-repeat 1`, `--keep-n 1` では、bench を raw-entry harness から
+typed user-record harness に切り替えたことで、次のように値が動いた。
+
+- `findadd_hit`: `141.80 -> 130.23`
+- `find_hit`: `147.19 -> 125.39`
+- `findadd_miss`: `202.73 -> 192.19`
+- `add_only`: `150.55 -> 130.08`
+- `add+del`: `210.23 -> 199.30`
+- `del_bulk`: `156.41 -> 147.27`
+- `mixed_90_10_reset`: `156.02 -> 131.02`
+
+つまり user data の配置は benchmark に無関係な detail ではなく、性能契約の
+一部として扱うべきである。
 
 修正後の cold `datapath` での current 基準値
 (`flow4`, `1M`, `avx2`, `--bench full`) は次の通り。
@@ -1165,6 +1187,8 @@ record の残りは user payload のままです。record base / entry は
 - embedded entry は cache-line 境界に置く。local bench では misaligned entry
   が明確に悪化した
 - user record が大きいほど callback 無効時でも cache/TLB 圧で遅くなる
+- `flow4` では小さな user-body 配置の差でも datapath 値が実際に動く。
+  bench は本番で使う record layout に合わせて取るべきである。
 - `fc_flow4_cache_set_event_cb()` は alloc/free path で呼ばれるため、cold な
   payload や大きい payload に触る callback は miss-heavy workload で支配的に
   なり得る
@@ -1229,7 +1253,6 @@ x86_64 では内部で `cpuid` を呼び出す。AArch64 では（GCC ≥ 14）
 
 | ファイル | 役割 |
 |----------|------|
-| `include/flow_cache.h` | **公開 umbrella ヘッダ** — 全バリアントヘッダ + `fc_arch_init()` + `FC_ARCH_*` フラグ |
 | `include/flow4_cache.h` | 公開 API: IPv4 flow cache の型 + 関数プロトタイプ |
 | `include/flow6_cache.h` | 公開 API: IPv6 flow cache の型 + 関数プロトタイプ |
 | `include/flowu_cache.h` | 公開 API: 統合 flow cache の型 + 関数プロトタイプ |

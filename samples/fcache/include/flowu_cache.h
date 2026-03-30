@@ -17,8 +17,8 @@
 #include <string.h>
 #include <rix/rix_hash.h>
 #include <rix/rix_queue.h>
-#include "fc_cache_common.h"
 #include <flow/flow_key.h>
+#include "fc_cache_common.h"
 
 #ifndef FC_CACHE_LINE_SIZE
 #define FC_CACHE_LINE_SIZE 64u

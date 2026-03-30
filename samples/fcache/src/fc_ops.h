@@ -15,7 +15,10 @@
 #ifndef _FC_OPS_H_
 #define _FC_OPS_H_
 
-#include "flow_cache.h"
+#include "fc_cache_common.h"
+#include "flow4_cache.h"
+#include "flow6_cache.h"
+#include "flowu_cache.h"
 
 /*===========================================================================
  * Ops table macro: generates struct fc_<prefix>_ops

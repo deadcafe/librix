@@ -18,7 +18,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "flow_cache.h"
+#include "flow4_cache.h"
+#include "flow6_cache.h"
+#include "flowu_cache.h"
 
 /*===========================================================================
  * Constants

@@ -879,6 +879,9 @@ Lock-free / RCU operation is out of scope and would require additional design.
 # Full library test pass
 make test
 
+# Build, test, and run the representative short benchmark
+make all
+
 # Top-level representative benchmark rerun
 make bench
 

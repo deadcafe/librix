@@ -3,7 +3,7 @@ export CC
 
 TESTDIRS := tests/slist tests/list tests/stailq tests/tailq tests/circleq \
             tests/rbtree tests/hashtbl tests/hashtbl32 tests/hashtbl64
-BENCHDIRS := tests/hashtbl tests/hashtbl32 tests/hashtbl64 samples
+BENCHDIRS := samples
 SUBDIRS  := $(TESTDIRS) samples
 
 HTAGS_PORT   ?= 8000
@@ -13,8 +13,8 @@ PREFIX       ?= /usr/local
 
 RIX_PUB_HDRS := $(filter-out %_private.h, $(wildcard include/rix/*.h))
 
-.PHONY: all build test bench bench-full clean install htags htags-serve help
-all: test
+.PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help
+all: build run-tests run-bench
 
 help:
 	@printf '%s\n' \
@@ -43,19 +43,25 @@ build:
 	  $(MAKE) -C $$d; \
 	done
 
-test: build
+test: build run-tests
+
+run-tests:
 	@for d in $(SUBDIRS); do \
 	  echo "[TEST] $$d"; \
 	  $(MAKE) -C $$d test; \
 	done
 
-bench: build
+bench: build run-bench
+
+run-bench:
 	@for d in $(BENCHDIRS); do \
 	  echo "[BENCH] $$d"; \
 	  $(MAKE) -C $$d bench; \
 	done
 
-bench-full: build
+bench-full: build run-bench-full
+
+run-bench-full:
 	@for d in tests/hashtbl tests/hashtbl32 tests/hashtbl64; do \
 	  echo "[BENCH] $$d"; \
 	  $(MAKE) -C $$d bench; \

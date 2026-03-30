@@ -476,7 +476,6 @@ samples/
     Makefile
     include/
       fc_cache_common.h
-      flow_cache.h
       flow4_cache.h
       flow6_cache.h
       flowu_cache.h
@@ -708,6 +707,11 @@ Benchmark modes and intent:
   touch outside the timer, and then times only the bulk API call. It compares
   `findadd_hit`, `find_hit`, `findadd_miss`, `add_only`, `add+del`,
   `del_bulk`, and reset-per-round mixed `90/10`.
+- `datapath` uses typed user-record layouts, not a raw `fc_flowX_entry[]`
+  array. This is intentional: real deployments carry caller-owned payload next
+  to the embedded entry, and that layout measurably affects datapath cost.
+  In particular, `flow4` is sensitive to whether the user body stays adjacent
+  to the embedded entry or spills into additional cache lines.
 - `maint`: full-table sweep with all entries expired. Useful for fill-sensitivity and saturation studies, but not part of the representative default bench path.
 - `maint_partial`: measures `maintain_step()` cost for partial sweeps at 75% fill with all entries expired.
 - `findadd_closed`: fixed-set benchmark. Measures `findadd_bulk()` with a stable hit set and a stable miss set; the miss set is deleted after each round so fill stays fixed.
@@ -716,10 +720,12 @@ Benchmark modes and intent:
 
 Default benchmark entry points:
 
-- `make bench`: representative suite. Runs `datapath`, `maint_partial`, and the quick `findadd_window` matrix only.
 - `make all`: builds the library, runs tests, and runs `bench-short`.
 - `make bench`: alias of `bench-short`.
-- `make bench-full`: full long-running suite. Adds the heavy `trace_open_custom` matrix runs.
+- `make bench-short`: representative short suite. Today this is the `datapath`
+  `1M` comparison only, so the final output stays short and directly comparable.
+- `make bench-full`: full long-running suite. Runs the full `datapath` set,
+  `maint_partial`, and the full matrix including long-running trace cases.
 - `./run_fc_bench_matrix.sh <variant> quick`: quick windowed open-set matrix.
 - `./run_fc_bench_matrix.sh <variant> full`: full matrix including long-running trace cases.
 
@@ -741,6 +747,22 @@ At `1M` entries on the current `avx2` build:
 
 So `short` is suitable for faster cold-path screening, while `full` remains
 the reference profile for cold-path comparisons.
+
+One practical consequence is that benchmark values must be interpreted
+together with the user-record layout. A recent `flow4`, `1M`, `avx2`,
+`--bench short`, `--raw-repeat 1`, `--keep-n 1` comparison changed from the
+older raw-entry harness
+
+- `findadd_hit`: `141.80 -> 130.23`
+- `find_hit`: `147.19 -> 125.39`
+- `findadd_miss`: `202.73 -> 192.19`
+- `add_only`: `150.55 -> 130.08`
+- `add+del`: `210.23 -> 199.30`
+- `del_bulk`: `156.41 -> 147.27`
+- `mixed_90_10_reset`: `156.02 -> 131.02`
+
+after switching the benchmark to typed user records. Treat user-data layout as
+part of the performance contract, not as a benchmark-irrelevant detail.
 
 Current corrected cold `datapath` reference values for `flow4`, `1M`,
 `avx2`, `--bench full` are:
@@ -1123,6 +1145,8 @@ Performance caveats:
 - keep the embedded entry cache-line aligned; misaligned entries showed a
   clear regression in local validation
 - larger user records raise cache/TLB pressure even when callbacks are off
+- for `flow4`, even small changes in user-body placement can move datapath
+  numbers materially; benchmark with the same record layout you expect to ship
 - `fc_flow4_cache_set_event_cb()` runs on alloc/free paths, so callbacks that
   touch cold or bulky payload state can dominate miss-heavy workloads
 
@@ -1188,7 +1212,6 @@ To port to a new platform:
 
 | File | Role |
 |------|------|
-| `include/flow_cache.h` | **Public umbrella header** — includes all variant headers + `fc_arch_init()` + `FC_ARCH_*` flags |
 | `include/flow4_cache.h` | Public API: types + function prototypes for IPv4 flow cache |
 | `include/flow6_cache.h` | Public API: types + function prototypes for IPv6 flow cache |
 | `include/flowu_cache.h` | Public API: types + function prototypes for unified flow cache |

@@ -11,6 +11,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <rix/rix_hash.h>
+
 #ifndef FC_CACHE_BULK_CTX_COUNT
 #define FC_CACHE_BULK_CTX_COUNT 128u
 #endif
@@ -23,36 +25,29 @@
 #define FC_FLOW_FAMILY_IPV6  6u
 #endif
 
+/*===========================================================================
+ * Architecture dispatch flags
+ *===========================================================================*/
+#ifndef FC_ARCH_GEN
+#define FC_ARCH_GEN     0u
+#endif
+#ifndef FC_ARCH_SSE
+#define FC_ARCH_SSE     (1u << 0)
+#endif
+#ifndef FC_ARCH_AVX2
+#define FC_ARCH_AVX2    (1u << 1)
+#endif
+#ifndef FC_ARCH_AVX512
+#define FC_ARCH_AVX512  (1u << 2)
+#endif
+#ifndef FC_ARCH_AUTO
+#define FC_ARCH_AUTO    (FC_ARCH_SSE | FC_ARCH_AVX2 | FC_ARCH_AVX512)
+#endif
+
 #ifndef FC_MEMBER_PTR
 #define FC_MEMBER_PTR(objp, member) (&((objp)->member))
 #endif
 
-/*
- * Generic byte-address helpers for init_ex() layouts.
- *
- * Naming:
- *   BYTE   : treat the operand as a byte-addressable pointer.
- *   PTR    : mutable pointer result.
- *   CPTR   : const pointer result ("const pointer").
- *   RECORD : one fixed-stride caller-owned record.
- *   MEMBER : an embedded object inside one record.
- *
- * Why these helpers exist:
- *   init_ex() accepts (base, stride, entry_offset), so the implementation
- *   must map between
- *
- *     entry_idx  <->  record base  <->  embedded entry/member
- *
- *   without assuming a contiguous entry[] array.
- *
- *   Writing raw expressions such as
- *
- *     base + (idx - 1) * stride + entry_offset
- *
- *   at many call sites makes the code hard to audit and easy to get wrong.
- *   These helpers centralize the byte-address arithmetic and alignment rules
- *   in one place.
- */
 #ifndef FC_BYTE_PTR
 #define FC_BYTE_PTR(ptr) ((unsigned char *)(void *)(ptr))
 #endif
@@ -252,5 +247,17 @@ fc_cache_size_bind(void *base, struct fc_cache_size_attr *attr)
     attr->scratch_ptr = p + attr->scratch_offset;
     return 0;
 }
+
+/**
+ * @brief One-time CPU detection and SIMD dispatch selection.
+ *
+ * Call once at startup before any cache operations. Selects the
+ * best available SIMD implementation (Generic/SSE4.2/AVX2/AVX-512)
+ * for all flow cache variants. Without this call, the generic
+ * (scalar) implementation is used.
+ *
+ * @param arch_enable  Bitmask of FC_ARCH_* flags, or FC_ARCH_AUTO.
+ */
+void fc_arch_init(unsigned arch_enable);
 
 #endif /* _FC_CACHE_COMMON_H_ */

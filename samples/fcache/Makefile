@@ -39,8 +39,7 @@ LIBDIR      ?= lib
 
 VARIANTS     = flow4 flow6 flowu
 
-PUB_HDRS     = $(INCDIR)/flow_cache.h \
-               $(INCDIR)/flow4_cache.h \
+PUB_HDRS     = $(INCDIR)/flow4_cache.h \
                $(INCDIR)/flow6_cache.h \
                $(INCDIR)/flowu_cache.h \
                $(INCDIR)/fc_ops.h
@@ -62,7 +61,7 @@ LIB_SONAME   = libfcache.so.1
 
 PREFIX       ?= /usr/local
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
-BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
+BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
 
 .PHONY: all static shared test bench-short bench-full clean install
 

@@ -11,6 +11,7 @@
  *   FCB_KEY_T       e.g. struct flow4_key
  *   FCB_RESULT_T    e.g. struct fc_flow4_result
  *   FCB_ENTRY_T     e.g. struct fc_flow4_entry
+ *   FCB_RECORD_T    e.g. struct fcb_flow4_record
  *   FCB_CACHE_T     e.g. struct fc_flow4_cache
  *   FCB_CONFIG_T    e.g. struct fc_flow4_config
  *   FCB_STATS_T     e.g. struct fc_flow4_stats
@@ -46,7 +47,7 @@
 struct FCB_FN(ctx) {
     FCB_CACHE_T               fc;
     struct rix_hash_bucket_s  *buckets;
-    FCB_ENTRY_T              *pool;
+    FCB_RECORD_T             *pool;
 };
 
 struct FCB_FN(stats_delta) {
@@ -75,7 +76,7 @@ FCB_FN(ctx_init)(struct FCB_FN(ctx) *ctx, unsigned nb_bk,
                   unsigned max_entries, uint64_t timeout_tsc)
 {
     size_t bk_bytes   = (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
-    size_t pool_bytes = (size_t)max_entries * sizeof(FCB_ENTRY_T);
+    size_t pool_bytes = (size_t)max_entries * sizeof(FCB_RECORD_T);
     FCB_CONFIG_T cfg;
 
     ctx->buckets = fcb_alloc(bk_bytes);
@@ -83,7 +84,7 @@ FCB_FN(ctx_init)(struct FCB_FN(ctx) *ctx, unsigned nb_bk,
     memset(&cfg, 0, sizeof(cfg));
     cfg.timeout_tsc          = timeout_tsc;
     cfg.pressure_empty_slots = FCB_PRESSURE;
-    FCB_API(init)(&ctx->fc, ctx->buckets, nb_bk, ctx->pool, max_entries, &cfg);
+    FCB_INIT_TYPED(&ctx->fc, ctx->buckets, nb_bk, ctx->pool, max_entries, &cfg);
 }
 
 static void
@@ -91,11 +92,11 @@ FCB_FN(ctx_init_cfg)(struct FCB_FN(ctx) *ctx, unsigned nb_bk,
                       unsigned max_entries, const FCB_CONFIG_T *cfg)
 {
     size_t bk_bytes   = (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
-    size_t pool_bytes = (size_t)max_entries * sizeof(FCB_ENTRY_T);
+    size_t pool_bytes = (size_t)max_entries * sizeof(FCB_RECORD_T);
 
     ctx->buckets = fcb_alloc(bk_bytes);
     ctx->pool    = fcb_alloc(pool_bytes);
-    FCB_API(init)(&ctx->fc, ctx->buckets, nb_bk, ctx->pool, max_entries, cfg);
+    FCB_INIT_TYPED(&ctx->fc, ctx->buckets, nb_bk, ctx->pool, max_entries, cfg);
 }
 
 static void
@@ -191,7 +192,7 @@ FCB_FN(active_scan)(const struct FCB_FN(ctx) *ctx)
     unsigned count = 0u;
 
     for (unsigned i = 0; i < ctx->fc.max_entries; i++) {
-        if (ctx->pool[i].last_ts != 0u)
+        if (ctx->pool[i].entry.last_ts != 0u)
             count++;
     }
     return count;
