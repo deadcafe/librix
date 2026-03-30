@@ -28,9 +28,10 @@
  *   del      / del_bulk      -- remove by key
  *   del_idx  / del_idx_bulk  -- remove by pool index
  *
- * Entries are 64-byte cache-line aligned.  The cache uses TSC-based
- * timestamps for expiration with adaptive timeout scaling based on
- * fill level.
+ * Flow4 entries are compact and use 8-byte alignment so callers can pack
+ * their own side data tightly when desired. The cache uses TSC-based
+ * timestamps for expiration with adaptive timeout scaling based on fill
+ * level.
  */
 
 /*-
@@ -47,6 +48,7 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_queue.h>
 #include "fc_cache_common.h"
+#include <flow/flow_key.h>
 
 /** @brief Cache-line size used for entry alignment. */
 #define FC_CACHE_LINE_SIZE 64u
@@ -70,30 +72,18 @@
  * @brief IPv4 5-tuple lookup key (24-byte fixed-width object).
  *
  * The common prefix through @c vrfid is intentionally ordered to match
- * @c fc_flowu_key as closely as possible for easier hex-dump inspection.
+ * @c flowu_key as closely as possible for easier hex-dump inspection.
  * The @c family field is always 4 for flow4. The trailing @c pad and
  * @c zero fields must always be 0. Together they form a fixed 24-byte key
  * object (3 x 8 bytes), enabling the optimised flow4 CRC32C / compare path
  * on x86-64.
  */
-struct fc_flow4_key {
-    uint8_t  family;            /**< Always FC_FLOW_FAMILY_IPV4 (4). */
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;               /**< Must be 0. */
-    uint32_t vrfid;
-    uint32_t src_ip;
-    uint32_t dst_ip;
-    uint32_t zero;              /**< Must be 0; completes a fixed 24B object. */
-};
-
-static inline struct fc_flow4_key
+static inline struct flow4_key
 fc_flow4_key_make(uint32_t src_ip, uint32_t dst_ip,
                   uint16_t src_port, uint16_t dst_port,
                   uint8_t proto, uint32_t vrfid)
 {
-    return (struct fc_flow4_key){
+    return (struct flow4_key){
         .family = FC_FLOW_FAMILY_IPV4,
         .proto = proto,
         .src_port = src_port,
@@ -118,22 +108,20 @@ struct fc_flow4_result {
 };
 
 /**
- * @brief Cache entry, one per cache line (64 bytes).
+ * @brief Compact IPv4 cache entry.
  *
  * Managed internally; callers access entries through pool + entry_idx.
  */
 struct fc_flow4_entry {
-    struct fc_flow4_key   key;          /**< 24B fixed-width lookup key. */
-    uint32_t               cur_hash;     /**< Hash stored for O(1) remove. */
+    struct flow4_entry_hdr hdr;        /**< Shared hash-table entry header. */
     uint64_t               last_ts;      /**< Last-access TSC; 0 = free. */
     RIX_SLIST_ENTRY(struct fc_flow4_entry) free_link;
-    uint16_t               slot;         /**< Slot within current bucket. */
-    uint16_t               reserved1;
-    uint8_t                reserved0[16];
-} __attribute__((aligned(FC_CACHE_LINE_SIZE)));
+} __attribute__((aligned(8)));
 
-RIX_STATIC_ASSERT(sizeof(struct fc_flow4_entry) == FC_CACHE_LINE_SIZE,
-                  "fc_flow4_entry must be 64 bytes");
+RIX_STATIC_ASSERT(sizeof(struct fc_flow4_entry) == 48u,
+                  "fc_flow4_entry must be 48 bytes");
+RIX_STATIC_ASSERT(_Alignof(struct fc_flow4_entry) == 8u,
+                  "fc_flow4_entry must be 8-byte aligned");
 
 RIX_HASH_HEAD(fc_flow4_ht);
 RIX_SLIST_HEAD(fc_flow4_free_head, fc_flow4_entry);
@@ -275,7 +263,7 @@ fc_flow4_cache_size_query(unsigned nb_entries, struct fc_cache_size_attr *attr)
  *                         Must be aligned to @c sizeof(struct rix_hash_bucket_s).
  * @param[in]  nb_bk       Number of buckets (must be a power of 2).
  * @param[in]  pool        Entry pool, @p max_entries elements.
- *                         Must be 64-byte aligned.
+ *                         Must satisfy @c _Alignof(struct fc_flow4_entry).
  * @param[in]  max_entries Pool capacity (number of entries).
  * @param[in]  cfg         Configuration, or NULL for defaults.
  */
@@ -442,7 +430,7 @@ unsigned fc_flow4_cache_nb_entries(const struct fc_flow4_cache *fc);
  * @param[out]    results   Per-key results.
  */
 void fc_flow4_cache_find_bulk(struct fc_flow4_cache *fc,
-                               const struct fc_flow4_key *keys,
+                               const struct flow4_key *keys,
                                unsigned nb_keys, uint64_t now,
                                struct fc_flow4_result *results);
 
@@ -460,7 +448,7 @@ void fc_flow4_cache_find_bulk(struct fc_flow4_cache *fc,
  * @param[out]    results   Per-key results.
  */
 void fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
-                                  const struct fc_flow4_key *keys,
+                                  const struct flow4_key *keys,
                                   unsigned nb_keys, uint64_t now,
                                   struct fc_flow4_result *results);
 
@@ -479,7 +467,7 @@ void fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
  * @param[out]    results   Per-key results.
  */
 void fc_flow4_cache_findadd_burst32(struct fc_flow4_cache *fc,
-                                     const struct fc_flow4_key *keys,
+                                     const struct flow4_key *keys,
                                      unsigned nb_keys, uint64_t now,
                                      struct fc_flow4_result *results);
 
@@ -496,7 +484,7 @@ void fc_flow4_cache_findadd_burst32(struct fc_flow4_cache *fc,
  * @param[out]    results   Per-key results (entry_idx of new entries).
  */
 void fc_flow4_cache_add_bulk(struct fc_flow4_cache *fc,
-                              const struct fc_flow4_key *keys,
+                              const struct flow4_key *keys,
                               unsigned nb_keys, uint64_t now,
                               struct fc_flow4_result *results);
 
@@ -510,7 +498,7 @@ void fc_flow4_cache_add_bulk(struct fc_flow4_cache *fc,
  * @param[in]     nb_keys   Number of keys.
  */
 void fc_flow4_cache_del_bulk(struct fc_flow4_cache *fc,
-                              const struct fc_flow4_key *keys,
+                              const struct flow4_key *keys,
                               unsigned nb_keys);
 
 /**
@@ -532,22 +520,22 @@ void fc_flow4_cache_del_idx_bulk(struct fc_flow4_cache *fc,
 
 /** @brief Find a single key.  Returns 1-origin entry_idx or 0. */
 uint32_t fc_flow4_cache_find(struct fc_flow4_cache *fc,
-                              const struct fc_flow4_key *key,
+                              const struct flow4_key *key,
                               uint64_t now);
 
 /** @brief Find or insert a single key.  Returns entry_idx or 0 if full. */
 uint32_t fc_flow4_cache_findadd(struct fc_flow4_cache *fc,
-                                 const struct fc_flow4_key *key,
+                                 const struct flow4_key *key,
                                  uint64_t now);
 
 /** @brief Insert a single key.  Returns entry_idx or 0 if full. */
 uint32_t fc_flow4_cache_add(struct fc_flow4_cache *fc,
-                             const struct fc_flow4_key *key,
+                             const struct flow4_key *key,
                              uint64_t now);
 
 /** @brief Remove a single entry by key. */
 void fc_flow4_cache_del(struct fc_flow4_cache *fc,
-                         const struct fc_flow4_key *key);
+                         const struct flow4_key *key);
 
 /** @brief Remove a single entry by pool index.  Returns 1 if removed. */
 int fc_flow4_cache_del_idx(struct fc_flow4_cache *fc, uint32_t entry_idx);

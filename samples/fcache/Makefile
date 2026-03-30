@@ -29,7 +29,8 @@ OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 
 CFLAGS_BASE  = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
-               -I$(TOPDIR)/include -I$(CURDIR)/include -I$(CURDIR)/src -fPIC \
+               -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
+               -I$(CURDIR)/include -I$(CURDIR)/src -fPIC \
                $(EXTRA_CFLAGS)
 
 SRCDIR       = src
@@ -60,12 +61,25 @@ LIB_SHARED   = $(LIBDIR)/libfcache.so
 LIB_SONAME   = libfcache.so.1
 
 PREFIX       ?= /usr/local
+BENCH_EXTRA_CFLAGS ?= -DNDEBUG
+BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 
-.PHONY: all static shared clean install
+.PHONY: all static shared test bench-short bench-full clean install
 
-all: static shared
+all: static shared test bench-short
 static: $(LIB_STATIC)
 shared: $(LIB_SHARED)
+
+test: static shared
+	$(MAKE) -C test test
+
+bench-short: static shared
+	$(MAKE) -C test bench-short BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
+	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
+
+bench-full: static shared
+	$(MAKE) -C test bench-full BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
+	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
 
 $(LIBDIR):
 	mkdir -p $@

@@ -8,7 +8,7 @@
  *
  * Before including, define:
  *   FCB_PREFIX      e.g. flow4
- *   FCB_KEY_T       e.g. struct fc_flow4_key
+ *   FCB_KEY_T       e.g. struct flow4_key
  *   FCB_RESULT_T    e.g. struct fc_flow4_result
  *   FCB_ENTRY_T     e.g. struct fc_flow4_entry
  *   FCB_CACHE_T     e.g. struct fc_flow4_cache
@@ -201,20 +201,25 @@ FCB_FN(active_scan)(const struct FCB_FN(ctx) *ctx)
  * Pure datapath: hit
  *===========================================================================*/
 static double
-FCB_FN(bench_hit)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
-                   unsigned n, unsigned repeat)
+FCB_FN(bench_hit)(struct FCB_FN(ctx) *ctx,
+                  const FCB_KEY_T *bg_keys, unsigned bg_n,
+                  const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
     uint64_t t0, t1;
 
-    for (unsigned w = 0; w < 20u; w++)
-        FCB_CALL_FINDADD(&ctx->fc, keys, n, (uint64_t)w + 1u, results);
-    t0 = fcb_rdtsc();
     for (unsigned r = 0; r < repeat; r++) {
+        const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
         uint64_t now = (uint64_t)r + 100u;
+
+        FCB_FN(ctx_reset)(ctx);
+        if (bg_n != 0u)
+            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
+        (void)FCB_FN(prefill)(ctx, round_keys, n, now + 1u);
+        fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_CALL_FINDADD(&ctx->fc, keys, n, now, results);
+        FCB_CALL_FINDADD(&ctx->fc, round_keys, n, now + 2u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -231,21 +236,25 @@ FCB_FN(bench_hit)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
  * Pure datapath: find_bulk hit (search only, no insert path)
  *===========================================================================*/
 static double
-FCB_FN(bench_find_hit)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
-                        unsigned n, unsigned repeat)
+FCB_FN(bench_find_hit)(struct FCB_FN(ctx) *ctx,
+                       const FCB_KEY_T *bg_keys, unsigned bg_n,
+                       const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
     uint64_t t0, t1;
 
-    /* warm up */
-    for (unsigned w = 0; w < 20u; w++)
-        FCB_API(find_bulk)(&ctx->fc, keys, n,
-                             (uint64_t)w + 1u, results);
     for (unsigned r = 0; r < repeat; r++) {
+        const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
         uint64_t now = (uint64_t)r + 100u;
+
+        FCB_FN(ctx_reset)(ctx);
+        if (bg_n != 0u)
+            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
+        (void)FCB_FN(prefill)(ctx, round_keys, n, now + 1u);
+        fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_API(find_bulk)(&ctx->fc, keys, n, now, results);
+        FCB_API(find_bulk)(&ctx->fc, round_keys, n, now + 2u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -262,19 +271,24 @@ FCB_FN(bench_find_hit)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
  * Pure datapath: add_bulk only
  *===========================================================================*/
 static double
-FCB_FN(bench_add_only)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
-                        unsigned n, unsigned repeat)
+FCB_FN(bench_add_only)(struct FCB_FN(ctx) *ctx,
+                       const FCB_KEY_T *bg_keys, unsigned bg_n,
+                       const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     for (unsigned r = 0; r < repeat; r++) {
+        const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
         uint64_t now = (uint64_t)r + 1000u;
         uint64_t t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
+        if (bg_n != 0u)
+            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
+        fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_API(add_bulk)(&ctx->fc, keys, n, now, results);
+        FCB_API(add_bulk)(&ctx->fc, round_keys, n, now + 1u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -291,20 +305,25 @@ FCB_FN(bench_add_only)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
  * Pure datapath: add_bulk + del_bulk cycle
  *===========================================================================*/
 static double
-FCB_FN(bench_add_del)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
-                       unsigned n, unsigned repeat)
+FCB_FN(bench_add_del)(struct FCB_FN(ctx) *ctx,
+                      const FCB_KEY_T *bg_keys, unsigned bg_n,
+                      const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     for (unsigned r = 0; r < repeat; r++) {
+        const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
         uint64_t now = (uint64_t)r + 1000u;
         uint64_t t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
+        if (bg_n != 0u)
+            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
+        fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_API(add_bulk)(&ctx->fc, keys, n, now, results);
-        FCB_API(del_bulk)(&ctx->fc, keys, n);
+        FCB_API(add_bulk)(&ctx->fc, round_keys, n, now + 1u, results);
+        FCB_API(del_bulk)(&ctx->fc, round_keys, n);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -321,20 +340,25 @@ FCB_FN(bench_add_del)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
  * Pure datapath: del_bulk (delete pre-filled entries)
  *===========================================================================*/
 static double
-FCB_FN(bench_del_bulk)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
-                        unsigned n, unsigned repeat)
+FCB_FN(bench_del_bulk)(struct FCB_FN(ctx) *ctx,
+                       const FCB_KEY_T *bg_keys, unsigned bg_n,
+                       const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
 
     for (unsigned r = 0; r < repeat; r++) {
+        const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
         uint64_t now = (uint64_t)r + 1000u;
         uint64_t t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
-        FCB_API(add_bulk)(&ctx->fc, keys, n, now, results);
+        if (bg_n != 0u)
+            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
+        FCB_API(add_bulk)(&ctx->fc, round_keys, n, now + 1u, results);
+        fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_API(del_bulk)(&ctx->fc, keys, n);
+        FCB_API(del_bulk)(&ctx->fc, round_keys, n);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -351,19 +375,24 @@ FCB_FN(bench_del_bulk)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
  * Pure datapath: miss + fill
  *===========================================================================*/
 static double
-FCB_FN(bench_miss_fill)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
-                         unsigned n, unsigned repeat)
+FCB_FN(bench_miss_fill)(struct FCB_FN(ctx) *ctx,
+                        const FCB_KEY_T *bg_keys, unsigned bg_n,
+                        const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     for (unsigned r = 0; r < repeat; r++) {
+        const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
         uint64_t now = (uint64_t)r + 1000u;
         uint64_t t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
+        if (bg_n != 0u)
+            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
+        fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_CALL_FINDADD(&ctx->fc, keys, n, now, results);
+        FCB_CALL_FINDADD(&ctx->fc, round_keys, n, now + 1u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -381,22 +410,29 @@ FCB_FN(bench_miss_fill)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
  *===========================================================================*/
 static double
 FCB_FN(bench_mixed)(struct FCB_FN(ctx) *ctx,
-                     const FCB_KEY_T *prefill_keys, unsigned prefill_n,
-                     const FCB_KEY_T *query_keys, unsigned query_n,
+                    const FCB_KEY_T *prefill_keys, unsigned prefill_n,
+                    const FCB_KEY_T *query_keys, unsigned query_n,
                      unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)query_n * sizeof(*results));
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    unsigned hit_n = (query_n * 9u) / 10u;
+    unsigned bg_n = (prefill_n > hit_n) ? (prefill_n - hit_n) : 0u;
 
     for (unsigned r = 0; r < repeat; r++) {
+        const FCB_KEY_T *round_query = query_keys + ((size_t)r * query_n);
         uint64_t now = (uint64_t)r + 5000u;
         uint64_t t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
-        (void)FCB_FN(prefill)(ctx, prefill_keys, prefill_n, now);
+        if (bg_n != 0u)
+            (void)FCB_FN(prefill)(ctx, prefill_keys, bg_n, now);
+        if (hit_n != 0u)
+            (void)FCB_FN(prefill)(ctx, round_query, hit_n, now + 1u);
+        fcb_cold_touch();
 
         t0 = fcb_rdtsc();
-        FCB_CALL_FINDADD(&ctx->fc, query_keys, query_n, now, results);
+        FCB_CALL_FINDADD(&ctx->fc, round_query, query_n, now + 2u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }

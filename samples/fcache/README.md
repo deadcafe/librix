@@ -7,14 +7,17 @@ lookup to hide DRAM latency.
 ## Quick Start
 
 ```sh
-# Build the cache library
+# Build the cache library, run tests, and run bench-short
 make -C samples/fcache all
 
 # Run functional tests
 make -C samples/fcache/test test
 
-# Run datapath benchmark
+# Run representative short benchmark suite
 make -C samples/fcache/test bench
+
+# Run full benchmark suite before commit
+make -C samples/fcache/test bench-full
 
 # Show top-level helper targets
 make help
@@ -102,7 +105,7 @@ Current datapath measurements are summarized in §16. In general:
 ### 3.1 IPv4 flow key (24-byte fixed-width object)
 
 ```c
-struct fc_flow4_key {
+struct flow4_key {
     uint8_t  family;   /* always 4 */
     uint8_t  proto;
     uint16_t src_port;
@@ -124,7 +127,7 @@ stay canonical.
 ### 3.2 IPv6 flow key (44 bytes)
 
 ```c
-struct fc_flow6_key {
+struct flow6_key {
     uint8_t  family;   /* always 6 */
     uint8_t  proto;
     uint16_t src_port;
@@ -429,8 +432,8 @@ unsigned fc_PREFIX_cache_maintain_step(...);
 For `flowu`, key construction helpers are also provided:
 
 ```c
-struct fc_flowu_key fc_flowu_key_v4(...);
-struct fc_flowu_key fc_flowu_key_v6(...);
+struct flowu_key fc_flowu_key_v4(...);
+struct flowu_key fc_flowu_key_v6(...);
 ```
 
 ## 11. Template and Dispatch Architecture
@@ -696,11 +699,15 @@ Latest rerun: March 24, 2026 on `AMD Ryzen 9 8945HS` (Zen 4, AVX-512 ready),
 
 Representative results below come from the default `make bench` path:
 `datapath`, `maint_partial`, and the quick `findadd_window` matrix.
-Query width is 256. The datapath microbench measures with 50% active entries.
+Query width is 256.
 
 Benchmark modes and intent:
 
-- `datapath`: reset-per-round microbench. Compares `findadd_hit`, `find_hit`, `findadd_miss`, `add_only`, `add+del`, `del_bulk`, and reset-per-round mixed `90/10`.
+- `datapath`: cold reset-per-round microbench. Each timed round uses a fresh
+  unique key batch, rebuilds the required resident set, performs a cache-cold
+  touch outside the timer, and then times only the bulk API call. It compares
+  `findadd_hit`, `find_hit`, `findadd_miss`, `add_only`, `add+del`,
+  `del_bulk`, and reset-per-round mixed `90/10`.
 - `maint`: full-table sweep with all entries expired. Useful for fill-sensitivity and saturation studies, but not part of the representative default bench path.
 - `maint_partial`: measures `maintain_step()` cost for partial sweeps at 75% fill with all entries expired.
 - `findadd_closed`: fixed-set benchmark. Measures `findadd_bulk()` with a stable hit set and a stable miss set; the miss set is deleted after each round so fill stays fixed.
@@ -710,9 +717,41 @@ Benchmark modes and intent:
 Default benchmark entry points:
 
 - `make bench`: representative suite. Runs `datapath`, `maint_partial`, and the quick `findadd_window` matrix only.
+- `make all`: builds the library, runs tests, and runs `bench-short`.
+- `make bench`: alias of `bench-short`.
 - `make bench-full`: full long-running suite. Adds the heavy `trace_open_custom` matrix runs.
 - `./run_fc_bench_matrix.sh <variant> quick`: quick windowed open-set matrix.
 - `./run_fc_bench_matrix.sh <variant> full`: full matrix including long-running trace cases.
+
+`fc_bench` also supports two sampling profiles:
+
+- `--bench full`: keep the configured `--raw-repeat` / `--keep-n` values for
+  every mode. For cold `datapath`, the current default internal round counts
+  are `hit/find=96`, `miss/add/del=32`, `mixed=32`.
+- `--bench short`: reduce sampling only for cold modes (`datapath`, `maint`, `maint_partial`).
+  Hot modes such as `findadd_closed`, `findadd_open`, and `findadd_window` keep the
+  user-specified sampling unchanged. For cold `datapath`, the current default
+  internal round counts are `hit/find=48`, `miss/add/del=16`, `mixed=16`.
+
+At `1M` entries on the current `avx2` build:
+
+- `datapath` (`flow4`, `1M`, `query=256`): `short` is typically within about
+  `1-9%` of `full`, depending on the metric.
+- `maint` (`flow4`, `1M`): `short` is within about `2%` of `full`.
+
+So `short` is suitable for faster cold-path screening, while `full` remains
+the reference profile for cold-path comparisons.
+
+Current corrected cold `datapath` reference values for `flow4`, `1M`,
+`avx2`, `--bench full` are:
+
+- `findadd_hit`: `150.47 cy/key`
+- `find_hit`: `143.59 cy/key`
+- `findadd_miss`: `208.05 cy/key`
+- `add_only`: `153.91 cy/key`
+- `add+del`: `202.66 cy/key`
+- `del_bulk`: `150.08 cy/key`
+- `mixed_90_10_reset`: `151.48 cy/key`
 
 ### 16.1 Datapath Performance (cycles/key, no expire)
 
@@ -945,7 +984,7 @@ via function pointers.  Inlining is critical for pipeline performance.
 
 ```c
 static inline union rix_hash_hash_u
-fc_flow4_hash_fn(const struct fc_flow4_key *key, uint32_t mask)
+fc_flow4_hash_fn(const struct flow4_key *key, uint32_t mask)
 {
 #if defined(__x86_64__) && defined(__SSE4_2__)
     /* Direct CRC32C — 3 x crc32q for 24B key */
@@ -990,19 +1029,19 @@ struct fc_flow4_ops {
                 int (*cb)(uint32_t entry_idx, void *arg), void *arg);
     /* hot-path */
     void (*find_bulk)(struct fc_flow4_cache *fc,
-                      const struct fc_flow4_key *keys,
+                      const struct flow4_key *keys,
                       unsigned nb_keys, uint64_t now,
                       struct fc_flow4_result *results);
     void (*findadd_bulk)(struct fc_flow4_cache *fc,
-                         const struct fc_flow4_key *keys,
+                         const struct flow4_key *keys,
                          unsigned nb_keys, uint64_t now,
                          struct fc_flow4_result *results);
     void (*add_bulk)(struct fc_flow4_cache *fc,
-                     const struct fc_flow4_key *keys,
+                     const struct flow4_key *keys,
                      unsigned nb_keys, uint64_t now,
                      struct fc_flow4_result *results);
     void (*del_bulk)(struct fc_flow4_cache *fc,
-                     const struct fc_flow4_key *keys,
+                     const struct flow4_key *keys,
                      unsigned nb_keys);
     void (*del_idx_bulk)(struct fc_flow4_cache *fc,
                          const uint32_t *idxs, unsigned nb_idxs);
@@ -1045,7 +1084,7 @@ fc_arch_init(unsigned arch_enable)
 /* Hot-path wrapper — dispatch through runtime-selected ops */
 void
 fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
-                             const struct fc_flow4_key *keys,
+                             const struct flow4_key *keys,
                              unsigned nb_keys, uint64_t now,
                              struct fc_flow4_result *results)
 {

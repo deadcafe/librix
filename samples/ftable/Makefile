@@ -28,7 +28,8 @@ OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 
 CFLAGS_BASE  = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
-               -I$(TOPDIR)/include -I$(CURDIR)/include -I$(CURDIR)/src \
+               -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
+               -I$(CURDIR)/include -I$(CURDIR)/src \
                -fPIC $(EXTRA_CFLAGS)
 
 LIBDIR      ?= lib

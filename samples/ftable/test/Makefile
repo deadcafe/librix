@@ -30,7 +30,8 @@ EXTRA_CFLAGS ?=
 BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
-               -I$(TOPDIR)/include -I$(FTDIR)/include \
+               -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
+               -I$(FTDIR)/include \
                -mavx2 -msse4.2 $(EXTRA_CFLAGS)
 
 TARGET       = ft_test

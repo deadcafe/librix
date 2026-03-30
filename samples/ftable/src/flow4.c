@@ -810,9 +810,9 @@ ft_flow4_table_add_idx_bulk(struct ft_flow4_table *ft,
                 hashes[idx & (FT_FLOW4_BULK_CTX_RING - 1u)] = h;
                 _rix_hash_buckets(h, ft->ht_head.rhh_mask, &bk0, &bk1,
                                   &fp_unused);
-                rix_hash_prefetch_bucket(&ft->buckets[bk0]);
+                rix_hash_prefetch_bucket_of(&ft->buckets[bk0]);
                 if (bk1 != bk0)
-                    rix_hash_prefetch_bucket(&ft->buckets[bk1]);
+                    rix_hash_prefetch_bucket_of(&ft->buckets[bk1]);
             }
         }
 
@@ -948,14 +948,14 @@ ft_flow4_table_grow_2x(struct ft_flow4_table *ft)
     for (unsigned bk = 0u;
          bk < FT_FLOW4_GROW_OLD_BK_AHEAD && bk <= old_mask;
          bk++)
-        rix_hash_prefetch_bucket_idx(&ft->buckets[bk]);
+        rix_hash_prefetch_bucket_indices_of(&ft->buckets[bk]);
 
     for (unsigned bk = 0u; bk <= old_mask; bk++) {
         const struct rix_hash_bucket_s *old_bk = &ft->buckets[bk];
         unsigned prefetch_bk = bk + FT_FLOW4_GROW_OLD_BK_AHEAD;
 
         if (prefetch_bk <= old_mask)
-            rix_hash_prefetch_bucket_idx(&ft->buckets[prefetch_bk]);
+            rix_hash_prefetch_bucket_indices_of(&ft->buckets[prefetch_bk]);
 
         for (unsigned slot = 0u; slot < RIX_HASH_BUCKET_ENTRY_SZ; slot++) {
             unsigned idx = old_bk->idx[slot];
@@ -965,7 +965,7 @@ ft_flow4_table_grow_2x(struct ft_flow4_table *ft)
                 continue;
             entry = ft_flow4_layout_entry_ptr_(ft, idx);
             RIX_ASSUME_NONNULL(entry);
-            rix_hash_prefetch_entry(entry);
+            rix_hash_prefetch_entry_of(entry);
         }
 
         for (unsigned slot = 0u; slot < RIX_HASH_BUCKET_ENTRY_SZ; slot++) {
@@ -989,7 +989,7 @@ ft_flow4_table_grow_2x(struct ft_flow4_table *ft)
              * bk0 usually has a free slot. Eagerly prefetch only bk0.hash[].
              * bk1 and idx[] are touched lazily in the commit path on demand.
              */
-            rix_hash_prefetch_bucket_hash(&new_buckets[bk0]);
+            rix_hash_prefetch_bucket_hashes_of(&new_buckets[bk0]);
             produced++;
 
             if (produced - consumed > FT_FLOW4_GROW_REINSERT_AHEAD) {

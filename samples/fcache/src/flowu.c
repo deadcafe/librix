@@ -11,13 +11,13 @@
 #include "flowu_cache.h"
 
 static inline union rix_hash_hash_u
-fc_flowu_hash_fn(const struct fc_flowu_key *key, uint32_t mask)
+fc_flowu_hash_fn(const struct flowu_key *key, uint32_t mask)
 {
     return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
 }
 
 static inline int
-fc_flowu_cmp(const struct fc_flowu_key *a, const struct fc_flowu_key *b)
+fc_flowu_cmp(const struct flowu_key *a, const struct flowu_key *b)
 {
     return memcmp(a, b, sizeof(*a));
 }

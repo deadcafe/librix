@@ -4,7 +4,7 @@
 # samples/Makefile - Top-level delegating Makefile
 #
 # Targets:
-#   all    - build library (static + shared) and test binary (default)
+#   all    - build library, run fcache tests, and run bench-short (default)
 #   static - build libfcache.a only
 #   shared - build libfcache.so only
 #   test   - build and run functional tests
@@ -20,7 +20,6 @@ BENCH_EXTRA_CFLAGS ?= -DNDEBUG
 BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 all:
 	$(MAKE) -C fcache all
-	$(MAKE) -C fcache/test all
 
 static:
 	$(MAKE) -C fcache static
@@ -33,7 +32,7 @@ test: all
 	$(MAKE) -C fcache/test test
 
 bench:
-	$(MAKE) -C fcache/test bench BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
+	$(MAKE) -C fcache/test bench-short BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
 	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
 
 bench-full:

@@ -18,6 +18,7 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_queue.h>
 #include "fc_cache_common.h"
+#include <flow/flow_key.h>
 
 #ifndef FC_CACHE_LINE_SIZE
 #define FC_CACHE_LINE_SIZE 64u
@@ -26,35 +27,15 @@
 #define FC_FLOWU_DEFAULT_PRESSURE_EMPTY_SLOTS 1u
 #endif
 
-struct fc_flowu_key {
-    uint8_t  family;        /*  1B: FC_FLOW_FAMILY_IPV4 / IPV6 */
-    uint8_t  proto;         /*  1B */
-    uint16_t src_port;      /*  2B */
-    uint16_t dst_port;      /*  2B */
-    uint16_t pad;           /*  2B */
-    uint32_t vrfid;         /*  4B */
-    union {                 /* 32B */
-        struct {
-            uint32_t src;
-            uint32_t dst;
-            uint8_t  _pad[24];
-        } v4;
-        struct {
-            uint8_t  src[16];
-            uint8_t  dst[16];
-        } v6;
-    } addr;
-} __attribute__((packed));  /* 44B total */
-
 /*===========================================================================
  * Key construction helpers
  *===========================================================================*/
-static inline struct fc_flowu_key
+static inline struct flowu_key
 fc_flowu_key_v4(uint32_t src_ip, uint32_t dst_ip,
                   uint16_t src_port, uint16_t dst_port,
                   uint8_t proto, uint32_t vrfid)
 {
-    struct fc_flowu_key k;
+    struct flowu_key k;
     memset(&k, 0, sizeof(k));
     k.family   = FC_FLOW_FAMILY_IPV4;
     k.proto    = proto;
@@ -66,12 +47,12 @@ fc_flowu_key_v4(uint32_t src_ip, uint32_t dst_ip,
     return k;
 }
 
-static inline struct fc_flowu_key
+static inline struct flowu_key
 fc_flowu_key_v6(const uint8_t *src_ip, const uint8_t *dst_ip,
                   uint16_t src_port, uint16_t dst_port,
                   uint8_t proto, uint32_t vrfid)
 {
-    struct fc_flowu_key k;
+    struct flowu_key k;
     memset(&k, 0, sizeof(k));
     k.family   = FC_FLOW_FAMILY_IPV6;
     k.proto    = proto;
@@ -88,13 +69,10 @@ struct fc_flowu_result {
 };
 
 struct fc_flowu_entry {
-    struct fc_flowu_key   key;          /* 44B */
-    uint32_t               cur_hash;     /* current-bucket hash */
-    uint64_t               last_ts;      /* 0 = free / invalid */
+    struct flowu_entry_hdr hdr;
+    uint64_t last_ts;            /* 0 = free / invalid */
     RIX_SLIST_ENTRY(struct fc_flowu_entry) free_link;
-    uint16_t               slot;         /* slot in current bucket */
-    uint16_t               reserved1;
-} __attribute__((aligned(FC_CACHE_LINE_SIZE)));
+} __attribute__((packed, aligned(FC_CACHE_LINE_SIZE)));
 
 RIX_STATIC_ASSERT(sizeof(struct fc_flowu_entry) == FC_CACHE_LINE_SIZE,
                   "fc_flowu_entry must be 64 bytes");
@@ -297,32 +275,32 @@ void fc_flowu_cache_flush(struct fc_flowu_cache *fc);
 unsigned fc_flowu_cache_nb_entries(const struct fc_flowu_cache *fc);
 /* bulk operations */
 void fc_flowu_cache_find_bulk(struct fc_flowu_cache *fc,
-                               const struct fc_flowu_key *keys,
+                               const struct flowu_key *keys,
                                unsigned nb_keys, uint64_t now,
                                struct fc_flowu_result *results);
 void fc_flowu_cache_findadd_bulk(struct fc_flowu_cache *fc,
-                                  const struct fc_flowu_key *keys,
+                                  const struct flowu_key *keys,
                                   unsigned nb_keys, uint64_t now,
                                   struct fc_flowu_result *results);
 void fc_flowu_cache_add_bulk(struct fc_flowu_cache *fc,
-                              const struct fc_flowu_key *keys,
+                              const struct flowu_key *keys,
                               unsigned nb_keys, uint64_t now,
                               struct fc_flowu_result *results);
 void fc_flowu_cache_del_bulk(struct fc_flowu_cache *fc,
-                              const struct fc_flowu_key *keys,
+                              const struct flowu_key *keys,
                               unsigned nb_keys);
 void fc_flowu_cache_del_idx_bulk(struct fc_flowu_cache *fc,
                                   const uint32_t *idxs, unsigned nb_idxs);
 
 /* single-key convenience */
 uint32_t fc_flowu_cache_find(struct fc_flowu_cache *fc,
-                              const struct fc_flowu_key *key, uint64_t now);
+                              const struct flowu_key *key, uint64_t now);
 uint32_t fc_flowu_cache_findadd(struct fc_flowu_cache *fc,
-                                 const struct fc_flowu_key *key, uint64_t now);
+                                 const struct flowu_key *key, uint64_t now);
 uint32_t fc_flowu_cache_add(struct fc_flowu_cache *fc,
-                             const struct fc_flowu_key *key, uint64_t now);
+                             const struct flowu_key *key, uint64_t now);
 void fc_flowu_cache_del(struct fc_flowu_cache *fc,
-                         const struct fc_flowu_key *key);
+                         const struct flowu_key *key);
 int fc_flowu_cache_del_idx(struct fc_flowu_cache *fc, uint32_t entry_idx);
 
 /* maintenance */

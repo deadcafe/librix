@@ -15,7 +15,7 @@
  * function-pointer dispatch.  24B = 3 x crc32q, no remainder handling.
  */
 static inline union rix_hash_hash_u
-fc_flow4_hash_fn(const struct fc_flow4_key *key, uint32_t mask)
+fc_flow4_hash_fn(const struct flow4_key *key, uint32_t mask)
 {
 #if defined(__x86_64__) && defined(__SSE4_2__)
     union rix_hash_hash_u r;
@@ -49,7 +49,7 @@ fc_flow4_hash_fn(const struct fc_flow4_key *key, uint32_t mask)
  * 24B = 3 x uint64_t XOR-OR.
  */
 static inline int
-fc_flow4_cmp(const struct fc_flow4_key *a, const struct fc_flow4_key *b)
+fc_flow4_cmp(const struct flow4_key *a, const struct flow4_key *b)
 {
     uint64_t a0, a1, a2, b0, b1, b2;
 
@@ -201,7 +201,7 @@ _FCG_API(flow4, init_ex)(struct fc_flow4_cache *fc,
 
 static inline void
 fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
-                             const struct fc_flow4_key *keys,
+                             const struct flow4_key *keys,
                              uint64_t now,
                              struct fc_flow4_result *results,
                              struct rix_hash_find_ctx_s *ctx,
@@ -263,7 +263,7 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
         return;
     }
 
-    entry->key = keys[idx];
+    entry->hdr.key = keys[idx];
     entry->last_ts = now;
     {
         struct fc_flow4_entry *ret;
@@ -314,14 +314,14 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
 }
 
 void _FCG_API(flow4, findadd_burst32)(struct fc_flow4_cache *fc,
-                                      const struct fc_flow4_key *keys,
+                                      const struct flow4_key *keys,
                                       unsigned nb_keys,
                                       uint64_t now,
                                       struct fc_flow4_result *results);
 
 void
 _FCG_API(flow4, findadd_burst32)(struct fc_flow4_cache *fc,
-                                 const struct fc_flow4_key *keys,
+                                 const struct flow4_key *keys,
                                  unsigned nb_keys,
                                  uint64_t now,
                                  struct fc_flow4_result *results)

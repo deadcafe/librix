@@ -13,6 +13,7 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_queue.h>
 #include "fc_cache_common.h"
+#include <flow/flow_key.h>
 
 #ifndef FC_CACHE_LINE_SIZE
 #define FC_CACHE_LINE_SIZE 64u
@@ -21,23 +22,12 @@
 #define FC_FLOW6_DEFAULT_PRESSURE_EMPTY_SLOTS 1u
 #endif
 
-struct fc_flow6_key {
-    uint8_t  family;         /* always FC_FLOW_FAMILY_IPV6 (6) */
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;            /* must be 0 */
-    uint32_t vrfid;
-    uint8_t  src_ip[16];
-    uint8_t  dst_ip[16];
-} __attribute__((packed));
-
-static inline struct fc_flow6_key
+static inline struct flow6_key
 fc_flow6_key_make(const uint8_t *src_ip, const uint8_t *dst_ip,
                   uint16_t src_port, uint16_t dst_port,
                   uint8_t proto, uint32_t vrfid)
 {
-    struct fc_flow6_key k;
+    struct flow6_key k;
 
     memset(&k, 0, sizeof(k));
     k.family = FC_FLOW_FAMILY_IPV6;
@@ -55,13 +45,10 @@ struct fc_flow6_result {
 };
 
 struct fc_flow6_entry {
-    struct fc_flow6_key   key;          /* 44B */
-    uint32_t               cur_hash;     /* current-bucket hash */
-    uint64_t               last_ts;      /* 0 = free / invalid */
+    struct flow6_entry_hdr hdr;
+    uint64_t last_ts;            /* 0 = free / invalid */
     RIX_SLIST_ENTRY(struct fc_flow6_entry) free_link;
-    uint16_t               slot;         /* slot in current bucket */
-    uint16_t               reserved1;
-} __attribute__((aligned(FC_CACHE_LINE_SIZE)));
+} __attribute__((packed, aligned(FC_CACHE_LINE_SIZE)));
 
 RIX_STATIC_ASSERT(sizeof(struct fc_flow6_entry) == FC_CACHE_LINE_SIZE,
                   "fc_flow6_entry must be 64 bytes");
@@ -264,32 +251,32 @@ void fc_flow6_cache_flush(struct fc_flow6_cache *fc);
 unsigned fc_flow6_cache_nb_entries(const struct fc_flow6_cache *fc);
 /* bulk operations */
 void fc_flow6_cache_find_bulk(struct fc_flow6_cache *fc,
-                               const struct fc_flow6_key *keys,
+                               const struct flow6_key *keys,
                                unsigned nb_keys, uint64_t now,
                                struct fc_flow6_result *results);
 void fc_flow6_cache_findadd_bulk(struct fc_flow6_cache *fc,
-                                  const struct fc_flow6_key *keys,
+                                  const struct flow6_key *keys,
                                   unsigned nb_keys, uint64_t now,
                                   struct fc_flow6_result *results);
 void fc_flow6_cache_add_bulk(struct fc_flow6_cache *fc,
-                              const struct fc_flow6_key *keys,
+                              const struct flow6_key *keys,
                               unsigned nb_keys, uint64_t now,
                               struct fc_flow6_result *results);
 void fc_flow6_cache_del_bulk(struct fc_flow6_cache *fc,
-                              const struct fc_flow6_key *keys,
+                              const struct flow6_key *keys,
                               unsigned nb_keys);
 void fc_flow6_cache_del_idx_bulk(struct fc_flow6_cache *fc,
                                   const uint32_t *idxs, unsigned nb_idxs);
 
 /* single-key convenience */
 uint32_t fc_flow6_cache_find(struct fc_flow6_cache *fc,
-                              const struct fc_flow6_key *key, uint64_t now);
+                              const struct flow6_key *key, uint64_t now);
 uint32_t fc_flow6_cache_findadd(struct fc_flow6_cache *fc,
-                                 const struct fc_flow6_key *key, uint64_t now);
+                                 const struct flow6_key *key, uint64_t now);
 uint32_t fc_flow6_cache_add(struct fc_flow6_cache *fc,
-                             const struct fc_flow6_key *key, uint64_t now);
+                             const struct flow6_key *key, uint64_t now);
 void fc_flow6_cache_del(struct fc_flow6_cache *fc,
-                         const struct fc_flow6_key *key);
+                         const struct flow6_key *key);
 int fc_flow6_cache_del_idx(struct fc_flow6_cache *fc, uint32_t entry_idx);
 
 /* maintenance */

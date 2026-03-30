@@ -15,6 +15,7 @@
 #include <rix/rix_defs_private.h>
 
 #include "ft_table_common.h"
+#include <flow/flow_key.h>
 
 #define FT_TABLE_CACHE_LINE_SIZE 64u
 #define FT_FLOW4_DEFAULT_GROW_FILL_PCT 60u
@@ -22,15 +23,20 @@
 #define FT_FLOW4_DEFAULT_MAX_NB_BK 1048576u
 
 struct ft_flow4_key {
-    uint8_t  family;
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;
-    uint32_t vrfid;
-    uint32_t src_ip;
-    uint32_t dst_ip;
-    uint32_t zero;
+    union {
+        struct flow4_key flow;
+        struct {
+            uint8_t  family;
+            uint8_t  proto;
+            uint16_t src_port;
+            uint16_t dst_port;
+            uint16_t pad;
+            uint32_t vrfid;
+            uint32_t src_ip;
+            uint32_t dst_ip;
+            uint32_t zero;
+        };
+    };
 };
 
 static inline struct ft_flow4_key
@@ -56,14 +62,25 @@ struct ft_flow4_result {
 };
 
 struct ft_flow4_entry {
-    struct ft_flow4_key key;
-    uint32_t cur_hash;
+    union {
+        struct flow4_entry_hdr hdr;
+        struct {
+            struct ft_flow4_key key;
+            union {
+                struct flow_hashtbl_elm htbl_elm;
+                struct {
+                    uint32_t cur_hash;
+                    uint16_t slot;
+                    uint16_t reserved1;
+                };
+            };
+        };
+    };
     uint32_t hash0;
     uint32_t hash1;
     uint32_t next_free;
-    uint16_t slot;
     uint16_t flags;
-    uint8_t  reserved0[20];
+    uint8_t  reserved0[18];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
 RIX_STATIC_ASSERT(sizeof(struct ft_flow4_entry) == FT_TABLE_CACHE_LINE_SIZE,

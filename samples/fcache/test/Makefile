@@ -36,10 +36,12 @@ EXTRA_CFLAGS ?=
 BENCH_EXTRA_CFLAGS ?= $(EXTRA_CFLAGS) -DNDEBUG
 BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
-               -I$(TOPDIR)/include -I$(FCDIR)/include \
+               -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
+               -I$(FCDIR)/include \
                $(EXTRA_CFLAGS)
 BENCH_CFLAGS = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
-               -I$(TOPDIR)/include -I$(FCDIR)/include \
+               -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
+               -I$(FCDIR)/include \
                $(BENCH_EXTRA_CFLAGS)
 
 VARIANT     ?= flow4
@@ -54,9 +56,9 @@ NDEBUG_LIBDIR ?= lib_ndebug
 NDEBUG_LIBFC   = $(FCDIR)/$(NDEBUG_LIBDIR)/libfcache.a
 NDEBUG_BENCH   = fc_bench_ndebug
 
-.PHONY: all test ndebug-check bench-build bench bench-full matrix matrix-full clean
+.PHONY: all test ndebug-check bench-build bench-short bench bench-full matrix matrix-full clean
 
-all: $(TARGET) $(BENCH)
+all: test bench-short
 
 $(TARGET): $(SRC) $(LIBFC)
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LIBFC)
@@ -84,10 +86,12 @@ bench-build:
 	$(MAKE) clean
 	$(MAKE) $(BENCH) BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
 
-bench: bench-build
+bench-short: bench-build
 	./$(BENCH) $(BENCH_FC_OPTS) datapath
 	./$(BENCH) $(BENCH_FC_OPTS) maint_partial
 	BENCH_FC_OPTS="$(BENCH_FC_OPTS)" ./run_fc_bench_matrix.sh all quick
+
+bench: bench-short
 
 bench-full: bench-build
 	./$(BENCH) $(BENCH_FC_OPTS) datapath

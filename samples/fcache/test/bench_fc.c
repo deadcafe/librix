@@ -29,10 +29,29 @@
 #include <sched.h>
 
 unsigned fcb_query = FCB_QUERY_DEFAULT;
+unsigned fcb_dp_hit_repeat = 96u;
+unsigned fcb_dp_miss_repeat = 32u;
+unsigned fcb_dp_mixed_repeat = 32u;
 unsigned fcb_findadd_api_mode = FCB_FINDADD_API_BULK;
 unsigned fcb_sample_raw_repeat = 1u;
 unsigned fcb_sample_keep_n = 1u;
 int fcb_pin_core = -1;
+
+enum fcb_bench_profile {
+    FCB_BENCH_FULL = 0,
+    FCB_BENCH_SHORT,
+};
+
+enum fcb_bench_profile fcb_bench_profile = FCB_BENCH_FULL;
+
+#define FCB_SHORT_COLD_RAW_REPEAT 3u
+#define FCB_SHORT_COLD_KEEP_N    1u
+#define FCB_FULL_DP_HIT_REPEAT    96u
+#define FCB_FULL_DP_MISS_REPEAT   32u
+#define FCB_FULL_DP_MIXED_REPEAT  32u
+#define FCB_SHORT_DP_HIT_REPEAT   48u
+#define FCB_SHORT_DP_MISS_REPEAT  16u
+#define FCB_SHORT_DP_MIXED_REPEAT 16u
 
 enum {
     FCB_DP_FINDADD_HIT = 0,
@@ -246,6 +265,62 @@ fcb_print_sampling_config(void)
 }
 
 static int
+fcb_mode_is_cold(const char *mode)
+{
+    return strcmp(mode, "datapath") == 0
+        || strcmp(mode, "maint") == 0
+        || strcmp(mode, "maint_partial") == 0;
+}
+
+struct fcb_sampling_guard {
+    unsigned raw_repeat;
+    unsigned keep_n;
+    unsigned dp_hit_repeat;
+    unsigned dp_miss_repeat;
+    unsigned dp_mixed_repeat;
+    int active;
+};
+
+static void
+fcb_apply_mode_sampling_profile(const char *mode, struct fcb_sampling_guard *guard)
+{
+    guard->raw_repeat = fcb_sample_raw_repeat;
+    guard->keep_n = fcb_sample_keep_n;
+    guard->dp_hit_repeat = fcb_dp_hit_repeat;
+    guard->dp_miss_repeat = fcb_dp_miss_repeat;
+    guard->dp_mixed_repeat = fcb_dp_mixed_repeat;
+    guard->active = 0;
+
+    if (fcb_bench_profile != FCB_BENCH_SHORT || !fcb_mode_is_cold(mode))
+        return;
+
+    if (fcb_sample_raw_repeat > FCB_SHORT_COLD_RAW_REPEAT)
+        fcb_sample_raw_repeat = FCB_SHORT_COLD_RAW_REPEAT;
+    if (fcb_sample_keep_n > FCB_SHORT_COLD_KEEP_N)
+        fcb_sample_keep_n = FCB_SHORT_COLD_KEEP_N;
+    if (fcb_sample_keep_n > fcb_sample_raw_repeat)
+        fcb_sample_keep_n = fcb_sample_raw_repeat;
+    if (strcmp(mode, "datapath") == 0) {
+        fcb_dp_hit_repeat = FCB_SHORT_DP_HIT_REPEAT;
+        fcb_dp_miss_repeat = FCB_SHORT_DP_MISS_REPEAT;
+        fcb_dp_mixed_repeat = FCB_SHORT_DP_MIXED_REPEAT;
+    }
+    guard->active = 1;
+}
+
+static void
+fcb_restore_mode_sampling_profile(const struct fcb_sampling_guard *guard)
+{
+    if (!guard->active)
+        return;
+    fcb_sample_raw_repeat = guard->raw_repeat;
+    fcb_sample_keep_n = guard->keep_n;
+    fcb_dp_hit_repeat = guard->dp_hit_repeat;
+    fcb_dp_miss_repeat = guard->dp_miss_repeat;
+    fcb_dp_mixed_repeat = guard->dp_mixed_repeat;
+}
+
+static int
 fcb_apply_pin_core(void)
 {
     cpu_set_t set;
@@ -340,7 +415,7 @@ fcb_print_archcmp_datapath_summary(const char *lhs_name,
 /*===========================================================================
  * Key generators
  *===========================================================================*/
-static inline struct fc_flow4_key
+static inline struct flow4_key
 fcb_make_key4(unsigned i)
 {
     return fc_flow4_key_make(0x0a000000u | (i & 0x00ffffffu),
@@ -352,7 +427,7 @@ fcb_make_key4(unsigned i)
                              1u + (i >> 24));
 }
 
-static inline struct fc_flow6_key
+static inline struct flow6_key
 fcb_make_key6(unsigned i)
 {
     uint8_t src[16] = {0x20, 0x01};
@@ -370,7 +445,7 @@ fcb_make_key6(unsigned i)
                              1u + (i >> 24));
 }
 
-static inline struct fc_flowu_key
+static inline struct flowu_key
 fcb_make_keyu(unsigned i)
 {
     uint32_t src = 0x0a000000u | (i & 0x00ffffffu);
@@ -385,7 +460,7 @@ fcb_make_keyu(unsigned i)
 
 static inline void
 fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
-                       const struct fc_flow4_key *keys,
+                       const struct flow4_key *keys,
                        unsigned n, uint64_t now,
                        struct fc_flow4_result *results)
 {
@@ -402,7 +477,7 @@ fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
 
 /* --- flow4 --- */
 #define FCB_PREFIX    flow4
-#define FCB_KEY_T     struct fc_flow4_key
+#define FCB_KEY_T     struct flow4_key
 #define FCB_RESULT_T  struct fc_flow4_result
 #define FCB_ENTRY_T   struct fc_flow4_entry
 #define FCB_CACHE_T   struct fc_flow4_cache
@@ -417,7 +492,7 @@ fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
 
 /* --- flow6 --- */
 #define FCB_PREFIX    flow6
-#define FCB_KEY_T     struct fc_flow6_key
+#define FCB_KEY_T     struct flow6_key
 #define FCB_RESULT_T  struct fc_flow6_result
 #define FCB_ENTRY_T   struct fc_flow6_entry
 #define FCB_CACHE_T   struct fc_flow6_cache
@@ -429,7 +504,7 @@ fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
 
 /* --- flowu --- */
 #define FCB_PREFIX    flowu
-#define FCB_KEY_T     struct fc_flowu_key
+#define FCB_KEY_T     struct flowu_key
 #define FCB_RESULT_T  struct fc_flowu_result
 #define FCB_ENTRY_T   struct fc_flowu_entry
 #define FCB_CACHE_T   struct fc_flowu_cache
@@ -451,6 +526,10 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
     unsigned max_entries = fcb_pool_count(desired);
     unsigned nb_bk = fcb_nb_bk_hint(max_entries);
     unsigned prefill_n = max_entries / 2u;
+    unsigned hit_key_n = (unsigned)((size_t)FCB_QUERY * fcb_dp_hit_repeat);
+    unsigned miss_key_n = (unsigned)((size_t)FCB_QUERY * fcb_dp_miss_repeat);
+    unsigned mixed_key_n = (unsigned)((size_t)FCB_QUERY * fcb_dp_mixed_repeat);
+    unsigned mixed_hit_n = (FCB_QUERY * 9u) / 10u;
 
     struct fcb_flow4_ctx ctx4;
     struct fcb_flow6_ctx ctx6;
@@ -461,18 +540,18 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
     fcb_flowu_ctx_init(&ctxu, nb_bk, max_entries, 1000000000ull);
 
     /* generate keys */
-    struct fc_flow4_key *p4 = fcb_alloc((size_t)prefill_n * sizeof(*p4));
-    struct fc_flow6_key *p6 = fcb_alloc((size_t)prefill_n * sizeof(*p6));
-    struct fc_flowu_key *pu = fcb_alloc((size_t)prefill_n * sizeof(*pu));
-    struct fc_flow4_key *h4 = fcb_alloc((size_t)FCB_QUERY * sizeof(*h4));
-    struct fc_flow6_key *h6 = fcb_alloc((size_t)FCB_QUERY * sizeof(*h6));
-    struct fc_flowu_key *hu = fcb_alloc((size_t)FCB_QUERY * sizeof(*hu));
-    struct fc_flow4_key *m4 = fcb_alloc((size_t)FCB_QUERY * sizeof(*m4));
-    struct fc_flow6_key *m6 = fcb_alloc((size_t)FCB_QUERY * sizeof(*m6));
-    struct fc_flowu_key *mu = fcb_alloc((size_t)FCB_QUERY * sizeof(*mu));
-    struct fc_flow4_key *x4 = fcb_alloc((size_t)FCB_QUERY * sizeof(*x4));
-    struct fc_flow6_key *x6 = fcb_alloc((size_t)FCB_QUERY * sizeof(*x6));
-    struct fc_flowu_key *xu = fcb_alloc((size_t)FCB_QUERY * sizeof(*xu));
+    struct flow4_key *p4 = fcb_alloc((size_t)prefill_n * sizeof(*p4));
+    struct flow6_key *p6 = fcb_alloc((size_t)prefill_n * sizeof(*p6));
+    struct flowu_key *pu = fcb_alloc((size_t)prefill_n * sizeof(*pu));
+    struct flow4_key *h4 = fcb_alloc((size_t)hit_key_n * sizeof(*h4));
+    struct flow6_key *h6 = fcb_alloc((size_t)hit_key_n * sizeof(*h6));
+    struct flowu_key *hu = fcb_alloc((size_t)hit_key_n * sizeof(*hu));
+    struct flow4_key *m4 = fcb_alloc((size_t)miss_key_n * sizeof(*m4));
+    struct flow6_key *m6 = fcb_alloc((size_t)miss_key_n * sizeof(*m6));
+    struct flowu_key *mu = fcb_alloc((size_t)miss_key_n * sizeof(*mu));
+    struct flow4_key *x4 = fcb_alloc((size_t)mixed_key_n * sizeof(*x4));
+    struct flow6_key *x6 = fcb_alloc((size_t)mixed_key_n * sizeof(*x6));
+    struct flowu_key *xu = fcb_alloc((size_t)mixed_key_n * sizeof(*xu));
 
     if (fcb_sample_raw_repeat > 1u)
         metric_samples = fcb_alloc((size_t)fcb_sample_raw_repeat
@@ -483,33 +562,40 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
         p6[i] = fcb_make_key6(i);
         pu[i] = fcb_make_keyu(i);
     }
-    for (unsigned i = 0; i < FCB_QUERY; i++) {
+    for (unsigned i = 0; i < hit_key_n; i++) {
         h4[i] = fcb_make_key4(i);
         h6[i] = fcb_make_key6(i);
         hu[i] = fcb_make_keyu(i);
+    }
+    for (unsigned i = 0; i < miss_key_n; i++) {
         m4[i] = fcb_make_key4(max_entries + i);
         m6[i] = fcb_make_key6(max_entries + i);
         mu[i] = fcb_make_keyu(max_entries + i);
-        /* mixed: 90% hit / 10% miss */
-        unsigned idx = (i < (FCB_QUERY * 9u / 10u))
-                       ? (i % prefill_n)
-                       : (prefill_n + i);
-        x4[i] = fcb_make_key4(idx);
-        x6[i] = fcb_make_key6(idx);
-        xu[i] = fcb_make_keyu(idx);
     }
-
-    (void)fcb_flow4_prefill(&ctx4, p4, prefill_n, 1u);
-    (void)fcb_flow6_prefill(&ctx6, p6, prefill_n, 1u);
-    (void)fcb_flowu_prefill(&ctxu, pu, prefill_n, 1u);
+    for (unsigned r = 0; r < fcb_dp_mixed_repeat; r++) {
+        unsigned base = r * FCB_QUERY;
+        for (unsigned i = 0; i < FCB_QUERY; i++) {
+            unsigned idx = base + i;
+            if (i < mixed_hit_n) {
+                x4[idx] = fcb_make_key4(prefill_n + idx);
+                x6[idx] = fcb_make_key6(prefill_n + idx);
+                xu[idx] = fcb_make_keyu(prefill_n + idx);
+            } else {
+                unsigned miss_off = idx - mixed_hit_n;
+                x4[idx] = fcb_make_key4(max_entries + hit_key_n + miss_key_n
+                                        + mixed_key_n + miss_off);
+                x6[idx] = fcb_make_key6(max_entries + hit_key_n + miss_key_n
+                                        + mixed_key_n + miss_off);
+                xu[idx] = fcb_make_keyu(max_entries + hit_key_n + miss_key_n
+                                        + mixed_key_n + miss_off);
+            }
+        }
+    }
 
     printf("  entries=%u nb_bk=%u query=%u\n",
            max_entries, nb_bk, FCB_QUERY);
     fcb_print_sampling_config();
-    printf("  entries active: flow4=%u  flow6=%u  flowu=%u\n",
-           fc_flow4_cache_nb_entries(&ctx4.fc),
-           fc_flow6_cache_nb_entries(&ctx6.fc),
-           fc_flowu_cache_nb_entries(&ctxu.fc));
+    printf("  cold datapath: unique query keys per timed round\n");
 
     memset(out, 0, sizeof(*out));
     out->desired = desired;
@@ -529,68 +615,78 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
 
     {
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_HIT][0],
-                          fcb_flow4_bench_hit(&ctx4, h4, FCB_QUERY, FCB_HIT_REPEAT));
+                          fcb_flow4_bench_hit(&ctx4, p4, prefill_n - FCB_QUERY,
+                                              h4, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_HIT][1],
-                          fcb_flow6_bench_hit(&ctx6, h6, FCB_QUERY, FCB_HIT_REPEAT));
+                          fcb_flow6_bench_hit(&ctx6, p6, prefill_n - FCB_QUERY,
+                                              h6, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_HIT][2],
-                          fcb_flowu_bench_hit(&ctxu, hu, FCB_QUERY, FCB_HIT_REPEAT));
+                          fcb_flowu_bench_hit(&ctxu, pu, prefill_n - FCB_QUERY,
+                                              hu, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FIND_HIT][0],
-                          fcb_flow4_bench_find_hit(&ctx4, h4, FCB_QUERY, FCB_HIT_REPEAT));
+                          fcb_flow4_bench_find_hit(&ctx4, p4, prefill_n - FCB_QUERY,
+                                                   h4, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FIND_HIT][1],
-                          fcb_flow6_bench_find_hit(&ctx6, h6, FCB_QUERY, FCB_HIT_REPEAT));
+                          fcb_flow6_bench_find_hit(&ctx6, p6, prefill_n - FCB_QUERY,
+                                                   h6, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FIND_HIT][2],
-                          fcb_flowu_bench_find_hit(&ctxu, hu, FCB_QUERY, FCB_HIT_REPEAT));
+                          fcb_flowu_bench_find_hit(&ctxu, pu, prefill_n - FCB_QUERY,
+                                                   hu, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_MISS][0],
-                          fcb_flow4_bench_miss_fill(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow4_bench_miss_fill(&ctx4, p4, prefill_n,
+                                                    m4, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_MISS][1],
-                          fcb_flow6_bench_miss_fill(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow6_bench_miss_fill(&ctx6, p6, prefill_n,
+                                                    m6, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_MISS][2],
-                          fcb_flowu_bench_miss_fill(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flowu_bench_miss_fill(&ctxu, pu, prefill_n,
+                                                    mu, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_ADD_ONLY][0],
-                          fcb_flow4_bench_add_only(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow4_bench_add_only(&ctx4, p4, prefill_n,
+                                                   m4, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_ADD_ONLY][1],
-                          fcb_flow6_bench_add_only(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow6_bench_add_only(&ctx6, p6, prefill_n,
+                                                   m6, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_ADD_ONLY][2],
-                          fcb_flowu_bench_add_only(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flowu_bench_add_only(&ctxu, pu, prefill_n,
+                                                   mu, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_ADD_DEL][0],
-                          fcb_flow4_bench_add_del(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow4_bench_add_del(&ctx4, p4, prefill_n,
+                                                  m4, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_ADD_DEL][1],
-                          fcb_flow6_bench_add_del(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow6_bench_add_del(&ctx6, p6, prefill_n,
+                                                  m6, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_ADD_DEL][2],
-                          fcb_flowu_bench_add_del(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flowu_bench_add_del(&ctxu, pu, prefill_n,
+                                                  mu, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_DEL_BULK][0],
-                          fcb_flow4_bench_del_bulk(&ctx4, m4, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow4_bench_del_bulk(&ctx4, p4, prefill_n,
+                                                   m4, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_DEL_BULK][1],
-                          fcb_flow6_bench_del_bulk(&ctx6, m6, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flow6_bench_del_bulk(&ctx6, p6, prefill_n,
+                                                   m6, FCB_QUERY, fcb_dp_miss_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_DEL_BULK][2],
-                          fcb_flowu_bench_del_bulk(&ctxu, mu, FCB_QUERY, FCB_MISS_REPEAT));
+                          fcb_flowu_bench_del_bulk(&ctxu, pu, prefill_n,
+                                                   mu, FCB_QUERY, fcb_dp_miss_repeat));
     }
 
-    printf("  pure datapath (median cycles/key across timed rounds, reset per round, no expire):\n");
+    printf("  pure datapath (median cycles/key across timed rounds, reset/prefill/cold-touch per round):\n");
     for (unsigned m = 0; m < FCB_DP_DEL_BULK + 1u; m++) {
         const double *row = out->metrics[m];
         fcb_emit3(fcb_datapath_labels[m],
                   row[0], row[1], row[2]);
     }
 
-    /* re-prefill for mixed */
-    fcb_flow4_ctx_reset(&ctx4);
-    fcb_flow6_ctx_reset(&ctx6);
-    fcb_flowu_ctx_reset(&ctxu);
-    (void)fcb_flow4_prefill(&ctx4, p4, prefill_n, 1u);
-    (void)fcb_flow6_prefill(&ctx6, p6, prefill_n, 1u);
-    (void)fcb_flowu_prefill(&ctxu, pu, prefill_n, 1u);
-
     {
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_MIXED_90_10_RESET][0],
                           fcb_flow4_bench_mixed(&ctx4, p4, prefill_n, x4,
-                                                FCB_QUERY, FCB_MIXED_REPEAT));
+                                                FCB_QUERY, fcb_dp_mixed_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_MIXED_90_10_RESET][1],
                           fcb_flow6_bench_mixed(&ctx6, p6, prefill_n, x6,
-                                                FCB_QUERY, FCB_MIXED_REPEAT));
+                                                FCB_QUERY, fcb_dp_mixed_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_MIXED_90_10_RESET][2],
                           fcb_flowu_bench_mixed(&ctxu, pu, prefill_n, xu,
-                                                FCB_QUERY, FCB_MIXED_REPEAT));
+                                                FCB_QUERY, fcb_dp_mixed_repeat));
     }
 
 #undef FCB_SAMPLE_METRIC
@@ -611,14 +707,18 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
 }
 
 static void
-bench_datapath(struct fcb_datapath_report *reports)
+bench_datapath(unsigned desired_filter, struct fcb_datapath_report *reports)
 {
     unsigned sizes[] = { 32768u, 1048576u, 4194304u };
+    unsigned out_idx = 0u;
 
     printf("fcache variant comparison\n\n");
     for (unsigned s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
+        if (desired_filter != 0u && sizes[s] != desired_filter)
+            continue;
         printf("[%uK entries]\n", sizes[s] / 1024u);
-        bench_datapath_one(sizes[s], reports ? &reports[s] : NULL);
+        bench_datapath_one(sizes[s], reports ? &reports[out_idx] : NULL);
+        out_idx++;
         printf("\n");
     }
 }
@@ -627,7 +727,7 @@ bench_datapath(struct fcb_datapath_report *reports)
  * maintain_step comparison (no args needed)
  *===========================================================================*/
 static void
-bench_maint(void)
+bench_maint(unsigned desired_filter)
 {
     unsigned configs[][2] = {
         /* { desired_entries, nb_bk } */
@@ -646,6 +746,9 @@ bench_maint(void)
         double data_mb = ((double)nb_bk * sizeof(struct rix_hash_bucket_s)
                           + (double)max_entries * sizeof(struct fc_flow4_entry))
                          / (1024.0 * 1024.0);
+
+        if (desired_filter != 0u && desired != desired_filter)
+            continue;
 
         printf("  nb_bk=%u  pool=%u  (%.1f MB)\n", nb_bk, max_entries, data_mb);
         printf("  [flow4]\n");
@@ -1002,19 +1105,19 @@ static void
 usage(const char *prog)
 {
     printf("usage:\n");
-    printf("  %s [--arch gen|sse|avx2|avx512] [--query 1..256] [--raw-repeat N] [--keep-n N] [--pin-core CPU] datapath\n", prog);
-    printf("  %s [--arch ...] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] maint\n", prog);
-    printf("  %s [--arch ...] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] maint_partial\n", prog);
-    printf("  %s [--arch ...] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_closed <desired> <fill%%> <hit%%> [rounds]\n", prog);
-    printf("  %s [--arch ...] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_closed_stream <desired> <fill%%> <hit%%> [total_keys]\n", prog);
-    printf("  %s [--arch ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_closed_stream_sweep <desired> <fill%%> <hit%%> [total_keys] [keep_n] [raw_repeat]\n", prog);
-    printf("  %s [--arch ...] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_open <desired> <start_fill%%> <hit%%> <keys_per_sec> [timeout_ms]\n", prog);
-    printf("  %s [--arch ...] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_window <desired> <low_fill%%> <high_fill%%> <hit%%> <keys_per_sec> <ttl_ms> [duration_ms]\n", prog);
-    printf("  %s [--arch ...] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] trace_open_custom <desired> <start_fill%%> <hit%%> <keys_per_sec>"
+    printf("  %s [--arch gen|sse|avx2|avx512] [--bench full|short] [--query 1..256] [--raw-repeat N] [--keep-n N] [--pin-core CPU] datapath\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] maint\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] maint_partial\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_closed <desired> <fill%%> <hit%%> [rounds]\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_closed_stream <desired> <fill%%> <hit%%> [total_keys]\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_closed_stream_sweep <desired> <fill%%> <hit%%> [total_keys] [keep_n] [raw_repeat]\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_open <desired> <start_fill%%> <hit%%> <keys_per_sec> [timeout_ms]\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] findadd_window <desired> <low_fill%%> <high_fill%%> <hit%%> <keys_per_sec> <ttl_ms> [duration_ms]\n", prog);
+    printf("  %s [--arch ...] [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [flow4|flow6|flowu] trace_open_custom <desired> <start_fill%%> <hit%%> <keys_per_sec>"
            " <timeout_ms> <soak_mul> <report_ms>"
            " <fill0> <fill1> <fill2> <fill3>"
            " <k0> <k1> <k2> <k3> [kick_scale]\n", prog);
-    printf("  %s [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [--findadd-api bulk|burst32] archcmp [flow4|flow6|flowu] <mode> [args...]\n", prog);
+    printf("  %s [--bench full|short] [--query ...] [--raw-repeat N] [--keep-n N] [--pin-core CPU] [--findadd-api bulk|burst32] archcmp [flow4|flow6|flowu] <mode> [args...]\n", prog);
     printf("\n");
     printf("  findadd_closed : fixed hit set + fixed miss set; miss set is deleted after each round.\n");
     printf("  findadd_closed_stream : fixed per-key hit/miss stream; query only changes grouping.\n");
@@ -1027,6 +1130,14 @@ usage(const char *prog)
     printf("  --query        : request width for bulk benchmark calls; 1 through 256.\n");
     printf("  --raw-repeat   : raw sample count for scalar summary aggregation.\n");
     printf("  --keep-n       : keep the tightest N raw samples and report their median.\n");
+    printf("  --bench        : full keeps current sampling; short reduces sampling only for cold modes.\n");
+    printf("                     full datapath defaults: hit/find=%u miss/add/del=%u mixed=%u.\n",
+           FCB_FULL_DP_HIT_REPEAT, FCB_FULL_DP_MISS_REPEAT, FCB_FULL_DP_MIXED_REPEAT);
+    printf("                     short datapath defaults: hit/find=%u miss/add/del=%u mixed=%u.\n",
+           FCB_SHORT_DP_HIT_REPEAT, FCB_SHORT_DP_MISS_REPEAT, FCB_SHORT_DP_MIXED_REPEAT);
+    printf("  --dp-hit-repeat   : override cold datapath hit/find rounds per metric.\n");
+    printf("  --dp-miss-repeat  : override cold datapath miss/add/del rounds per metric.\n");
+    printf("  --dp-mixed-repeat : override cold datapath mixed rounds per metric.\n");
     printf("  --pin-core     : pin the fc_bench process to one CPU before running.\n");
     printf("  --findadd-api  : bulk (default) or burst32; burst32 is currently flow4-only.\n");
 }
@@ -1143,6 +1254,103 @@ fcb_parse_sampling_args(int *argc, char ***argv)
 }
 
 static int
+fcb_parse_dp_repeat_args(int *argc, char ***argv)
+{
+    while (*argc >= 2) {
+        const char *arg = (*argv)[1];
+        const char *value = NULL;
+        unsigned *dst = NULL;
+        size_t shift = 0u;
+
+        if (strcmp(arg, "--dp-hit-repeat") == 0 ||
+            strcmp(arg, "--dp-miss-repeat") == 0 ||
+            strcmp(arg, "--dp-mixed-repeat") == 0) {
+            if (*argc < 3) {
+                fprintf(stderr, "%s requires an integer value\n", arg);
+                return 2;
+            }
+            value = (*argv)[2];
+            memmove(&(*argv)[1], &(*argv)[3],
+                    (size_t)(*argc - 3 + 1) * sizeof((*argv)[0]));
+            *argc -= 2;
+        } else if (strncmp(arg, "--dp-hit-repeat=", 16) == 0) {
+            value = arg + 16;
+            shift = 1u;
+        } else if (strncmp(arg, "--dp-miss-repeat=", 17) == 0) {
+            value = arg + 17;
+            shift = 1u;
+        } else if (strncmp(arg, "--dp-mixed-repeat=", 18) == 0) {
+            value = arg + 18;
+            shift = 1u;
+        } else {
+            break;
+        }
+
+        if (shift != 0u) {
+            memmove(&(*argv)[1], &(*argv)[2],
+                    (size_t)(*argc - 2 + 1) * sizeof((*argv)[0]));
+            *argc -= 1;
+        }
+
+        if (strstr(arg, "hit") != NULL)
+            dst = &fcb_dp_hit_repeat;
+        else if (strstr(arg, "miss") != NULL)
+            dst = &fcb_dp_miss_repeat;
+        else
+            dst = &fcb_dp_mixed_repeat;
+
+        {
+            unsigned long parsed = strtoul(value, NULL, 10);
+            if (parsed == 0ul) {
+                fprintf(stderr, "%s must be greater than 0\n", arg);
+                return 2;
+            }
+            *dst = (unsigned)parsed;
+        }
+    }
+
+    return 0;
+}
+
+static int
+fcb_parse_bench_profile_args(int *argc, char ***argv)
+{
+    while (*argc >= 2) {
+        const char *arg = (*argv)[1];
+        const char *value = NULL;
+
+        if (strcmp(arg, "--bench") == 0) {
+            if (*argc < 3) {
+                fprintf(stderr, "--bench requires one of: full, short\n");
+                return 2;
+            }
+            value = (*argv)[2];
+            memmove(&(*argv)[1], &(*argv)[3],
+                    (size_t)(*argc - 3 + 1) * sizeof((*argv)[0]));
+            *argc -= 2;
+        } else if (strncmp(arg, "--bench=", 8) == 0) {
+            value = arg + 8;
+            memmove(&(*argv)[1], &(*argv)[2],
+                    (size_t)(*argc - 2 + 1) * sizeof((*argv)[0]));
+            *argc -= 1;
+        } else {
+            break;
+        }
+
+        if (strcmp(value, "full") == 0) {
+            fcb_bench_profile = FCB_BENCH_FULL;
+        } else if (strcmp(value, "short") == 0) {
+            fcb_bench_profile = FCB_BENCH_SHORT;
+        } else {
+            fprintf(stderr, "--bench must be one of: full, short\n");
+            return 2;
+        }
+    }
+
+    return 0;
+}
+
+static int
 fcb_validate_sampling_args(void)
 {
     if (fcb_sample_raw_repeat == 0u || fcb_sample_keep_n == 0u) {
@@ -1203,11 +1411,19 @@ run_mode(const char *variant, const char *mode, int argc, char **argv, int arg_o
     findadd_window_summary_fn fn_window_summary;
 
     if (strcmp(mode, "datapath") == 0) {
-        bench_datapath(NULL);
+        unsigned desired = 0u;
+
+        if (argc - arg_off >= 1)
+            desired = (unsigned)strtoul(argv[arg_off + 0], NULL, 10);
+        bench_datapath(desired, NULL);
         return 0;
     }
     if (strcmp(mode, "maint") == 0) {
-        bench_maint();
+        unsigned desired = 0u;
+
+        if (argc - arg_off >= 1)
+            desired = (unsigned)strtoul(argv[arg_off + 0], NULL, 10);
+        bench_maint(desired);
         return 0;
     }
     if (strcmp(mode, "maint_partial") == 0) {
@@ -1449,14 +1665,27 @@ main(int argc, char **argv)
     unsigned arch_enable;
     int parse_rc;
 
-    arch_enable = fc_parse_arch_args(&argc, &argv);
+    arch_enable = FC_ARCH_AUTO;
     for (;;) {
         int prev_argc = argc;
 
+        parse_rc = fcb_parse_bench_profile_args(&argc, &argv);
+        if (parse_rc != 0)
+            return parse_rc;
+        {
+            int arch_argc = argc;
+            unsigned parsed_arch = fc_parse_arch_args(&argc, &argv);
+
+            if (argc != arch_argc)
+                arch_enable = parsed_arch;
+        }
         parse_rc = fcb_parse_query_args(&argc, &argv);
         if (parse_rc != 0)
             return parse_rc;
         parse_rc = fcb_parse_sampling_args(&argc, &argv);
+        if (parse_rc != 0)
+            return parse_rc;
+        parse_rc = fcb_parse_dp_repeat_args(&argc, &argv);
         if (parse_rc != 0)
             return parse_rc;
         parse_rc = fcb_parse_findadd_api_args(&argc, &argv);
@@ -1518,11 +1747,14 @@ main(int argc, char **argv)
         }
 
         for (unsigned i = 0; i < sizeof(arch_runs) / sizeof(arch_runs[0]); i++) {
+            struct fcb_sampling_guard sampling_guard;
+
             fc_arch_init(arch_runs[i].enable);
+            fcb_apply_mode_sampling_profile(mode, &sampling_guard);
             printf("[archcmp: %s]\n\n", arch_runs[i].name);
 
             if (strcmp(mode, "datapath") == 0) {
-                bench_datapath(datapath_reports[i]);
+                bench_datapath(0u, datapath_reports[i]);
                 have_datapath_summary = 1;
                 rc = 0;
             } else if (strcmp(mode, "findadd_closed") == 0) {
@@ -1712,6 +1944,7 @@ main(int argc, char **argv)
             } else {
                 rc = run_mode(variant, mode, argc, argv, arg_off);
             }
+            fcb_restore_mode_sampling_profile(&sampling_guard);
             if (rc != 0)
                 return rc;
             if (i + 1u < sizeof(arch_runs) / sizeof(arch_runs[0]))
@@ -1753,7 +1986,15 @@ main(int argc, char **argv)
         arg_off = 2;
     }
 
-    return run_mode(variant, mode, argc, argv, arg_off);
+    {
+        struct fcb_sampling_guard sampling_guard;
+        int rc;
+
+        fcb_apply_mode_sampling_profile(mode, &sampling_guard);
+        rc = run_mode(variant, mode, argc, argv, arg_off);
+        fcb_restore_mode_sampling_profile(&sampling_guard);
+        return rc;
+    }
 }
 
 /*

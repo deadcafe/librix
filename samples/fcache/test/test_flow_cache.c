@@ -26,7 +26,7 @@
 /*===========================================================================
  * Key makers
  *===========================================================================*/
-static struct fc_flow4_key
+static struct flow4_key
 make_key4(unsigned i)
 {
     return fc_flow4_key_make(0x0a000001u + i,
@@ -36,7 +36,7 @@ make_key4(unsigned i)
                              17u, 1u);
 }
 
-static struct fc_flow6_key
+static struct flow6_key
 make_key6(unsigned i)
 {
     uint8_t src[16] = {0x20, 0x01, 0x0d, 0xb8};
@@ -53,7 +53,7 @@ make_key6(unsigned i)
                              6u, 1u);
 }
 
-static struct fc_flowu_key
+static struct flowu_key
 make_keyu_v4(unsigned i)
 {
     return fc_flowu_key_v4(
@@ -62,7 +62,7 @@ make_keyu_v4(unsigned i)
         17u, 1u);
 }
 
-static struct fc_flowu_key
+static struct flowu_key
 make_keyu_v6(unsigned i)
 {
     uint8_t src[16] = {0x20, 0x01, 0x0d, 0xb8};
@@ -82,7 +82,7 @@ make_keyu_v6(unsigned i)
  * Macro-templated test body
  *
  * PREFIX   : flow4, flow6, flowu
- * KEY_T    : struct fc_flow4_key, etc.
+ * KEY_T    : struct flow4_key, etc.
  * RESULT_T : struct fc_flow4_result, etc.
  * ENTRY_T  : struct fc_flow4_entry, etc.
  * CACHE_T  : struct fc_flow4_cache, etc.
@@ -1113,17 +1113,17 @@ test_##PREFIX##_findadd_single(void) \
 /*===========================================================================
  * Instantiate tests for all three variants
  *===========================================================================*/
-DEFINE_TESTS(flow4, struct fc_flow4_key, struct fc_flow4_result,
+DEFINE_TESTS(flow4, struct flow4_key, struct fc_flow4_result,
              struct fc_flow4_entry, struct fc_flow4_cache,
              struct fc_flow4_config, struct fc_flow4_stats,
              make_key4)
 
-DEFINE_TESTS(flow6, struct fc_flow6_key, struct fc_flow6_result,
+DEFINE_TESTS(flow6, struct flow6_key, struct fc_flow6_result,
              struct fc_flow6_entry, struct fc_flow6_cache,
              struct fc_flow6_config, struct fc_flow6_stats,
              make_key6)
 
-DEFINE_TESTS(flowu, struct fc_flowu_key, struct fc_flowu_result,
+DEFINE_TESTS(flowu, struct flowu_key, struct fc_flowu_result,
              struct fc_flowu_entry, struct fc_flowu_cache,
              struct fc_flowu_config, struct fc_flowu_stats,
              make_keyu_v4)
@@ -1136,7 +1136,7 @@ struct test_flow4_user {
         uint32_t frees;
         uint32_t last_event;
         uint64_t touch;
-    } body;
+    } __attribute__((aligned(FC_CACHE_LINE_SIZE))) body;
 } __attribute__((aligned(FC_CACHE_LINE_SIZE)));
 
 RIX_STATIC_ASSERT(offsetof(struct test_flow4_user, body) == FC_CACHE_LINE_SIZE,
@@ -1180,7 +1180,7 @@ test_flow4_init_ex_and_event_cb(void)
     struct fc_flow4_cache fc;
     struct fc_flow4_result result;
     struct test_flow4_event_log log = { .users = users };
-    struct fc_flow4_key key;
+    struct flow4_key key;
 
     printf("[T] fc flow4 init_ex/event_cb\n");
     for (unsigned i = 0; i < MAX_ENTRIES; i++) {
@@ -1325,7 +1325,7 @@ test_flow4_init_ex_varbody_mapping(void)
     struct fc_flow4_cache fc;
     struct fc_flow4_result result;
     struct test_flow4_var_ctx ctx;
-    struct fc_flow4_key key;
+    struct flow4_key key;
 
     printf("[T] fc flow4 init_ex/varbody mapping\n");
     memset(records, 0, sizeof(records));
@@ -1436,7 +1436,7 @@ test_flow6_init_ex_and_event_cb(void)
     struct fc_flow6_cache fc;
     struct fc_flow6_result result;
     struct test_flow6_event_log log = { .users = users };
-    struct fc_flow6_key key;
+    struct flow6_key key;
 
     printf("[T] fc flow6 init_ex/event_cb\n");
     for (unsigned i = 0; i < MAX_ENTRIES; i++) {
@@ -1557,7 +1557,7 @@ test_flowu_init_ex_and_event_cb(void)
     struct fc_flowu_cache fc;
     struct fc_flowu_result result;
     struct test_flowu_event_log log = { .users = users };
-    struct fc_flowu_key key;
+    struct flowu_key key;
 
     printf("[T] fc flowu init_ex/event_cb\n");
     for (unsigned i = 0; i < MAX_ENTRIES; i++) {
@@ -1636,7 +1636,7 @@ test_flowu_v4_v6_coexist(void)
     struct rix_hash_bucket_s buckets[NB_BK];
     struct fc_flowu_entry pool[MAX_ENTRIES];
     struct fc_flowu_cache fc;
-    struct fc_flowu_key keys[NB_V4 + NB_V6];
+    struct flowu_key keys[NB_V4 + NB_V6];
     struct fc_flowu_result results[NB_V4 + NB_V6];
     unsigned total = NB_V4 + NB_V6;
 

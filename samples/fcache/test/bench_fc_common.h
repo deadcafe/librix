@@ -28,10 +28,14 @@ enum {
     FCB_QUERY_DEFAULT   = 256u,
     FCB_HIT_REPEAT      = 200u,
     FCB_MISS_REPEAT     = 80u,
-    FCB_MIXED_REPEAT    = 80u
+    FCB_MIXED_REPEAT    = 80u,
+    FCB_COLD_TOUCH_BYTES = 64u * 1024u * 1024u
 };
 
 extern unsigned fcb_query;
+extern unsigned fcb_dp_hit_repeat;
+extern unsigned fcb_dp_miss_repeat;
+extern unsigned fcb_dp_mixed_repeat;
 enum {
     FCB_FINDADD_API_BULK = 0u,
     FCB_FINDADD_API_BURST32 = 1u
@@ -150,6 +154,19 @@ fcb_alloc(size_t size)
     }
     memset(p, 0, alloc_size);
     return p;
+}
+
+static inline void
+fcb_cold_touch(void)
+{
+    static uint8_t *trash;
+    static volatile uint64_t sink;
+
+    if (trash == NULL)
+        trash = fcb_alloc(FCB_COLD_TOUCH_BYTES);
+
+    for (size_t off = 0; off < FCB_COLD_TOUCH_BYTES; off += FCB_ALIGN)
+        sink += trash[off];
 }
 
 /*===========================================================================

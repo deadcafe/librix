@@ -12,10 +12,10 @@
  *   #include "fc_cache_generate.h"
  *
  *   static inline int
- *   fc_flow4_cmp(const struct fc_flow4_key *a,
- *                 const struct fc_flow4_key *b) { ... }
+ *   fc_flow4_cmp(const struct flow4_key *a,
+ *                 const struct flow4_key *b) { ... }
  *   static inline union rix_hash_hash_u
- *   fc_flow4_hash_fn(const struct fc_flow4_key *key,
+ *   fc_flow4_hash_fn(const struct flow4_key *key,
  *                     uint32_t mask) { ... }
  *
  *   FC_CACHE_GENERATE(flow4, FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS,
@@ -44,7 +44,7 @@
 #define _FCG_API(p, name)  _FCG_CAT(fc_, _FCG_CAT(p, _cache_##name))
 #endif
 
-#define _FCG_KEY_T(p)       struct _FCG_CAT(fc_, _FCG_CAT(p, _key))
+#define _FCG_KEY_T(p)       struct _FCG_CAT(p, _key)
 #define _FCG_RESULT_T(p)    struct _FCG_CAT(fc_, _FCG_CAT(p, _result))
 #define _FCG_ENTRY_T(p)     struct _FCG_CAT(fc_, _FCG_CAT(p, _entry))
 #define _FCG_CACHE_T(p)     struct _FCG_CAT(fc_, _FCG_CAT(p, _cache))
@@ -232,7 +232,7 @@ RIX_STATIC_ASSERT(_FC_MAINT_STEP_MAX_BKS >= _FC_MAINT_STEP_PREFETCH_AHEAD,
 RIX_HASH_GENERATE_STATIC_SLOT_EX(                                         \
     _FCG_CAT(fc_, _FCG_CAT(p, _ht)),                                      \
     _FCG_CAT(fc_, _FCG_CAT(p, _entry)),                                   \
-    key, cur_hash, slot,                                                   \
+    hdr.key, hdr.htbl_elm.cur_hash, hdr.htbl_elm.slot,                    \
     cmp_fn, hash_fn)
 
 /*===========================================================================
@@ -941,7 +941,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                     _FCG_INT(p, result_set_miss)(&results[idx]);          \
                     continue;                                              \
                 }                                                          \
-                entry->key = keys[idx];                                    \
+                entry->hdr.key = keys[idx];                                \
                 entry->last_ts = now;                                      \
                 /* insert_hashed: buckets in L1 from cmp_key,      */     \
                 /* hash reused from ctx (no rehash), dup-safe.     */     \
@@ -1164,7 +1164,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                     _FCG_INT(p, result_set_miss)(&results[idx]);          \
                     continue;                                              \
                 }                                                          \
-                entry->key = keys[idx];                                    \
+                entry->hdr.key = keys[idx];                                \
                 entry->last_ts = now;                                      \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_ret;                                \
