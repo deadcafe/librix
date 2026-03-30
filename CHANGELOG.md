@@ -68,7 +68,7 @@ Initial public release.
   - `fc_cache_size_bind()`
   - `fc_*_cache_init_attr()`
 - Fixed in-flight scratch support for bulk APIs.
-- Test and benchmark runners under `samples/test/`.
+- Test and benchmark runners under `samples/fcache/test/`.
 
 ### Changed
 

@@ -14,15 +14,13 @@
 #   install PREFIX=/path - install library and headers
 #
 
-.PHONY: all static shared test bench bench-full ftable ftable-test ftable-bench clean install
+.PHONY: all static shared test bench bench-full clean install
 
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
 BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
-BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
-
 all:
 	$(MAKE) -C fcache all
-	$(MAKE) -C test   all
+	$(MAKE) -C fcache/test all
 
 static:
 	$(MAKE) -C fcache static
@@ -31,31 +29,20 @@ shared:
 	$(MAKE) -C fcache shared
 
 test: all
-	$(MAKE) -C test ndebug-check BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
-	$(MAKE) -C test test
+	$(MAKE) -C fcache/test ndebug-check BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)"
+	$(MAKE) -C fcache/test test
 
 bench:
-	$(MAKE) -C test bench BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
+	$(MAKE) -C fcache/test bench BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
 	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
 
 bench-full:
-	$(MAKE) -C test bench-full BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
+	$(MAKE) -C fcache/test bench-full BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
 	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
-
-ftable:
-	$(MAKE) -C ftable static
-
-ftable-test:
-	$(MAKE) -C ftable/test test
-
-ftable-bench:
-	$(MAKE) -C ftable/test bench BENCH_FT_OPTS="$(BENCH_FT_OPTS)"
 
 clean:
 	$(MAKE) -C fcache clean
-	$(MAKE) -C test   clean
-	$(MAKE) -C ftable clean
-	$(MAKE) -C ftable/test clean
+	$(MAKE) -C fcache/test clean
 
 install:
 	$(MAKE) -C fcache install PREFIX=$(PREFIX)

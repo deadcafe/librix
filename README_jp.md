@@ -827,7 +827,7 @@ tuning 比較では `EXTRA_CFLAGS` で上書きできます:
 ```sh
 make -C samples/fcache static CC=gcc OPTLEVEL=3 \
      EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
-make -C samples/test all CC=gcc OPTLEVEL=3 \
+make -C samples/fcache/test all CC=gcc OPTLEVEL=3 \
      EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
 ```
 

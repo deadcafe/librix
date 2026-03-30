@@ -6,7 +6,7 @@ bench="${script_dir}/fc_bench"
 
 if [[ ! -x "${bench}" ]]; then
     echo "fc_bench not found: ${bench}" >&2
-    echo "build it first with: make -C samples/test fc_bench" >&2
+    echo "build it first with: make -C samples/fcache/test fc_bench" >&2
     exit 1
 fi
 

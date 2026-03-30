@@ -166,19 +166,19 @@
  * Prefer AVX-512 helpers in AVX-512 tiers, otherwise fall back to AVX2.
  *===========================================================================*/
 #if defined(__AVX512F__)
-#undef _RIX_HASH_FIND_U32X16
-#undef _RIX_HASH_FIND_U32X16_2
-#define _RIX_HASH_FIND_U32X16(arr, val) \
-    _rix_hash_find_u32x16_AVX512((arr), (val))
-#define _RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
-    _rix_hash_find_u32x16_2_AVX512((arr), (val0), (val1), (mask0), (mask1))
+#undef RIX_HASH_FIND_U32X16
+#undef RIX_HASH_FIND_U32X16_2
+#define RIX_HASH_FIND_U32X16(arr, val) \
+    rix_hash_find_u32x16_avx512((arr), (val))
+#define RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
+    rix_hash_find_u32x16_2_avx512((arr), (val0), (val1), (mask0), (mask1))
 #elif defined(__AVX2__)
-#undef _RIX_HASH_FIND_U32X16
-#undef _RIX_HASH_FIND_U32X16_2
-#define _RIX_HASH_FIND_U32X16(arr, val) \
-    _rix_hash_find_u32x16_AVX2((arr), (val))
-#define _RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
-    _rix_hash_find_u32x16_2_AVX2((arr), (val0), (val1), (mask0), (mask1))
+#undef RIX_HASH_FIND_U32X16
+#undef RIX_HASH_FIND_U32X16_2
+#define RIX_HASH_FIND_U32X16(arr, val) \
+    rix_hash_find_u32x16_avx2((arr), (val))
+#define RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
+    rix_hash_find_u32x16_2_avx2((arr), (val0), (val1), (mask0), (mask1))
 #endif
 
 /*===========================================================================
@@ -249,8 +249,8 @@ _FCG_INT(p, prefetch_insert_hash)(const _FCG_CACHE_T(p) *fc,              \
     unsigned mask = fc->ht_head.rhh_mask;                                  \
     rix_hash_buckets(h, mask, &bk0, &bk1, &fp);                          \
     (void)fp;                                                              \
-    rix_hash_prefetch_bucket(fc->buckets + bk0);                          \
-    rix_hash_prefetch_bucket(fc->buckets + bk1);                          \
+    rix_hash_prefetch_bucket_of(fc->buckets + bk0);                       \
+    rix_hash_prefetch_bucket_of(fc->buckets + bk1);                       \
 }                                                                          \
                                                                            \
 static inline void                                                         \
@@ -522,12 +522,12 @@ _FCG_INT(p, maintain_grouped)(_FCG_CACHE_T(p) *fc,                        \
     expire_before = (now_tsc > fc->eff_timeout_tsc) ?                      \
         (now_tsc - fc->eff_timeout_tsc) : 0u;                             \
     next_bk = start_bk & mask;                                             \
-    rix_hash_prefetch_bucket_idx(&fc->buckets[next_bk]);                  \
+    rix_hash_prefetch_bucket_indices_of_idx(fc->buckets, next_bk);        \
     while (bucket_count-- != 0u) {                                         \
         unsigned reclaimed;                                                \
         cur_bk = next_bk;                                                  \
         next_bk = (next_bk + 1u) & mask;                                  \
-        rix_hash_prefetch_bucket_idx(&fc->buckets[next_bk]);              \
+        rix_hash_prefetch_bucket_indices_of_idx(fc->buckets, next_bk);    \
         fc->stats.maint_bucket_checks++;                                   \
         reclaimed = _FCG_INT(p, reclaim_bucket_all)(fc, cur_bk,           \
                                                      expire_before,        \
@@ -578,11 +578,11 @@ _FCG_INT(p, maintain_step_filter_reclaim)(                                 \
     for (unsigned j = 0;                                                   \
          j < _FC_MAINT_STEP_PREFETCH_AHEAD && j < work_count;              \
          j++)                                                              \
-        rix_hash_prefetch_bucket(&fc->buckets[work[j]]);                   \
+        rix_hash_prefetch_bucket_of(&fc->buckets[work[j]]);                \
     for (unsigned i = 0; i < work_count; i++) {                            \
         unsigned reclaimed;                                                \
         if (i + _FC_MAINT_STEP_PREFETCH_AHEAD < work_count)                \
-            rix_hash_prefetch_bucket(                                      \
+            rix_hash_prefetch_bucket_of(                                   \
                 &fc->buckets[work[i + _FC_MAINT_STEP_PREFETCH_AHEAD]]);   \
         reclaimed = _FCG_INT(p, reclaim_bucket_all)(fc, work[i],           \
                                                      expire_before,        \
@@ -838,7 +838,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
     {                                                                      \
         _FCG_ENTRY_T(p) *_fh = FCG_FREE_LIST_FIRST_PTR(fc);                \
         if (_fh != NULL)                                                   \
-            rix_hash_prefetch_entry(_fh);                                 \
+            rix_hash_prefetch_entry_of(_fh);                              \
     }                                                                      \
     /* 4-stage N-ahead pipeline: lookup + inline insert on miss */         \
     for (unsigned i = 0; i < total; i += step_keys) {                      \
@@ -993,7 +993,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_nf = FCG_FREE_LIST_FIRST_PTR(fc);    \
                     if (_nf != NULL)                                       \
-                        rix_hash_prefetch_entry(_nf);                     \
+                        rix_hash_prefetch_entry_of(_nf);                  \
                 }                                                          \
             }                                                              \
         }                                                                  \
@@ -1122,7 +1122,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
     {                                                                      \
         _FCG_ENTRY_T(p) *_fh = FCG_FREE_LIST_FIRST_PTR(fc);                \
         if (_fh != NULL)                                                   \
-            rix_hash_prefetch_entry(_fh);                                 \
+            rix_hash_prefetch_entry_of(_fh);                              \
     }                                                                      \
     /* 2-stage pipeline: hash+prefetch both candidate buckets, then        \
      * alloc+insert. add_bulk still performs duplicate checks inside       \
@@ -1139,11 +1139,11 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 u32 _fp_unused;                                            \
                 hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)] =             \
                     hash_fn(&keys[idx], fc->ht_head.rhh_mask);             \
-                _rix_hash_buckets(                                         \
+                rix_hash_buckets(                                          \
                     hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)],          \
                     fc->ht_head.rhh_mask, &_bk0, &_bk1, &_fp_unused);      \
-                rix_hash_prefetch_bucket(&fc->buckets[_bk0]);              \
-                rix_hash_prefetch_bucket(&fc->buckets[_bk1]);              \
+                rix_hash_prefetch_bucket_of(&fc->buckets[_bk0]);           \
+                rix_hash_prefetch_bucket_of(&fc->buckets[_bk1]);           \
             }                                                              \
         }                                                                  \
         /* Stage 2: alloc + insert */                                      \
@@ -1212,7 +1212,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_nf = FCG_FREE_LIST_FIRST_PTR(fc);    \
                     if (_nf != NULL)                                       \
-                        rix_hash_prefetch_entry(_nf);                     \
+                        rix_hash_prefetch_entry_of(_nf);                  \
                 }                                                          \
             }                                                              \
         }                                                                  \
@@ -1306,7 +1306,7 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
             for (unsigned j = 0; j < n; j++) {                             \
                 if (idxs[i + j] != 0u &&                                   \
                     idxs[i + j] <= fc->max_entries)                        \
-                    rix_hash_prefetch_entry(                              \
+                    rix_hash_prefetch_entry_of(                           \
                         FCG_LAYOUT_ENTRY_PTR(fc, idxs[i + j]));           \
             }                                                              \
         }                                                                  \

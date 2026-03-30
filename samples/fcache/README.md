@@ -11,10 +11,10 @@ lookup to hide DRAM latency.
 make -C samples/fcache all
 
 # Run functional tests
-make -C samples/test test
+make -C samples/fcache/test test
 
 # Run datapath benchmark
-make -C samples/test bench
+make -C samples/fcache/test bench
 
 # Show top-level helper targets
 make help
@@ -690,9 +690,9 @@ three variants with zero code duplication, maintaining high maintainability.
 Latest rerun: March 24, 2026 on `AMD Ryzen 9 8945HS` (Zen 4, AVX-512 ready),
 `cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`.
 
-- `./samples/test/fc_test`: passed
-- `taskset -c 2 ./samples/test/fc_bench datapath`: auto-selected `avx512`
-- `taskset -c 2 ./samples/test/fc_bench maint_partial`: auto-selected `avx512`
+- `./samples/fcache/test/fc_test`: passed
+- `taskset -c 2 ./samples/fcache/test/fc_bench datapath`: auto-selected `avx512`
+- `taskset -c 2 ./samples/fcache/test/fc_bench maint_partial`: auto-selected `avx512`
 
 Representative results below come from the default `make bench` path:
 `datapath`, `maint_partial`, and the quick `findadd_window` matrix.
@@ -919,8 +919,8 @@ So the current state is:
 Measured on `AMD Ryzen 9 8945HS` on March 23, 2026 with:
 
 ```sh
-./samples/test/fc_bench --arch avx2 datapath
-./samples/test/fc_bench --arch avx512 datapath
+./samples/fcache/test/fc_bench --arch avx2 datapath
+./samples/fcache/test/fc_bench --arch avx512 datapath
 ```
 
 Representative results (cycles/key):

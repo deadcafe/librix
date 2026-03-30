@@ -20,8 +20,8 @@ Use this checklist before publishing a public release of `librix`.
 
 ## Validation
 
-- [ ] `make -C samples/test test`
-- [ ] `make -C samples/test bench`
+- [ ] `make -C samples/fcache/test test`
+- [ ] `make -C samples/fcache/test bench`
 - [ ] GCC build confirmed
 - [ ] Clang build confirmed
 - [ ] Generic path tested

@@ -1,9 +1,9 @@
 set datafile separator '\t'
 
 if (!exists("ROOT")) ROOT = GPVAL_PWD
-input_tsv = ROOT . '/samples/test/out/flow4_findadd_query_curve_median.tsv'
-output_svg = ROOT . '/samples/test/out/flow4_findadd_query_curve_median.gnuplot.svg'
-output_png = ROOT . '/samples/test/out/flow4_findadd_query_curve_median.gnuplot.png'
+input_tsv = ROOT . '/samples/fcache/test/out/flow4_findadd_query_curve_median.tsv'
+output_svg = ROOT . '/samples/fcache/test/out/flow4_findadd_query_curve_median.gnuplot.svg'
+output_png = ROOT . '/samples/fcache/test/out/flow4_findadd_query_curve_median.gnuplot.png'
 
 set terminal svg size 1400,800 dynamic
 set output output_svg

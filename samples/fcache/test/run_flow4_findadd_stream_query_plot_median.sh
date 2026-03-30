@@ -27,7 +27,7 @@ fi
 
 if [[ ! -x "${bench}" ]]; then
     echo "missing benchmark binary: ${bench}" >&2
-    echo "run: make -C samples/test fc_bench" >&2
+    echo "run: make -C samples/fcache/test fc_bench" >&2
     exit 1
 fi
 

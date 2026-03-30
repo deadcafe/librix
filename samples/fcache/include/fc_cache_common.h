@@ -188,7 +188,7 @@ fc_cache_size_query_common(unsigned requested_entries,
                            size_t entry_align,
                            struct fc_cache_size_attr *attr)
 {
-    size_t off = 0u;
+    size_t off = 0;
     unsigned nb_entries;
     unsigned nb_bk;
 

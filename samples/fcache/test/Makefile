@@ -1,11 +1,11 @@
 #
 # Copyright (c) 2026 deadcafe.beef@gmail.com
 #
-# samples/test/Makefile - fcache test, benchmark, and matrix runner
+# samples/fcache/test/Makefile - fcache test, benchmark, and matrix runner
 #
 
-TOPDIR  := $(shell cd ../.. && pwd)
-FCDIR   := $(shell cd ../fcache && pwd)
+TOPDIR  := $(shell cd ../../.. && pwd)
+FCDIR   := $(shell cd .. && pwd)
 
 CC_IS_CLANG := $(shell $(CC) --version 2>&1 | grep -c "clang")
 

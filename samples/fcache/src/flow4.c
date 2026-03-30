@@ -309,7 +309,7 @@ fc_flow4_findadd_resolve_ctx(struct fc_flow4_cache *fc,
     {
         struct fc_flow4_entry *next_free = FCG_FREE_LIST_FIRST_PTR(fc);
         if (next_free != NULL)
-            rix_hash_prefetch_entry(next_free);
+            rix_hash_prefetch_entry_of(next_free);
     }
 }
 
@@ -343,7 +343,7 @@ _FCG_API(flow4, findadd_burst32)(struct fc_flow4_cache *fc,
     {
         struct fc_flow4_entry *free_head = FCG_FREE_LIST_FIRST_PTR(fc);
         if (free_head != NULL)
-            rix_hash_prefetch_entry(free_head);
+            rix_hash_prefetch_entry_of(free_head);
     }
 
     if (nb_keys <= 4u) {

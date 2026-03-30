@@ -11,10 +11,10 @@ DRAM レイテンシを隠蔽する。
 make -C samples/fcache all
 
 # 正当性テスト
-make -C samples/test test
+make -C samples/fcache/test test
 
 # データパスベンチ
-make -C samples/test bench
+make -C samples/fcache/test bench
 
 # top-level の補助ターゲット一覧
 make help
@@ -741,9 +741,9 @@ DRAM-cold条件として優秀。
 最新の再計測は 2026-03-24、`AMD Ryzen 9 8945HS`（Zen 4, AVX-512 対応）、
 `cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0` で実施。
 
-- `./samples/test/fc_test`: PASS
-- `taskset -c 2 ./samples/test/fc_bench datapath`: 自動選択 backend は `avx512`
-- `taskset -c 2 ./samples/test/fc_bench maint_partial`: 自動選択 backend は `avx512`
+- `./samples/fcache/test/fc_test`: PASS
+- `taskset -c 2 ./samples/fcache/test/fc_bench datapath`: 自動選択 backend は `avx512`
+- `taskset -c 2 ./samples/fcache/test/fc_bench maint_partial`: 自動選択 backend は `avx512`
 
 以下の代表値は、既定の `make bench` 経路で使う
 `datapath`, `maint_partial`, quick `findadd_window` matrix を基準にした。
@@ -962,8 +962,8 @@ $(LIBDIR)/fc_dispatch.o: $(SRCDIR)/fc_dispatch.c
 `AMD Ryzen 9 8945HS` 上で 2026-03-23 に次を実行:
 
 ```sh
-./samples/test/fc_bench --arch avx2 datapath
-./samples/test/fc_bench --arch avx512 datapath
+./samples/fcache/test/fc_bench --arch avx2 datapath
+./samples/fcache/test/fc_bench --arch avx512 datapath
 ```
 
 代表値（cycles/key）:

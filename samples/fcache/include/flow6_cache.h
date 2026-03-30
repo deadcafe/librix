@@ -218,13 +218,13 @@ fc_flow6_cache_entry_cptr(const struct fc_flow6_cache *fc, uint32_t entry_idx)
 static inline size_t
 fc_flow6_cache_record_stride(const struct fc_flow6_cache *fc)
 {
-    return fc != NULL ? fc->pool_stride : 0u;
+    return fc != NULL ? fc->pool_stride : 0;
 }
 
 static inline size_t
 fc_flow6_cache_entry_offset(const struct fc_flow6_cache *fc)
 {
-    return fc != NULL ? fc->pool_entry_offset : 0u;
+    return fc != NULL ? fc->pool_entry_offset : 0;
 }
 
 #define FC_FLOW6_CACHE_RECORD_PTR_AS(fc, type, entry_idx) \
