@@ -103,7 +103,7 @@ name##_hash_key(struct rix_hash_find_ctx_s *ctx,                              \
     ctx->key   = (const void *)key;                                           \
     ctx->bk[0] = buckets + _bk0;                                              \
     ctx->bk[1] = buckets + _bk1;                                              \
-    _rix_hash_prefetch_bucket(ctx->bk[0]);                                    \
+    rix_hash_prefetch_bucket_of(ctx->bk[0]);                                  \
 }                                                                             \
                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
@@ -123,8 +123,7 @@ name##_prefetch_node(struct rix_hash_find_ctx_s *ctx,                         \
     if (_hits) {                                                              \
         unsigned _bit = (unsigned)__builtin_ctz(_hits);                       \
         unsigned _nidx = ctx->bk[0]->idx[_bit];                               \
-        if (_nidx != (unsigned)RIX_NIL)                                       \
-            _rix_hash_prefetch_entry(name##_hptr(base, _nidx));               \
+        rix_hash_prefetch_entry_of_idx(base, _nidx);                          \
     }                                                                         \
 }                                                                             \
                                                                               \
@@ -180,8 +179,8 @@ name##_hash_key_2bk(struct rix_hash_find_ctx_s *ctx,                          \
     ctx->key   = (const void *)key;                                           \
     ctx->bk[0] = buckets + _bk0;                                              \
     ctx->bk[1] = buckets + _bk1;                                              \
-    _rix_hash_prefetch_bucket(ctx->bk[0]);                                    \
-    _rix_hash_prefetch_bucket(ctx->bk[1]);                                    \
+    rix_hash_prefetch_bucket_of(ctx->bk[0]);                                  \
+    rix_hash_prefetch_bucket_of(ctx->bk[1]);                                  \
 }                                                                             \
                                                                               \
 /* Stage 2: scan bk_0 for fp matches AND empty slots in one pass.     */      \
@@ -372,9 +371,9 @@ name##_insert_hashed(struct name *head,                                       \
     u32 _hits_zero[2];                                                   \
     _rix_hash_buckets(_h, mask, &_bk0, &_bk1, &_fp);                          \
     elm->hash_field = _h.val32[0];                                            \
-    _rix_hash_prefetch_bucket(buckets + _bk0);                                \
+    rix_hash_prefetch_bucket_of(buckets + _bk0);                              \
     if (_bk1 != _bk0)                                                         \
-        _rix_hash_prefetch_bucket(buckets + _bk1);                            \
+        rix_hash_prefetch_bucket_of(buckets + _bk1);                          \
                                                                               \
     for (int _i = 0; _i < 2; _i++) {                                          \
         struct rix_hash_bucket_s *_bk =                                       \

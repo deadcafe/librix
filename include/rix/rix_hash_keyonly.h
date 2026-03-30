@@ -130,7 +130,7 @@ name##_hash_key(struct rix_hash_find_ctx_s *ctx,                              \
     ctx->key   = (const void *)key;                                           \
     ctx->bk[0] = buckets + _bk0;                                              \
     ctx->bk[1] = buckets + _bk1;                                              \
-    _rix_hash_prefetch_bucket(ctx->bk[0]);                                    \
+    rix_hash_prefetch_bucket_of(ctx->bk[0]);                                  \
 }                                                                             \
                                                                               \
 /* Stage 2: scan bk_0 fingerprints only; produce fp_hits[0] bitmask.  */      \
@@ -156,8 +156,7 @@ name##_prefetch_node(struct rix_hash_find_ctx_s *ctx,                         \
         while (_hits) {                                                       \
             unsigned _bit = (unsigned)__builtin_ctz(_hits);                   \
             _hits &= _hits - 1u;                                              \
-            _rix_hash_prefetch_entry(                                         \
-                name##_hptr(base, ctx->bk[_i]->idx[_bit]));                   \
+            rix_hash_prefetch_entry_of_idx(base, ctx->bk[_i]->idx[_bit]);     \
         }                                                                     \
     }                                                                         \
 }                                                                             \

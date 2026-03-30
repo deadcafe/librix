@@ -15,14 +15,24 @@
 
 #  include "rix_hash_arch.h"
 
+#  ifndef RIX_HASH_FIND_U32X16
+#    define RIX_HASH_FIND_U32X16(arr, val) \
+        rix_hash_arch->find_u32x16((arr), (val))
+#  endif
+
+#  ifndef RIX_HASH_FIND_U32X16_2
+#    define RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
+        rix_hash_arch->find_u32x16_2((arr), (val0), (val1), (mask0), (mask1))
+#  endif
+
 #  ifndef _RIX_HASH_FIND_U32X16
 #    define _RIX_HASH_FIND_U32X16(arr, val) \
-        rix_hash_arch->find_u32x16((arr), (val))
+        RIX_HASH_FIND_U32X16((arr), (val))
 #  endif
 
 #  ifndef _RIX_HASH_FIND_U32X16_2
 #    define _RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
-        rix_hash_arch->find_u32x16_2((arr), (val0), (val1), (mask0), (mask1))
+        RIX_HASH_FIND_U32X16_2((arr), (val0), (val1), (mask0), (mask1))
 #  endif
 
 /*
@@ -89,59 +99,75 @@ rix_hash_prefetch_key(const void *key)
 
 /* Prefetch a node/entry before key comparison. */
 static RIX_FORCE_INLINE void
-rix_hash_prefetch_entry(const void *entry)
+rix_hash_prefetch_entry_of(const void *entry)
 {
     __builtin_prefetch(entry, 0, 1);
 }
 
-/* Prefetch only the fingerprint/hash line of a bucket. */
+/*
+ * Prefetch an indexed entry after converting a 1-origin index to an entry
+ * pointer. base must be a typed pointer to the entry array.
+ */
+#  ifndef rix_hash_prefetch_entry_of_idx
+#    define rix_hash_prefetch_entry_of_idx(base, idx)                         \
+        do {                                                                  \
+            unsigned __rix_idx_tmp = (unsigned)(idx);                         \
+            if (__rix_idx_tmp != RIX_NIL)                                     \
+                rix_hash_prefetch_entry_of(RIX_PTR_FROM_IDX((base),           \
+                                                             __rix_idx_tmp)); \
+        } while (0)
+#  endif
+
+/* Return a pointer to buckets[bk_idx]. */
+#  ifndef rix_hash_bucket_of_idx
+#    define rix_hash_bucket_of_idx(buckets, bk_idx) \
+        (&(buckets)[(unsigned)(bk_idx)])
+#  endif
+
+/* Return buckets[bk_idx].hash[]. */
+#  ifndef rix_hash_bucket_hashes_of_idx
+#    define rix_hash_bucket_hashes_of_idx(buckets, bk_idx) \
+        (rix_hash_bucket_of_idx((buckets), (bk_idx))->hash)
+#  endif
+
+/* Return buckets[bk_idx].idx[]. */
+#  ifndef rix_hash_bucket_indices_of_idx
+#    define rix_hash_bucket_indices_of_idx(buckets, bk_idx) \
+        (rix_hash_bucket_of_idx((buckets), (bk_idx))->idx)
+#  endif
+
+/* Prefetch only the fingerprint/hash line of a bucket pointer. */
 static RIX_FORCE_INLINE void
-rix_hash_prefetch_bucket_hash(const struct rix_hash_bucket_s *bucket)
+rix_hash_prefetch_bucket_hashes_of(const struct rix_hash_bucket_s *bucket)
 {
     __builtin_prefetch(&bucket->hash[0], 0, 1);
 }
 
-/* Prefetch only the idx[] line of a bucket. */
+/* Prefetch only the idx[] line of a bucket pointer. */
 static RIX_FORCE_INLINE void
-rix_hash_prefetch_bucket_idx(const struct rix_hash_bucket_s *bucket)
+rix_hash_prefetch_bucket_indices_of(const struct rix_hash_bucket_s *bucket)
 {
     __builtin_prefetch(&bucket->idx[0], 0, 1);
 }
 
+/* Prefetch the hash[] line of buckets[bk_idx]. */
+#  ifndef rix_hash_prefetch_bucket_hashes_of_idx
+#    define rix_hash_prefetch_bucket_hashes_of_idx(buckets, bk_idx)           \
+        rix_hash_prefetch_bucket_hashes_of(&(buckets)[(unsigned)(bk_idx)])
+#  endif
+
+/* Prefetch the idx[] line of buckets[bk_idx]. */
+#  ifndef rix_hash_prefetch_bucket_indices_of_idx
+#    define rix_hash_prefetch_bucket_indices_of_idx(buckets, bk_idx)          \
+        rix_hash_prefetch_bucket_indices_of(&(buckets)[(unsigned)(bk_idx)])
+#  endif
+
 /* Prefetch both cache lines of a bucket for ordinary read-mostly access. */
 static RIX_FORCE_INLINE void
-rix_hash_prefetch_bucket(const struct rix_hash_bucket_s *bucket)
+rix_hash_prefetch_bucket_of(const struct rix_hash_bucket_s *bucket)
 {
-    rix_hash_prefetch_bucket_hash(bucket);
-    rix_hash_prefetch_bucket_idx(bucket);
-}
-
-/*---------------------------------------------------------------------------
- * Private aliases -- used by GENERATE macros internally.
- * Applications should use the public rix_hash_xxx() forms above.
- *---------------------------------------------------------------------------*/
-static RIX_FORCE_INLINE void
-_rix_hash_prefetch_entry(const void *entry)
-{
-    rix_hash_prefetch_entry(entry);
-}
-
-static RIX_FORCE_INLINE void
-_rix_hash_prefetch_bucket_hash(const struct rix_hash_bucket_s *bucket)
-{
-    rix_hash_prefetch_bucket_hash(bucket);
-}
-
-static RIX_FORCE_INLINE void
-_rix_hash_prefetch_bucket_idx(const struct rix_hash_bucket_s *bucket)
-{
-    rix_hash_prefetch_bucket_idx(bucket);
-}
-
-static RIX_FORCE_INLINE void
-_rix_hash_prefetch_bucket(const struct rix_hash_bucket_s *bucket)
-{
-    rix_hash_prefetch_bucket(bucket);
+    rix_hash_prefetch_bucket_hashes_of(bucket);
+    rix_hash_prefetch_bucket_indices_of(bucket);
 }
 
 /*===========================================================================
