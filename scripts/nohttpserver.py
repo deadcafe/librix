@@ -18,6 +18,29 @@ import sys
 
 
 class NoCacheHandler(http.server.CGIHTTPRequestHandler):
+    @staticmethod
+    def _content_type_with_utf8(value):
+        ctype = value.strip()
+        lower = ctype.lower()
+
+        if ";" in ctype:
+            return value
+        if lower.startswith("text/"):
+            return ctype + "; charset=utf-8"
+        if lower in {
+            "application/javascript",
+            "application/json",
+            "application/xml",
+            "image/svg+xml",
+        }:
+            return ctype + "; charset=utf-8"
+        return value
+
+    def send_header(self, keyword, value):
+        if keyword.lower() == "content-type":
+            value = self._content_type_with_utf8(value)
+        super().send_header(keyword, value)
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Pragma", "no-cache")
