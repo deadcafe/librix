@@ -282,6 +282,10 @@ void fc_flowu_cache_findadd_bulk(struct fc_flowu_cache *fc,
                                   const struct flowu_key *keys,
                                   unsigned nb_keys, uint64_t now,
                                   struct fc_flowu_result *results);
+void fc_flowu_cache_findadd_burst32(struct fc_flowu_cache *fc,
+                                     const struct flowu_key *keys,
+                                     unsigned nb_keys, uint64_t now,
+                                     struct fc_flowu_result *results);
 void fc_flowu_cache_add_bulk(struct fc_flowu_cache *fc,
                               const struct flowu_key *keys,
                               unsigned nb_keys, uint64_t now,

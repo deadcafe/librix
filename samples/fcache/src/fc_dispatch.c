@@ -60,6 +60,40 @@ extern void fc_flow4_cache_findadd_burst32_avx512(struct fc_flow4_cache *fc,
                                                   unsigned nb_keys, uint64_t now,
                                                   struct fc_flow4_result *results);
 
+extern void fc_flow6_cache_findadd_burst32_gen(struct fc_flow6_cache *fc,
+                                               const struct flow6_key *keys,
+                                               unsigned nb_keys, uint64_t now,
+                                               struct fc_flow6_result *results);
+extern void fc_flow6_cache_findadd_burst32_sse(struct fc_flow6_cache *fc,
+                                               const struct flow6_key *keys,
+                                               unsigned nb_keys, uint64_t now,
+                                               struct fc_flow6_result *results);
+extern void fc_flow6_cache_findadd_burst32_avx2(struct fc_flow6_cache *fc,
+                                                const struct flow6_key *keys,
+                                                unsigned nb_keys, uint64_t now,
+                                                struct fc_flow6_result *results);
+extern void fc_flow6_cache_findadd_burst32_avx512(struct fc_flow6_cache *fc,
+                                                  const struct flow6_key *keys,
+                                                  unsigned nb_keys, uint64_t now,
+                                                  struct fc_flow6_result *results);
+
+extern void fc_flowu_cache_findadd_burst32_gen(struct fc_flowu_cache *fc,
+                                               const struct flowu_key *keys,
+                                               unsigned nb_keys, uint64_t now,
+                                               struct fc_flowu_result *results);
+extern void fc_flowu_cache_findadd_burst32_sse(struct fc_flowu_cache *fc,
+                                               const struct flowu_key *keys,
+                                               unsigned nb_keys, uint64_t now,
+                                               struct fc_flowu_result *results);
+extern void fc_flowu_cache_findadd_burst32_avx2(struct fc_flowu_cache *fc,
+                                                const struct flowu_key *keys,
+                                                unsigned nb_keys, uint64_t now,
+                                                struct fc_flowu_result *results);
+extern void fc_flowu_cache_findadd_burst32_avx512(struct fc_flowu_cache *fc,
+                                                  const struct flowu_key *keys,
+                                                  unsigned nb_keys, uint64_t now,
+                                                  struct fc_flowu_result *results);
+
 /*===========================================================================
  * Per-variant dispatch state
  *===========================================================================*/
@@ -394,6 +428,28 @@ fc_flow6_cache_findadd_bulk(struct fc_flow6_cache *fc,
 }
 
 void
+fc_flow6_cache_findadd_burst32(struct fc_flow6_cache *fc,
+                                const struct flow6_key *keys,
+                                unsigned nb_keys, uint64_t now,
+                                struct fc_flow6_result *results)
+{
+    if (nb_keys > 32u) {
+        _fc_flow6_active->findadd_bulk(fc, keys, nb_keys, now, results);
+        return;
+    }
+
+    if (_fc_flow6_active == &fc_flow6_ops_avx512) {
+        fc_flow6_cache_findadd_burst32_avx512(fc, keys, nb_keys, now, results);
+    } else if (_fc_flow6_active == &fc_flow6_ops_avx2) {
+        fc_flow6_cache_findadd_burst32_avx2(fc, keys, nb_keys, now, results);
+    } else if (_fc_flow6_active == &fc_flow6_ops_sse) {
+        fc_flow6_cache_findadd_burst32_sse(fc, keys, nb_keys, now, results);
+    } else {
+        fc_flow6_cache_findadd_burst32_gen(fc, keys, nb_keys, now, results);
+    }
+}
+
+void
 fc_flow6_cache_add_bulk(struct fc_flow6_cache *fc,
                          const struct flow6_key *keys,
                          unsigned nb_keys, uint64_t now,
@@ -458,6 +514,28 @@ fc_flowu_cache_findadd_bulk(struct fc_flowu_cache *fc,
                              struct fc_flowu_result *results)
 {
     _fc_flowu_active->findadd_bulk(fc, keys, nb_keys, now, results);
+}
+
+void
+fc_flowu_cache_findadd_burst32(struct fc_flowu_cache *fc,
+                                const struct flowu_key *keys,
+                                unsigned nb_keys, uint64_t now,
+                                struct fc_flowu_result *results)
+{
+    if (nb_keys > 32u) {
+        _fc_flowu_active->findadd_bulk(fc, keys, nb_keys, now, results);
+        return;
+    }
+
+    if (_fc_flowu_active == &fc_flowu_ops_avx512) {
+        fc_flowu_cache_findadd_burst32_avx512(fc, keys, nb_keys, now, results);
+    } else if (_fc_flowu_active == &fc_flowu_ops_avx2) {
+        fc_flowu_cache_findadd_burst32_avx2(fc, keys, nb_keys, now, results);
+    } else if (_fc_flowu_active == &fc_flowu_ops_sse) {
+        fc_flowu_cache_findadd_burst32_sse(fc, keys, nb_keys, now, results);
+    } else {
+        fc_flowu_cache_findadd_burst32_gen(fc, keys, nb_keys, now, results);
+    }
 }
 
 void

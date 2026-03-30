@@ -472,6 +472,32 @@ fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
     }
 }
 
+static inline void
+fcb_flow6_call_findadd(struct fc_flow6_cache *fc,
+                       const struct flow6_key *keys,
+                       unsigned n, uint64_t now,
+                       struct fc_flow6_result *results)
+{
+    if (fcb_findadd_api_mode == FCB_FINDADD_API_BURST32 && n <= 32u) {
+        fc_flow6_cache_findadd_burst32(fc, keys, n, now, results);
+    } else {
+        fc_flow6_cache_findadd_bulk(fc, keys, n, now, results);
+    }
+}
+
+static inline void
+fcb_flowu_call_findadd(struct fc_flowu_cache *fc,
+                       const struct flowu_key *keys,
+                       unsigned n, uint64_t now,
+                       struct fc_flowu_result *results)
+{
+    if (fcb_findadd_api_mode == FCB_FINDADD_API_BURST32 && n <= 32u) {
+        fc_flowu_cache_findadd_burst32(fc, keys, n, now, results);
+    } else {
+        fc_flowu_cache_findadd_bulk(fc, keys, n, now, results);
+    }
+}
+
 struct fcb_flow4_record {
     struct fc_flow4_entry entry;
     struct {
@@ -540,7 +566,10 @@ struct fcb_flowu_record {
                               (max_entries), struct fcb_flow6_record, entry, \
                               (cfg))
 #define FCB_MAKE_KEY(i) fcb_make_key6(i)
+#define FCB_CALL_FINDADD(fc, keys, n, now, results) \
+    fcb_flow6_call_findadd((fc), (keys), (n), (now), (results))
 #include "bench_fc_body.h"
+#undef FCB_CALL_FINDADD
 #undef FCB_RECORD_T
 #undef FCB_INIT_TYPED
 
@@ -559,7 +588,10 @@ struct fcb_flowu_record {
                               (max_entries), struct fcb_flowu_record, entry, \
                               (cfg))
 #define FCB_MAKE_KEY(i) fcb_make_keyu(i)
+#define FCB_CALL_FINDADD(fc, keys, n, now, results) \
+    fcb_flowu_call_findadd((fc), (keys), (n), (now), (results))
 #include "bench_fc_body.h"
+#undef FCB_CALL_FINDADD
 #undef FCB_RECORD_T
 #undef FCB_INIT_TYPED
 
@@ -577,8 +609,9 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
     unsigned prefill_n = max_entries / 2u;
     unsigned hit_key_n = (unsigned)((size_t)FCB_QUERY * fcb_dp_hit_repeat);
     unsigned miss_key_n = (unsigned)((size_t)FCB_QUERY * fcb_dp_miss_repeat);
-    unsigned mixed_key_n = (unsigned)((size_t)FCB_QUERY * fcb_dp_mixed_repeat);
     unsigned mixed_hit_n = (FCB_QUERY * 9u) / 10u;
+    unsigned mixed_miss_n = FCB_QUERY - mixed_hit_n;
+    unsigned mixed_key_n = (unsigned)((size_t)FCB_QUERY * fcb_dp_mixed_repeat);
 
     struct fcb_flow4_ctx ctx4;
     struct fcb_flow6_ctx ctx6;
@@ -588,7 +621,17 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
     fcb_flow6_ctx_init(&ctx6, nb_bk, max_entries, 1000000000ull);
     fcb_flowu_ctx_init(&ctxu, nb_bk, max_entries, 1000000000ull);
 
-    /* generate keys */
+    /*
+     * Key space layout (disjoint ranges):
+     *
+     *   [0 .. prefill_n-1]                                   prefill / hit keys
+     *   [max_entries .. max_entries+miss_key_n-1]             miss keys
+     *   [max_entries+miss_key_n+mixed_key_n .. ]              mixed miss keys
+     *
+     * Hit keys (h4/h6/hu) are drawn from within [0..prefill_n-1] so that
+     * they target long-resident entries after a full prefill + cold-touch.
+     * Keys wrap via modulo when hit_key_n > prefill_n.
+     */
     struct flow4_key *p4 = fcb_alloc((size_t)prefill_n * sizeof(*p4));
     struct flow6_key *p6 = fcb_alloc((size_t)prefill_n * sizeof(*p6));
     struct flowu_key *pu = fcb_alloc((size_t)prefill_n * sizeof(*pu));
@@ -612,31 +655,36 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
         pu[i] = fcb_make_keyu(i);
     }
     for (unsigned i = 0; i < hit_key_n; i++) {
-        h4[i] = fcb_make_key4(i);
-        h6[i] = fcb_make_key6(i);
-        hu[i] = fcb_make_keyu(i);
+        h4[i] = fcb_make_key4(i % prefill_n);
+        h6[i] = fcb_make_key6(i % prefill_n);
+        hu[i] = fcb_make_keyu(i % prefill_n);
     }
     for (unsigned i = 0; i < miss_key_n; i++) {
         m4[i] = fcb_make_key4(max_entries + i);
         m6[i] = fcb_make_key6(max_entries + i);
         mu[i] = fcb_make_keyu(max_entries + i);
     }
-    for (unsigned r = 0; r < fcb_dp_mixed_repeat; r++) {
-        unsigned base = r * FCB_QUERY;
-        for (unsigned i = 0; i < FCB_QUERY; i++) {
-            unsigned idx = base + i;
-            if (i < mixed_hit_n) {
-                x4[idx] = fcb_make_key4(prefill_n + idx);
-                x6[idx] = fcb_make_key6(prefill_n + idx);
-                xu[idx] = fcb_make_keyu(prefill_n + idx);
-            } else {
-                unsigned miss_off = idx - mixed_hit_n;
-                x4[idx] = fcb_make_key4(max_entries + hit_key_n + miss_key_n
-                                        + mixed_key_n + miss_off);
-                x6[idx] = fcb_make_key6(max_entries + hit_key_n + miss_key_n
-                                        + mixed_key_n + miss_off);
-                xu[idx] = fcb_make_keyu(max_entries + hit_key_n + miss_key_n
-                                        + mixed_key_n + miss_off);
+    /*
+     * Mixed query keys: hit portion drawn from prefill_keys tail,
+     * miss portion unique per round.
+     */
+    {
+        unsigned hit_base = prefill_n - mixed_hit_n;
+        unsigned miss_key_base = max_entries + miss_key_n + mixed_key_n;
+        for (unsigned r = 0; r < fcb_dp_mixed_repeat; r++) {
+            unsigned qbase = r * FCB_QUERY;
+            for (unsigned i = 0; i < mixed_hit_n; i++) {
+                unsigned idx = qbase + i;
+                x4[idx] = fcb_make_key4(hit_base + i);
+                x6[idx] = fcb_make_key6(hit_base + i);
+                xu[idx] = fcb_make_keyu(hit_base + i);
+            }
+            for (unsigned i = mixed_hit_n; i < FCB_QUERY; i++) {
+                unsigned idx = qbase + i;
+                unsigned miss_off = r * mixed_miss_n + (i - mixed_hit_n);
+                x4[idx] = fcb_make_key4(miss_key_base + miss_off);
+                x6[idx] = fcb_make_key6(miss_key_base + miss_off);
+                xu[idx] = fcb_make_keyu(miss_key_base + miss_off);
             }
         }
     }
@@ -664,22 +712,22 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
 
     {
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_HIT][0],
-                          fcb_flow4_bench_hit(&ctx4, p4, prefill_n - FCB_QUERY,
+                          fcb_flow4_bench_hit(&ctx4, p4, prefill_n,
                                               h4, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_HIT][1],
-                          fcb_flow6_bench_hit(&ctx6, p6, prefill_n - FCB_QUERY,
+                          fcb_flow6_bench_hit(&ctx6, p6, prefill_n,
                                               h6, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_HIT][2],
-                          fcb_flowu_bench_hit(&ctxu, pu, prefill_n - FCB_QUERY,
+                          fcb_flowu_bench_hit(&ctxu, pu, prefill_n,
                                               hu, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FIND_HIT][0],
-                          fcb_flow4_bench_find_hit(&ctx4, p4, prefill_n - FCB_QUERY,
+                          fcb_flow4_bench_find_hit(&ctx4, p4, prefill_n,
                                                    h4, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FIND_HIT][1],
-                          fcb_flow6_bench_find_hit(&ctx6, p6, prefill_n - FCB_QUERY,
+                          fcb_flow6_bench_find_hit(&ctx6, p6, prefill_n,
                                                    h6, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FIND_HIT][2],
-                          fcb_flowu_bench_find_hit(&ctxu, pu, prefill_n - FCB_QUERY,
+                          fcb_flowu_bench_find_hit(&ctxu, pu, prefill_n,
                                                    hu, FCB_QUERY, fcb_dp_hit_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_FINDADD_MISS][0],
                           fcb_flow4_bench_miss_fill(&ctx4, p4, prefill_n,
@@ -729,13 +777,16 @@ bench_datapath_one(unsigned desired, struct fcb_datapath_report *report)
     {
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_MIXED_90_10_RESET][0],
                           fcb_flow4_bench_mixed(&ctx4, p4, prefill_n, x4,
-                                                FCB_QUERY, fcb_dp_mixed_repeat));
+                                                FCB_QUERY, mixed_hit_n,
+                                                fcb_dp_mixed_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_MIXED_90_10_RESET][1],
                           fcb_flow6_bench_mixed(&ctx6, p6, prefill_n, x6,
-                                                FCB_QUERY, fcb_dp_mixed_repeat));
+                                                FCB_QUERY, mixed_hit_n,
+                                                fcb_dp_mixed_repeat));
         FCB_SAMPLE_METRIC(out->metrics[FCB_DP_MIXED_90_10_RESET][2],
                           fcb_flowu_bench_mixed(&ctxu, pu, prefill_n, xu,
-                                                FCB_QUERY, fcb_dp_mixed_repeat));
+                                                FCB_QUERY, mixed_hit_n,
+                                                fcb_dp_mixed_repeat));
     }
 
 #undef FCB_SAMPLE_METRIC
@@ -1188,7 +1239,7 @@ usage(const char *prog)
     printf("  --dp-miss-repeat  : override cold datapath miss/add/del rounds per metric.\n");
     printf("  --dp-mixed-repeat : override cold datapath mixed rounds per metric.\n");
     printf("  --pin-core     : pin the fc_bench process to one CPU before running.\n");
-    printf("  --findadd-api  : bulk (default) or burst32; burst32 is currently flow4-only.\n");
+    printf("  --findadd-api  : bulk (default) or burst32; applies to flow4, flow6, and flowu.\n");
 }
 
 static int

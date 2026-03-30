@@ -199,11 +199,19 @@ FCB_FN(active_scan)(const struct FCB_FN(ctx) *ctx)
 }
 
 /*===========================================================================
- * Pure datapath: hit
+ * Pure datapath: hit (findadd on long-resident entries)
+ *
+ * Each round:
+ *   1. Reset the cache.
+ *   2. Prefill all prefill_keys[0..prefill_n-1].
+ *      The query keys must be a subset of prefill_keys so that hits
+ *      target long-resident entries, not freshly inserted ones.
+ *   3. Cold-touch to flush CPU caches.
+ *   4. Time findadd over the query keys (all hits).
  *===========================================================================*/
 static double
 FCB_FN(bench_hit)(struct FCB_FN(ctx) *ctx,
-                  const FCB_KEY_T *bg_keys, unsigned bg_n,
+                  const FCB_KEY_T *prefill_keys, unsigned prefill_n,
                   const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
@@ -215,12 +223,10 @@ FCB_FN(bench_hit)(struct FCB_FN(ctx) *ctx,
         uint64_t now = (uint64_t)r + 100u;
 
         FCB_FN(ctx_reset)(ctx);
-        if (bg_n != 0u)
-            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
-        (void)FCB_FN(prefill)(ctx, round_keys, n, now + 1u);
+        (void)FCB_FN(prefill)(ctx, prefill_keys, prefill_n, now);
         fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_CALL_FINDADD(&ctx->fc, round_keys, n, now + 2u, results);
+        FCB_CALL_FINDADD(&ctx->fc, round_keys, n, now + 1u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -235,10 +241,12 @@ FCB_FN(bench_hit)(struct FCB_FN(ctx) *ctx,
 
 /*===========================================================================
  * Pure datapath: find_bulk hit (search only, no insert path)
+ *
+ * Same setup as bench_hit but times find_bulk (pure lookup, no insert).
  *===========================================================================*/
 static double
 FCB_FN(bench_find_hit)(struct FCB_FN(ctx) *ctx,
-                       const FCB_KEY_T *bg_keys, unsigned bg_n,
+                       const FCB_KEY_T *prefill_keys, unsigned prefill_n,
                        const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
@@ -250,12 +258,10 @@ FCB_FN(bench_find_hit)(struct FCB_FN(ctx) *ctx,
         uint64_t now = (uint64_t)r + 100u;
 
         FCB_FN(ctx_reset)(ctx);
-        if (bg_n != 0u)
-            (void)FCB_FN(prefill)(ctx, bg_keys, bg_n, now);
-        (void)FCB_FN(prefill)(ctx, round_keys, n, now + 1u);
+        (void)FCB_FN(prefill)(ctx, prefill_keys, prefill_n, now);
         fcb_cold_touch();
         t0 = fcb_rdtsc();
-        FCB_API(find_bulk)(&ctx->fc, round_keys, n, now + 2u, results);
+        FCB_API(find_bulk)(&ctx->fc, round_keys, n, now + 1u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -407,18 +413,28 @@ FCB_FN(bench_miss_fill)(struct FCB_FN(ctx) *ctx,
 }
 
 /*===========================================================================
- * Pure datapath: mixed (90% hit / 10% miss, reset per round)
+ * Pure datapath: mixed (hit_n hit / (query_n - hit_n) miss, reset per round)
+ *
+ * Each round:
+ *   1. Reset the cache.
+ *   2. Prefill all prefill_keys[0..prefill_n-1].
+ *      The hit portion of query_keys must be a subset of prefill_keys
+ *      so that hits come from long-resident entries, not freshly inserted ones.
+ *   3. Cold-touch to flush CPU caches.
+ *   4. Time findadd over query_keys (hit_n hits + remainder misses).
  *===========================================================================*/
 static double
 FCB_FN(bench_mixed)(struct FCB_FN(ctx) *ctx,
                     const FCB_KEY_T *prefill_keys, unsigned prefill_n,
                     const FCB_KEY_T *query_keys, unsigned query_n,
-                     unsigned repeat)
+                    unsigned hit_n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)query_n * sizeof(*results));
     uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
-    unsigned hit_n = (query_n * 9u) / 10u;
-    unsigned bg_n = (prefill_n > hit_n) ? (prefill_n - hit_n) : 0u;
+
+    assert(hit_n <= query_n);   /* checked at -O0; suppresses unused-param */
+    assert(hit_n <= prefill_n);
+    (void)hit_n;
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_query = query_keys + ((size_t)r * query_n);
@@ -426,14 +442,11 @@ FCB_FN(bench_mixed)(struct FCB_FN(ctx) *ctx,
         uint64_t t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
-        if (bg_n != 0u)
-            (void)FCB_FN(prefill)(ctx, prefill_keys, bg_n, now);
-        if (hit_n != 0u)
-            (void)FCB_FN(prefill)(ctx, round_query, hit_n, now + 1u);
+        (void)FCB_FN(prefill)(ctx, prefill_keys, prefill_n, now);
         fcb_cold_touch();
 
         t0 = fcb_rdtsc();
-        FCB_CALL_FINDADD(&ctx->fc, round_query, query_n, now + 2u, results);
+        FCB_CALL_FINDADD(&ctx->fc, round_query, query_n, now + 1u, results);
         t1 = fcb_rdtsc();
         samples[r] = t1 - t0;
     }

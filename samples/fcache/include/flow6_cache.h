@@ -258,6 +258,10 @@ void fc_flow6_cache_findadd_bulk(struct fc_flow6_cache *fc,
                                   const struct flow6_key *keys,
                                   unsigned nb_keys, uint64_t now,
                                   struct fc_flow6_result *results);
+void fc_flow6_cache_findadd_burst32(struct fc_flow6_cache *fc,
+                                     const struct flow6_key *keys,
+                                     unsigned nb_keys, uint64_t now,
+                                     struct fc_flow6_result *results);
 void fc_flow6_cache_add_bulk(struct fc_flow6_cache *fc,
                               const struct flow6_key *keys,
                               unsigned nb_keys, uint64_t now,

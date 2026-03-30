@@ -51,7 +51,9 @@
 #include "fc_cache_common.h"
 
 /** @brief Cache-line size used for entry alignment. */
+#ifndef FC_CACHE_LINE_SIZE
 #define FC_CACHE_LINE_SIZE 64u
+#endif
 
 #ifndef FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS
 /** @brief Default insert-pressure threshold (empty slots per bucket). */

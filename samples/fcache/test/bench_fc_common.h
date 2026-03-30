@@ -27,10 +27,7 @@
  *===========================================================================*/
 enum {
     FCB_ALIGN           = 64u,
-    FCB_QUERY_DEFAULT   = 256u,
-    FCB_HIT_REPEAT      = 200u,
-    FCB_MISS_REPEAT     = 80u,
-    FCB_MIXED_REPEAT    = 80u,
+    FCB_QUERY_DEFAULT    = 256u,
     FCB_COLD_TOUCH_BYTES = 64u * 1024u * 1024u
 };
 

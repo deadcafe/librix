@@ -125,38 +125,25 @@ _FCG_API(flowu, init_ex)(struct fc_flowu_cache *fc,
                          size_t entry_offset,
                          const struct fc_flowu_config *cfg)
 {
-    struct fc_flowu_config defcfg = {
-        .timeout_tsc = UINT64_C(1000000),
-        .pressure_empty_slots = FC_FLOWU_DEFAULT_PRESSURE_EMPTY_SLOTS,
-    };
+    _FCG_INIT_EX_BODY(flowu, FC_FLOWU_DEFAULT_PRESSURE_EMPTY_SLOTS,
+                      fc, buckets, nb_bk, array, max_entries,
+                      stride, entry_offset, cfg);
+}
 
-    if (cfg == NULL)
-        cfg = &defcfg;
+void _FCG_API(flowu, findadd_burst32)(struct fc_flowu_cache *fc,
+                                      const struct flowu_key *keys,
+                                      unsigned nb_keys,
+                                      uint64_t now,
+                                      struct fc_flowu_result *results);
 
-    memset(fc, 0, sizeof(*fc));
-    memset(buckets, 0, (size_t)nb_bk * sizeof(*buckets));
-    FCG_LAYOUT_INIT_STORAGE(fc, array, stride, entry_offset);
-    fc->buckets = buckets;
-    fc->nb_bk = nb_bk;
-    fc->max_entries = max_entries;
-    fc->total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
-    fc->timeout_tsc = cfg->timeout_tsc;
-    fc->eff_timeout_tsc = cfg->timeout_tsc ? cfg->timeout_tsc : 1u;
-    fc->pressure_empty_slots = cfg->pressure_empty_slots ?
-        cfg->pressure_empty_slots : FC_FLOWU_DEFAULT_PRESSURE_EMPTY_SLOTS;
-    fc->maint_interval_tsc = cfg->maint_interval_tsc;
-    fc->maint_base_bk = cfg->maint_base_bk ? cfg->maint_base_bk : nb_bk;
-    fc->maint_fill_threshold = cfg->maint_fill_threshold;
-    _FCG_INT(flowu, init_thresholds)(fc);
-    FCG_FREE_LIST_INIT(fc);
-    _FCG_HT(flowu, init)(&fc->ht_head, nb_bk);
-    for (unsigned i = max_entries; i > 0u; i--) {
-        struct fc_flowu_entry *entry = FCG_LAYOUT_ENTRY_PTR(fc, i);
-
-        RIX_ASSUME_NONNULL(entry);
-        FCG_LAYOUT_ENTRY_CLEAR(fc, entry);
-        FCG_FREE_LIST_PUSH_ENTRY(fc, entry, i);
-    }
+void
+_FCG_API(flowu, findadd_burst32)(struct fc_flowu_cache *fc,
+                                 const struct flowu_key *keys,
+                                 unsigned nb_keys,
+                                 uint64_t now,
+                                 struct fc_flowu_result *results)
+{
+    _FCG_FINDADD_BURST32_BODY(flowu, fc, keys, nb_keys, now, results);
 }
 
 #ifdef FC_ARCH_SUFFIX
