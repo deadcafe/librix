@@ -10,42 +10,40 @@
 
 #include "flow_table.h"
 
+/*===========================================================================
+ * Ops table macro: generates struct ft_<prefix>_ops
+ *===========================================================================*/
 #define FT_OPS_DEFINE(prefix)                                                  \
 struct ft_##prefix##_ops {                                                     \
     uint32_t (*find)(struct ft_##prefix##_table *ft,                           \
-                     const struct ft_##prefix##_key *key);                     \
-    uint32_t (*add)(struct ft_##prefix##_table *ft,                            \
-                    const struct ft_##prefix##_key *key);                      \
-    uint32_t (*add_idx)(struct ft_##prefix##_table *ft,                        \
-                        uint32_t entry_idx);                                   \
+                     const struct prefix##_key *key);                          \
     uint32_t (*add_entry)(struct ft_##prefix##_table *ft,                      \
-                          struct ft_##prefix##_entry *entry);                  \
+                          uint32_t entry_idx);                                 \
     uint32_t (*del)(struct ft_##prefix##_table *ft,                            \
-                    const struct ft_##prefix##_key *key);                      \
+                    const struct prefix##_key *key);                           \
+    uint32_t (*del_idx)(struct ft_##prefix##_table *ft,                        \
+                        uint32_t entry_idx);                                   \
     void (*find_bulk)(struct ft_##prefix##_table *ft,                          \
-                      const struct ft_##prefix##_key *keys,                    \
+                      const struct prefix##_key *keys,                         \
                       unsigned nb_keys,                                        \
                       struct ft_##prefix##_result *results);                   \
-    void (*add_bulk)(struct ft_##prefix##_table *ft,                           \
-                     const struct ft_##prefix##_key *keys,                     \
-                     unsigned nb_keys,                                         \
-                     struct ft_##prefix##_result *results);                    \
-    void (*add_idx_bulk)(struct ft_##prefix##_table *ft,                       \
-                         const uint32_t *entry_idxv,                           \
-                         unsigned nb_keys,                                     \
-                         struct ft_##prefix##_result *results);                \
     void (*add_entry_bulk)(struct ft_##prefix##_table *ft,                     \
-                           struct ft_##prefix##_entry *const *entries,         \
+                           const uint32_t *entry_idxv,                         \
                            unsigned nb_keys,                                   \
                            struct ft_##prefix##_result *results);              \
     void (*del_bulk)(struct ft_##prefix##_table *ft,                           \
-                     const struct ft_##prefix##_key *keys,                     \
+                     const struct prefix##_key *keys,                          \
                      unsigned nb_keys,                                         \
                      struct ft_##prefix##_result *results);                    \
 }
 
 FT_OPS_DEFINE(flow4);
+FT_OPS_DEFINE(flow6);
+FT_OPS_DEFINE(flowu);
 
+/*===========================================================================
+ * Per-arch ops table declarations
+ *===========================================================================*/
 #define FT_OPS_DECLARE(prefix, suffix)                                         \
     extern const struct ft_##prefix##_ops ft_##prefix##_ops##suffix
 
@@ -54,6 +52,19 @@ FT_OPS_DECLARE(flow4, _sse);
 FT_OPS_DECLARE(flow4, _avx2);
 FT_OPS_DECLARE(flow4, _avx512);
 
+FT_OPS_DECLARE(flow6, _gen);
+FT_OPS_DECLARE(flow6, _sse);
+FT_OPS_DECLARE(flow6, _avx2);
+FT_OPS_DECLARE(flow6, _avx512);
+
+FT_OPS_DECLARE(flowu, _gen);
+FT_OPS_DECLARE(flowu, _sse);
+FT_OPS_DECLARE(flowu, _avx2);
+FT_OPS_DECLARE(flowu, _avx512);
+
+/*===========================================================================
+ * Runtime selection helper
+ *===========================================================================*/
 #define FT_OPS_SELECT(prefix, arch_enable, out_ops)                            \
 do {                                                                           \
     *(out_ops) = &ft_##prefix##_ops_gen;                                       \

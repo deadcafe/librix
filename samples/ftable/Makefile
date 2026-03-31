@@ -39,12 +39,22 @@ DISPATCH_SRC  = $(SRCDIR)/ft_dispatch.c
 
 PUB_HDRS     = $(INCDIR)/flow_table.h \
                $(INCDIR)/flow4_table.h \
+               $(INCDIR)/flow6_table.h \
+               $(INCDIR)/flowu_table.h \
                $(INCDIR)/ft_table_common.h
 
 OBJS         = $(LIBDIR)/flow4_gen.o \
                $(LIBDIR)/flow4_sse.o \
                $(LIBDIR)/flow4_avx2.o \
                $(LIBDIR)/flow4_avx512.o \
+               $(LIBDIR)/flow6_gen.o \
+               $(LIBDIR)/flow6_sse.o \
+               $(LIBDIR)/flow6_avx2.o \
+               $(LIBDIR)/flow6_avx512.o \
+               $(LIBDIR)/flowu_gen.o \
+               $(LIBDIR)/flowu_sse.o \
+               $(LIBDIR)/flowu_avx2.o \
+               $(LIBDIR)/flowu_avx512.o \
                $(LIBDIR)/ft_dispatch.o
 LIB_STATIC   = $(LIBDIR)/libftable.a
 
@@ -56,6 +66,7 @@ static: $(LIB_STATIC)
 $(LIBDIR):
 	mkdir -p $@
 
+# flow4
 $(LIBDIR)/flow4_gen.o: $(SRCDIR)/flow4.c | $(LIBDIR)
 	$(CC) $(CFLAGS_BASE) -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
 
@@ -68,6 +79,33 @@ $(LIBDIR)/flow4_avx2.o: $(SRCDIR)/flow4.c | $(LIBDIR)
 $(LIBDIR)/flow4_avx512.o: $(SRCDIR)/flow4.c | $(LIBDIR)
 	$(CC) $(CFLAGS_BASE) -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
 
+# flow6
+$(LIBDIR)/flow6_gen.o: $(SRCDIR)/flow6.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
+
+$(LIBDIR)/flow6_sse.o: $(SRCDIR)/flow6.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
+
+$(LIBDIR)/flow6_avx2.o: $(SRCDIR)/flow6.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
+
+$(LIBDIR)/flow6_avx512.o: $(SRCDIR)/flow6.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
+
+# flowu
+$(LIBDIR)/flowu_gen.o: $(SRCDIR)/flowu.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
+
+$(LIBDIR)/flowu_sse.o: $(SRCDIR)/flowu.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
+
+$(LIBDIR)/flowu_avx2.o: $(SRCDIR)/flowu.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
+
+$(LIBDIR)/flowu_avx512.o: $(SRCDIR)/flowu.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
+
+# dispatch
 $(LIBDIR)/ft_dispatch.o: $(DISPATCH_SRC) | $(LIBDIR)
 	$(CC) $(CFLAGS_BASE) -c -o $@ $<
 

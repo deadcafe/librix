@@ -11,8 +11,37 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <rix/rix_hash.h>
+
+#ifndef FT_TABLE_CACHE_LINE_SIZE
+#define FT_TABLE_CACHE_LINE_SIZE 64u
+#endif
+
 #ifndef FT_FLOW_FAMILY_IPV4
 #define FT_FLOW_FAMILY_IPV4 4u
+#endif
+
+#ifndef FT_FLOW_FAMILY_IPV6
+#define FT_FLOW_FAMILY_IPV6 6u
+#endif
+
+/*===========================================================================
+ * Architecture dispatch flags
+ *===========================================================================*/
+#ifndef FT_ARCH_GEN
+#define FT_ARCH_GEN     0u
+#endif
+#ifndef FT_ARCH_SSE
+#define FT_ARCH_SSE     (1u << 0)
+#endif
+#ifndef FT_ARCH_AVX2
+#define FT_ARCH_AVX2    (1u << 1)
+#endif
+#ifndef FT_ARCH_AVX512
+#define FT_ARCH_AVX512  (1u << 2)
+#endif
+#ifndef FT_ARCH_AUTO
+#define FT_ARCH_AUTO    (FT_ARCH_SSE | FT_ARCH_AVX2 | FT_ARCH_AVX512)
 #endif
 
 #ifndef FT_MEMBER_PTR
@@ -108,5 +137,27 @@ ft_roundup_pow2_u32(unsigned v)
     v |= v >> 16;
     return v + 1u;
 }
+
+/*===========================================================================
+ * Bucket allocator interface
+ *===========================================================================*/
+typedef void *(*ft_bucket_alloc_fn)(size_t size, size_t align, void *arg);
+typedef void (*ft_bucket_free_fn)(void *ptr, size_t size, size_t align,
+                                  void *arg);
+
+struct ft_bucket_allocator {
+    ft_bucket_alloc_fn alloc;
+    ft_bucket_free_fn  free;
+    void              *arg;
+};
+
+/**
+ * @brief One-time CPU detection and SIMD dispatch selection.
+ *
+ * Call once at startup before any table operations.
+ *
+ * @param arch_enable  Bitmask of FT_ARCH_* flags, or FT_ARCH_AUTO.
+ */
+void ft_arch_init(unsigned arch_enable);
 
 #endif /* _FT_TABLE_COMMON_H_ */
