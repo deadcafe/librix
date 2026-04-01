@@ -54,39 +54,32 @@ test_cfg(unsigned start_nb_bk, unsigned max_nb_bk, unsigned grow_fill_pct)
     return cfg;
 }
 
-static struct ft_flow4_key
+static struct flow4_key
 test_key(unsigned i)
 {
-    return ft_flow4_key_make(UINT32_C(0x0a000001) + i,
-                             UINT32_C(0x0a000101) + i,
-                             (uint16_t)(1000u + i),
-                             (uint16_t)(2000u + i),
-                             6u,
-                             1u);
+    struct flow4_key k;
+
+    memset(&k, 0, sizeof(k));
+    k.family   = 2u;
+    k.proto    = 6u;
+    k.src_port = (uint16_t)(1000u + i);
+    k.dst_port = (uint16_t)(2000u + i);
+    k.vrfid    = 1u;
+    k.src_ip   = UINT32_C(0x0a000001) + i;
+    k.dst_ip   = UINT32_C(0x0a000101) + i;
+    return k;
 }
 
 static uint32_t
 test_add_idx_key(struct ft_flow4_table *ft, uint32_t entry_idx,
-                 const struct ft_flow4_key *key)
+                 const struct flow4_key *key)
 {
     struct ft_flow4_entry *entry = ft_flow4_table_entry_ptr(ft, entry_idx);
 
     if (entry == NULL)
         return 0u;
     entry->key = *key;
-    return ft_flow4_table_add_idx(ft, entry_idx);
-}
-
-static uint32_t
-test_add_entry_key(struct ft_flow4_table *ft, uint32_t entry_idx,
-                   const struct ft_flow4_key *key)
-{
-    struct ft_flow4_entry *entry = ft_flow4_table_entry_ptr(ft, entry_idx);
-
-    if (entry == NULL)
-        return 0u;
-    entry->key = *key;
-    return ft_flow4_table_add_entry(ft, entry);
+    return ft_flow4_table_add_entry(ft, entry_idx);
 }
 
 struct walk_ctx {
@@ -135,8 +128,8 @@ test_basic_add_find_del(void)
     struct ft_flow4_config cfg = test_cfg(0u, 0u, 60u);
     struct ft_flow4_table ft;
     struct ft_flow4_entry *pool;
-    struct ft_flow4_key k1 = test_key(1u);
-    struct ft_flow4_key k2 = test_key(2u);
+    struct flow4_key k1 = test_key(1u);
+    struct flow4_key k2 = test_key(2u);
     uint32_t idx1, idx2;
 
     printf("[T] flow4 table basic add/find/del\n");
@@ -146,7 +139,7 @@ test_basic_add_find_del(void)
     if (ft_flow4_table_init(&ft, pool, 128u, &cfg) != 0)
         FAIL("ft_flow4_table_init failed");
     idx1 = test_add_idx_key(&ft, 1u, &k1);
-    idx2 = test_add_entry_key(&ft, 2u, &k2);
+    idx2 = test_add_idx_key(&ft, 2u, &k2);
     if (idx1 != 1u || idx2 != 2u || idx1 == idx2)
         FAIL("basic add returned invalid indices");
     if (ft_flow4_table_find(&ft, &k1) != idx1)
@@ -178,7 +171,7 @@ test_init_ex_and_mapping(void)
     struct ft_flow4_config cfg = test_cfg(0u, 0u, 60u);
     struct ft_flow4_table ft;
     struct test_user_rec *users;
-    struct ft_flow4_key key = test_key(10u);
+    struct flow4_key key = test_key(10u);
     uint32_t idx;
 
     printf("[T] flow4 table init_ex mapping\n");
@@ -222,7 +215,7 @@ test_manual_grow_preserves_entries(void)
     if (ft_flow4_table_init(&ft, pool, 4096u, &cfg) != 0)
         FAIL("init failed");
     for (unsigned i = 0; i < 256u; i++) {
-        struct ft_flow4_key key = test_key(i + 100u);
+        struct flow4_key key = test_key(i + 100u);
 
         idxs[i] = test_add_idx_key(&ft, i + 1u, &key);
         if (idxs[i] != i + 1u)
@@ -231,7 +224,7 @@ test_manual_grow_preserves_entries(void)
     if (ft_flow4_table_grow_2x(&ft) != 0)
         FAIL("grow_2x failed");
     for (unsigned i = 0; i < 256u; i++) {
-        struct ft_flow4_key key = test_key(i + 100u);
+        struct flow4_key key = test_key(i + 100u);
 
         if (ft_flow4_table_find(&ft, &key) != idxs[i])
             FAILF("find after grow mismatch at %u", i);
@@ -266,7 +259,7 @@ test_need_grow_and_reserve(void)
     if (ft_flow4_table_init(&ft, pool, 200000u, &cfg) != 0)
         FAIL("reinit failed");
     for (unsigned i = 0; i < 160000u; i++) {
-        struct ft_flow4_key key = test_key(i + 1000u);
+        struct flow4_key key = test_key(i + 1000u);
 
         if (test_add_idx_key(&ft, i + 1u, &key) == 0u)
             break;
@@ -284,7 +277,7 @@ test_bulk_ops_and_stats(void)
     struct ft_flow4_config cfg = test_cfg(0u, 0u, 60u);
     struct ft_flow4_table ft;
     struct ft_flow4_entry *pool;
-    struct ft_flow4_key keys[8];
+    struct flow4_key keys[8];
     uint32_t entry_idxv[8];
     struct ft_flow4_result results[8];
     struct ft_flow4_stats stats;
@@ -301,7 +294,7 @@ test_bulk_ops_and_stats(void)
         entry_idxv[i] = i + 1u;
     }
 
-    ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 8u, results);
+    ft_flow4_table_add_entry_bulk(&ft, entry_idxv, 8u, results);
     for (unsigned i = 0; i < 8u; i++) {
         if (results[i].entry_idx != entry_idxv[i])
             FAILF("add_bulk failed at %u", i);
@@ -314,7 +307,7 @@ test_bulk_ops_and_stats(void)
             FAILF("find_bulk miss at %u", i);
     }
 
-    ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 8u, results);
+    ft_flow4_table_add_entry_bulk(&ft, entry_idxv, 8u, results);
     for (unsigned i = 0; i < 8u; i++) {
         if (results[i].entry_idx != entry_idxv[i])
             FAILF("duplicate add_bulk failed at %u", i);
@@ -364,8 +357,8 @@ test_entry_bulk_registration(void)
     struct ft_flow4_config cfg = test_cfg(0u, 0u, 60u);
     struct ft_flow4_table ft;
     struct ft_flow4_entry *pool;
-    struct ft_flow4_key keys[4];
-    struct ft_flow4_entry *entries[4];
+    struct flow4_key keys[4];
+    uint32_t entry_idxv[4];
     struct ft_flow4_result results[4];
 
     printf("[T] flow4 table entry bulk registration\n");
@@ -378,10 +371,10 @@ test_entry_bulk_registration(void)
     for (unsigned i = 0; i < 4u; i++) {
         keys[i] = test_key(i + 2500u);
         pool[8u + i].key = keys[i];
-        entries[i] = &pool[8u + i];
+        entry_idxv[i] = 9u + i;
     }
 
-    ft_flow4_table_add_entry_bulk(&ft, entries, 4u, results);
+    ft_flow4_table_add_entry_bulk(&ft, entry_idxv, 4u, results);
     for (unsigned i = 0; i < 4u; i++) {
         if (results[i].entry_idx != 9u + i)
             FAILF("add_entry_bulk failed at %u", i);
@@ -410,7 +403,7 @@ test_hash_pair_invariants(void)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 128u; i++) {
-        struct ft_flow4_key key = test_key(i + 3000u);
+        struct flow4_key key = test_key(i + 3000u);
         uint32_t idx = test_add_idx_key(&ft, i + 1u, &key);
         const struct ft_flow4_entry *entry;
 
@@ -453,7 +446,7 @@ test_grow_preserves_hash_pair(void)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 64u; i++) {
-        struct ft_flow4_key key = test_key(i + 4000u);
+        struct flow4_key key = test_key(i + 4000u);
         const struct ft_flow4_entry *entry;
 
         idxs[i] = test_add_idx_key(&ft, i + 1u, &key);
@@ -472,7 +465,7 @@ test_grow_preserves_hash_pair(void)
         FAIL("second grow failed");
 
     for (unsigned i = 0; i < 64u; i++) {
-        struct ft_flow4_key key = test_key(i + 4000u);
+        struct flow4_key key = test_key(i + 4000u);
         const struct ft_flow4_entry *entry = ft_flow4_table_entry_cptr(&ft, idxs[i]);
 
         if (ft_flow4_table_find(&ft, &key) != idxs[i])
@@ -505,7 +498,7 @@ test_walk_flush_and_stats_reset(void)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 16u; i++) {
-        struct ft_flow4_key key = test_key(i + 5000u);
+        struct flow4_key key = test_key(i + 5000u);
 
         if (test_add_idx_key(&ft, i + 1u, &key) == 0u)
             FAILF("add failed at %u", i);
@@ -587,8 +580,8 @@ test_duplicate_and_delete_miss_stats(void)
     struct ft_flow4_table ft;
     struct ft_flow4_entry *pool;
     struct ft_flow4_stats stats;
-    struct ft_flow4_key key = test_key(6000u);
-    struct ft_flow4_key miss = test_key(6001u);
+    struct flow4_key key = test_key(6000u);
+    struct flow4_key miss = test_key(6001u);
     uint32_t idx;
 
     printf("[T] flow4 table duplicate add/del miss stats\n");
@@ -637,7 +630,7 @@ test_walk_early_stop(void)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 16u; i++) {
-        struct ft_flow4_key key = test_key(i + 7000u);
+        struct flow4_key key = test_key(i + 7000u);
 
         if (test_add_idx_key(&ft, i + 1u, &key) == 0u)
             FAILF("add failed at %u", i);
@@ -679,7 +672,7 @@ test_grow_failure_preserves_table(void)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 64u; i++) {
-        struct ft_flow4_key key = test_key(i + 8000u);
+        struct flow4_key key = test_key(i + 8000u);
 
         idxs[i] = test_add_idx_key(&ft, i + 1u, &key);
         if (idxs[i] != i + 1u)
@@ -693,7 +686,7 @@ test_grow_failure_preserves_table(void)
         FAIL("nb_bk changed after failed grow");
 
     for (unsigned i = 0; i < 64u; i++) {
-        struct ft_flow4_key key = test_key(i + 8000u);
+        struct flow4_key key = test_key(i + 8000u);
 
         if (ft_flow4_table_find(&ft, &key) != idxs[i])
             FAILF("find after failed grow mismatch at %u", i);
@@ -728,6 +721,355 @@ test_config_rounding_and_clamp(void)
     return 0;
 }
 
+/*
+ * High fill: push to ~94% of bucket capacity.
+ * 64 buckets × 16 slots = 1024 capacity; insert 960.
+ * Verifies all entries findable, then removes every other entry
+ * and verifies remaining entries still findable.
+ */
+static int
+test_high_fill(void)
+{
+    const unsigned nb_bk = 64u;
+    const unsigned capacity = nb_bk * 16u; /* 1024 */
+    const unsigned target = (capacity * 15u) / 16u; /* 960 */
+    struct ft_flow4_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_flow4_table ft;
+    struct ft_flow4_entry *pool;
+    unsigned inserted = 0u;
+
+    printf("[T] flow4 table high fill (94%%)\n");
+    pool = test_aligned_calloc(capacity + 1u, sizeof(*pool),
+                               FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    if (ft_flow4_table_init(&ft, pool, capacity, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < target; i++) {
+        struct flow4_key key = test_key(i + 10000u);
+        uint32_t idx = test_add_idx_key(&ft, i + 1u, &key);
+
+        if (idx == 0u)
+            break;
+        inserted++;
+    }
+    printf("  inserted %u / %u (%.1f%%)\n",
+           inserted, capacity,
+           (double)inserted * 100.0 / (double)capacity);
+    if (inserted < target)
+        FAILF("could not reach target fill: %u < %u", inserted, target);
+
+    /* verify all findable */
+    for (unsigned i = 0; i < inserted; i++) {
+        struct flow4_key key = test_key(i + 10000u);
+
+        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+            FAILF("find failed at high fill i=%u", i);
+    }
+
+    /* remove every other entry, verify remaining */
+    for (unsigned i = 0; i < inserted; i += 2u) {
+        struct flow4_key key = test_key(i + 10000u);
+
+        if (ft_flow4_table_del(&ft, &key) != i + 1u)
+            FAILF("del at high fill failed i=%u", i);
+    }
+    for (unsigned i = 1u; i < inserted; i += 2u) {
+        struct flow4_key key = test_key(i + 10000u);
+
+        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+            FAILF("find after partial del failed i=%u", i);
+    }
+    /* deleted keys must miss */
+    for (unsigned i = 0; i < inserted; i += 2u) {
+        struct flow4_key key = test_key(i + 10000u);
+
+        if (ft_flow4_table_find(&ft, &key) != 0u)
+            FAILF("deleted key still found i=%u", i);
+    }
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+/*
+ * Max fill: insert until first kickout failure.
+ * 128 buckets × 16 = 2048 capacity.
+ * Verifies all inserted entries are findable at max fill.
+ */
+static int
+test_max_fill(void)
+{
+    const unsigned nb_bk = 128u;
+    const unsigned capacity = nb_bk * 16u; /* 2048 */
+    struct ft_flow4_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_flow4_table ft;
+    struct ft_flow4_entry *pool;
+    unsigned inserted = 0u;
+
+    printf("[T] flow4 table max fill\n");
+    pool = test_aligned_calloc(capacity + 1u, sizeof(*pool),
+                               FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    if (ft_flow4_table_init(&ft, pool, capacity, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < capacity; i++) {
+        struct flow4_key key = test_key(i + 20000u);
+        uint32_t idx = test_add_idx_key(&ft, i + 1u, &key);
+
+        if (idx == 0u)
+            break;
+        inserted++;
+    }
+    printf("  inserted %u / %u (%.1f%%)\n",
+           inserted, capacity,
+           (double)inserted * 100.0 / (double)capacity);
+    if (inserted == 0u)
+        FAIL("could not insert any entries");
+
+    /* all inserted entries must be findable */
+    for (unsigned i = 0; i < inserted; i++) {
+        struct flow4_key key = test_key(i + 20000u);
+
+        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+            FAILF("find at max fill failed i=%u", i);
+    }
+
+    /* walk count must match */
+    {
+        struct walk_ctx ctx;
+
+        memset(&ctx, 0, sizeof(ctx));
+        if (ft_flow4_table_walk(&ft, walk_count_cb, &ctx) != 0)
+            FAIL("walk at max fill failed");
+        if (ctx.count != inserted)
+            FAILF("walk count=%u expected=%u", ctx.count, inserted);
+    }
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+/*
+ * Kickout safety: verify no previously-inserted entries become
+ * unreachable after failed inserts (kickout exhaustion).
+ *
+ * Phase 1: Fill greedily until first rejection.
+ * Phase 2: Continue inserting beyond first failure.
+ * Check: all Phase-1 entries still findable.
+ */
+static int
+test_kickout_safety(void)
+{
+    const unsigned nb_bk = 32u;
+    const unsigned capacity = nb_bk * 16u; /* 512 */
+    const unsigned overflow = 64u;
+    struct ft_flow4_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_flow4_table ft;
+    struct ft_flow4_entry *pool;
+    unsigned phase1_count = 0u;
+    unsigned lost = 0u;
+
+    printf("[T] flow4 table kickout safety\n");
+    pool = test_aligned_calloc(capacity + overflow + 1u, sizeof(*pool),
+                               FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    if (ft_flow4_table_init(&ft, pool, capacity + overflow, &cfg) != 0)
+        FAIL("init failed");
+
+    /* Phase 1: fill until first rejection */
+    for (unsigned i = 0; i < capacity; i++) {
+        struct flow4_key key = test_key(i + 30000u);
+        uint32_t idx = test_add_idx_key(&ft, i + 1u, &key);
+
+        if (idx == 0u)
+            break;
+        phase1_count++;
+    }
+    if (phase1_count == 0u)
+        FAIL("phase1 inserted nothing");
+
+    /* Phase 2: attempt more inserts (some will fail via kickout exhaustion) */
+    for (unsigned i = 0; i < overflow; i++) {
+        struct flow4_key key = test_key(capacity + i + 30000u);
+
+        test_add_idx_key(&ft, phase1_count + i + 1u, &key);
+    }
+
+    /* Check: all phase-1 entries must still be findable */
+    for (unsigned i = 0; i < phase1_count; i++) {
+        struct flow4_key key = test_key(i + 30000u);
+
+        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+            lost++;
+    }
+    printf("  phase1=%u lost=%u\n", phase1_count, lost);
+    if (lost != 0u)
+        FAILF("kickout caused %u victim(s) to become unreachable", lost);
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+/*
+ * del_idx: delete by entry index rather than by key.
+ * Verifies del_idx returns the correct index and find misses afterward.
+ */
+static int
+test_del_idx(void)
+{
+    struct ft_flow4_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_flow4_table ft;
+    struct ft_flow4_entry *pool;
+    struct flow4_key keys[8];
+    uint32_t idxs[8];
+
+    printf("[T] flow4 table del_idx\n");
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    if (ft_flow4_table_init(&ft, pool, 128u, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < 8u; i++) {
+        keys[i] = test_key(i + 40000u);
+        idxs[i] = test_add_idx_key(&ft, i + 1u, &keys[i]);
+        if (idxs[i] != i + 1u)
+            FAILF("add failed at %u", i);
+    }
+
+    /* del_idx for even entries */
+    for (unsigned i = 0; i < 8u; i += 2u) {
+        if (ft_flow4_table_del_idx(&ft, idxs[i]) != idxs[i])
+            FAILF("del_idx failed at idx=%u", idxs[i]);
+    }
+    /* deleted entries miss, remaining entries hit */
+    for (unsigned i = 0; i < 8u; i++) {
+        uint32_t found = ft_flow4_table_find(&ft, &keys[i]);
+
+        if ((i & 1u) == 0u) {
+            if (found != 0u)
+                FAILF("del_idx entry still found i=%u", i);
+        } else {
+            if (found != idxs[i])
+                FAILF("remaining entry not found i=%u", i);
+        }
+    }
+    /* double del_idx should return 0 */
+    if (ft_flow4_table_del_idx(&ft, idxs[0]) != 0u)
+        FAIL("double del_idx should return 0");
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+/*
+ * Fuzz: random insert/find/delete with internal model validation.
+ * Detects correctness issues under unpredictable access patterns.
+ */
+static int
+test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
+{
+    struct ft_flow4_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_flow4_table ft;
+    struct ft_flow4_entry *pool;
+    uint8_t *in_table; /* 1 if entry i is in table */
+    unsigned in_count = 0u;
+
+    printf("[T] flow4 table fuzz seed=%u N=%u nb_bk=%u ops=%u\n",
+           seed, n, nb_bk, ops);
+    pool = test_aligned_calloc(n + 1u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    in_table = calloc(n, 1u);
+    if (pool == NULL || in_table == NULL)
+        FAIL("alloc failed");
+    if (ft_flow4_table_init(&ft, pool, n, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned op = 0; op < ops; op++) {
+        seed = seed * 1103515245u + 12345u;
+        unsigned idx0 = (seed >> 16) % n;
+        unsigned action = (seed >> 8) & 3u;
+        struct flow4_key key = test_key(idx0 + 50000u);
+        uint32_t entry_idx = idx0 + 1u;
+
+        switch (action) {
+        case 0: /* insert */
+            if (!in_table[idx0]) {
+                uint32_t ret = test_add_idx_key(&ft, entry_idx, &key);
+
+                if (ret == entry_idx) {
+                    in_table[idx0] = 1u;
+                    in_count++;
+                }
+                /* ret == 0 means table full, acceptable */
+            }
+            break;
+        case 1: /* find */
+        {
+            uint32_t ret = ft_flow4_table_find(&ft, &key);
+
+            if (in_table[idx0] && ret != entry_idx)
+                FAILF("fuzz find miss: op=%u idx0=%u", op, idx0);
+            if (!in_table[idx0] && ret != 0u)
+                FAILF("fuzz find ghost: op=%u idx0=%u", op, idx0);
+            break;
+        }
+        case 2: /* delete */
+            if (in_table[idx0]) {
+                uint32_t ret = ft_flow4_table_del(&ft, &key);
+
+                if (ret != entry_idx)
+                    FAILF("fuzz del mismatch: op=%u idx0=%u ret=%u",
+                           op, idx0, ret);
+                in_table[idx0] = 0u;
+                in_count--;
+            }
+            break;
+        default: /* find (bias toward reads) */
+        {
+            uint32_t ret = ft_flow4_table_find(&ft, &key);
+
+            if (in_table[idx0] && ret != entry_idx)
+                FAILF("fuzz find2 miss: op=%u idx0=%u", op, idx0);
+            break;
+        }
+        }
+    }
+
+    /* final walk count must match model */
+    {
+        struct walk_ctx ctx;
+
+        memset(&ctx, 0, sizeof(ctx));
+        ft_flow4_table_walk(&ft, walk_count_cb, &ctx);
+        if (ctx.count != in_count)
+            FAILF("fuzz walk count=%u model=%u", ctx.count, in_count);
+    }
+
+    /* verify all model entries findable */
+    for (unsigned i = 0; i < n; i++) {
+        if (in_table[i]) {
+            struct flow4_key key = test_key(i + 50000u);
+
+            if (ft_flow4_table_find(&ft, &key) != i + 1u)
+                FAILF("fuzz final find miss i=%u", i);
+        }
+    }
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    free(in_table);
+    return 0;
+}
+
 int
 main(void)
 {
@@ -758,6 +1100,18 @@ main(void)
     if (test_allocator_failure_and_max_bucket_limit() != 0)
         return 1;
     if (test_config_rounding_and_clamp() != 0)
+        return 1;
+    if (test_high_fill() != 0)
+        return 1;
+    if (test_max_fill() != 0)
+        return 1;
+    if (test_kickout_safety() != 0)
+        return 1;
+    if (test_del_idx() != 0)
+        return 1;
+    if (test_fuzz(3237998097u, 512u, 64u, 200000u) != 0)
+        return 1;
+    if (test_fuzz(3237998097u, 1000u, 64u, 500000u) != 0)
         return 1;
     printf("ALL FLOW TABLE TESTS PASSED\n");
     return 0;

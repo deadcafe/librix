@@ -120,7 +120,7 @@ rix_ptr_from_idx_valid_(void *base, size_t elem_size, unsigned i)
  * Example:
  *   RIX_ASSERT_RELATION(base, idx, ptr);
  */
-#  define RIX_ASSERT_RELATION(base, idx, ptr)                                   \
+#  define RIX_ASSERT_RELATION(base, idx, ptr)                                 \
     do {                                                                      \
         const unsigned __rix_idx_tmp = (unsigned)(idx);                       \
         const void *__rix_ptr_tmp = (const void *)(ptr);                      \
@@ -133,7 +133,7 @@ rix_ptr_from_idx_valid_(void *base, size_t elem_size, unsigned i)
  * Use where a bitmap guarantees the slot is occupied but GCC cannot
  * prove it after deep inlining (e.g. insert duplicate-scan loop).
  * -O2: compiles to nothing.  -O0: dead branch (never taken). */
-#  define RIX_ASSUME_NONNULL(ptr)                                              \
+#  define RIX_ASSUME_NONNULL(ptr)                                             \
     do {                                                                      \
         if (__builtin_expect((ptr) == NULL, 0))                               \
             __builtin_unreachable();                                          \
@@ -162,18 +162,18 @@ rix_ptr_from_idx_valid_(void *base, size_t elem_size, unsigned i)
 
 /* container_of: get struct pointer from pointer to its member. */
 #  ifndef RIX_CONTAINER_OF
-#    define RIX_CONTAINER_OF(ptr, type, member) \
-    ((type *)__builtin_assume_aligned( \
+#    define RIX_CONTAINER_OF(ptr, type, member)                         \
+    ((type *)__builtin_assume_aligned(                                  \
         (void *)((char *)(ptr) - RIX_OFFSET_OF(type, member)), _Alignof(type)))
 #  endif
 
 /* Swap two variables of the same type. */
 #  ifndef RIX_SWAP
-#    define RIX_SWAP(T, a, b)    \
-    do {                     \
-        T __rix_tmp__ = (a); \
-        (a) = (b);           \
-        (b) = __rix_tmp__;   \
+#    define RIX_SWAP(T, a, b)                   \
+    do {                                        \
+        T __rix_tmp__ = (a);                    \
+        (a) = (b);                              \
+        (b) = __rix_tmp__;                      \
     } while (0)
 #  endif
 

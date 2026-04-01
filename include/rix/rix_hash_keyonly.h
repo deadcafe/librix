@@ -71,14 +71,14 @@
 #  define RIX_HASH_GENERATE_KEYONLY_STATIC_EX(name, type, key_field, cmp_fn, hash_fn) \
     RIX_HASH_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn, hash_fn, RIX_UNUSED static)
 
-#  define RIX_HASH_GENERATE_KEYONLY(name, type, key_field, cmp_fn)               \
+#  define RIX_HASH_GENERATE_KEYONLY(name, type, key_field, cmp_fn)            \
     _RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                   \
-    RIX_HASH_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,            \
+    RIX_HASH_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,         \
                                     _RIX_HASH_DEFAULT_HASH_FN_NAME(name), )
 
-#  define RIX_HASH_GENERATE_KEYONLY_STATIC(name, type, key_field, cmp_fn)        \
+#  define RIX_HASH_GENERATE_KEYONLY_STATIC(name, type, key_field, cmp_fn)     \
     _RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                   \
-    RIX_HASH_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,            \
+    RIX_HASH_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,         \
                                     _RIX_HASH_DEFAULT_HASH_FN_NAME(name),     \
                                     RIX_UNUSED static)
 
@@ -167,13 +167,13 @@ static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
 name##_cmp_key(struct rix_hash_find_ctx_s *ctx,                               \
                struct type *base)                                             \
 {                                                                             \
-    u32 _hits = ctx->fp_hits[0];                                         \
+    u32 _hits = ctx->fp_hits[0];                                              \
     while (_hits) {                                                           \
         unsigned      _bit  = (unsigned)__builtin_ctz(_hits);                 \
         _hits &= _hits - 1u;                                                  \
         unsigned      _nidx = ctx->bk[0]->idx[_bit];                          \
         struct type  *_node = name##_hptr(base, _nidx);                       \
-        if (cmp_fn((const _RIX_HASH_KEY_TYPE(type, key_field) *)ctx->key,    \
+        if (cmp_fn((const _RIX_HASH_KEY_TYPE(type, key_field) *)ctx->key,     \
                    &_node->key_field) == 0)                                   \
             return _node;                                                     \
     }                                                                         \
@@ -258,16 +258,16 @@ static RIX_UNUSED int                                                         \
 name##_find_empty(struct rix_hash_bucket_s *buckets,                          \
                   unsigned bk_idx)                                            \
 {                                                                             \
-    u32 _nilm = _RIX_HASH_FIND_U32X16(buckets[bk_idx].hash, 0u);        \
+    u32 _nilm = _RIX_HASH_FIND_U32X16(buckets[bk_idx].hash, 0u);              \
     if (!_nilm) return -1;                                                    \
     return (int)__builtin_ctz(_nilm);                                         \
 }                                                                             \
                                                                               \
 /* ================================================================== */      \
-/* flipflop: move bk[slot] to its alt bucket if alt has a free slot.   */     \
-/* Nohf: re-hash key to find alt bucket (no hash_field stored).        */     \
-/* Returns freed slot on success, -1 on failure.                        */     \
-/* Non-destructive on failure.                                         */      \
+/* flipflop: move bk[slot] to its alt bucket if alt has a free slot.  */      \
+/* Nohf: re-hash key to find alt bucket (no hash_field stored).       */      \
+/* Returns freed slot on success, -1 on failure.                      */      \
+/* Non-destructive on failure.                                        */      \
 /* ================================================================== */      \
 static RIX_UNUSED int                                                         \
 name##_flipflop(struct rix_hash_bucket_s *buckets,                            \
@@ -277,33 +277,33 @@ name##_flipflop(struct rix_hash_bucket_s *buckets,                            \
                 unsigned slot)                                                \
 {                                                                             \
     struct rix_hash_bucket_s *_bk = buckets + bk_idx;                         \
-    u32     _fp  = _bk->hash[slot];                                      \
-    unsigned     _idx = _bk->idx [slot];                                        \
+    u32     _fp  = _bk->hash[slot];                                           \
+    unsigned     _idx = _bk->idx [slot];                                      \
     struct type *_nd  = name##_hptr(base, _idx);                              \
     if (!_nd) return -1;                                                      \
     union rix_hash_hash_u _rh =                                               \
         hash_fn((const _RIX_HASH_KEY_TYPE(type, key_field) *)                 \
                 &_nd->key_field, mask);                                       \
-    unsigned _rb0 = _rh.val32[0] & mask;                                       \
-    unsigned _rb1 = _rh.val32[1] & mask;                                       \
+    unsigned _rb0 = _rh.val32[0] & mask;                                      \
+    unsigned _rb1 = _rh.val32[1] & mask;                                      \
     unsigned _ab  = (bk_idx == _rb0) ? _rb1 : _rb0;                           \
     int _slot = name##_find_empty(buckets, _ab);                              \
     if (_slot < 0) return -1;                                                 \
     struct rix_hash_bucket_s *_alt = buckets + _ab;                           \
-    _alt->hash[_slot] = _fp;                                                   \
-    _alt->idx [_slot] = _idx;                                                  \
-    _bk->hash[slot] = 0u;                                                      \
-    _bk->idx [slot] = (u32)RIX_NIL;                                      \
-    return (int)slot;                                                          \
+    _alt->hash[_slot] = _fp;                                                  \
+    _alt->idx [_slot] = _idx;                                                 \
+    _bk->hash[slot] = 0u;                                                     \
+    _bk->idx [slot] = (u32)RIX_NIL;                                           \
+    return (int)slot;                                                         \
 }                                                                             \
                                                                               \
 /* ================================================================== */      \
-/* kickout: make a free slot in bk by moving occupants.                */      \
+/* kickout: make a free slot in bk by moving occupants.               */      \
 /*                                                                    */      \
-/* Pass 1: try flipflop for each of 16 slots (direct move).            */      \
+/* Pass 1: try flipflop for each of 16 slots (direct move).           */      \
 /* Pass 2: for each slot, recurse into occupant's alt bucket to make  */      \
-/*         room there first, then flipflop (guaranteed to succeed).    */      \
-/* Returns freed slot index, or -1 (table untouched on failure).       */      \
+/*         room there first, then flipflop (guaranteed to succeed).   */      \
+/* Returns freed slot index, or -1 (table untouched on failure).      */      \
 /* ================================================================== */      \
 static RIX_UNUSED int                                                         \
 name##_kickout(struct rix_hash_bucket_s *buckets,                             \
@@ -315,34 +315,34 @@ name##_kickout(struct rix_hash_bucket_s *buckets,                             \
     if (depth <= 0) return -1;                                                \
     struct rix_hash_bucket_s *_bk = buckets + bk_idx;                         \
                                                                               \
-    for (unsigned _s = 0; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) {             \
-        if (name##_flipflop(buckets, base, mask, bk_idx, _s) >= 0)           \
+    for (unsigned _s = 0; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) {              \
+        if (name##_flipflop(buckets, base, mask, bk_idx, _s) >= 0)            \
             return (int)_s;                                                   \
     }                                                                         \
-    for (unsigned _s = 0; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) {             \
-        u32     _fp = _bk->hash[_s];                                     \
-        unsigned     _si = _bk->idx [_s];                                      \
+    for (unsigned _s = 0; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) {              \
+        u32     _fp = _bk->hash[_s];                                          \
+        unsigned     _si = _bk->idx [_s];                                     \
         struct type *_sn = name##_hptr(base, _si);                            \
         if (!_sn) continue;                                                   \
         union rix_hash_hash_u _sh =                                           \
             hash_fn((const _RIX_HASH_KEY_TYPE(type, key_field) *)             \
                     &_sn->key_field, mask);                                   \
-        unsigned _sb0 = _sh.val32[0] & mask;                                   \
-        unsigned _sb1 = _sh.val32[1] & mask;                                   \
+        unsigned _sb0 = _sh.val32[0] & mask;                                  \
+        unsigned _sb1 = _sh.val32[1] & mask;                                  \
         unsigned _ab  = (bk_idx == _sb0) ? _sb1 : _sb0;                       \
         if (name##_kickout(buckets, base, mask, _ab, depth - 1) >= 0) {       \
-            /* Re-check: recursive chain may have relocated bk[_s] */        \
-            if (_bk->hash[_s] != _fp || _bk->idx[_s] != _si) {              \
-                int _fs = name##_find_empty(buckets, bk_idx);                \
-                if (_fs >= 0) return _fs;                                    \
-                continue;                                                    \
-            }                                                                \
+            /* Re-check: recursive chain may have relocated bk[_s] */         \
+            if (_bk->hash[_s] != _fp || _bk->idx[_s] != _si) {                \
+                int _fs = name##_find_empty(buckets, bk_idx);                 \
+                if (_fs >= 0) return _fs;                                     \
+                continue;                                                     \
+            }                                                                 \
             int _slot = name##_find_empty(buckets, _ab);                      \
             struct rix_hash_bucket_s *_alt = buckets + _ab;                   \
-            _alt->hash[_slot] = _fp;                                           \
-            _alt->idx [_slot] = _si;                                           \
+            _alt->hash[_slot] = _fp;                                          \
+            _alt->idx [_slot] = _si;                                          \
             _bk->hash[_s] = 0u;                                               \
-            _bk->idx [_s] = (u32)RIX_NIL;                               \
+            _bk->idx [_s] = (u32)RIX_NIL;                                     \
             return (int)_s;                                                   \
         }                                                                     \
     }                                                                         \
@@ -368,21 +368,21 @@ name##_insert(struct name *head,                                              \
         hash_fn((const _RIX_HASH_KEY_TYPE(type, key_field) *)&elm->key_field, \
                 mask);                                                        \
     unsigned _bk0, _bk1;                                                      \
-    u32 _fp;                                                             \
-    u32 _hits_fp[2];                                                     \
-    u32 _hits_zero[2];                                                   \
+    u32 _fp;                                                                  \
+    u32 _hits_fp[2];                                                          \
+    u32 _hits_zero[2];                                                        \
     _rix_hash_buckets(_h, mask, &_bk0, &_bk1, &_fp);                          \
     for (int _i = 0; _i < 2; _i++) {                                          \
         struct rix_hash_bucket_s *_bk =                                       \
             buckets + (_i == 0 ? _bk0 : _bk1);                                \
         _RIX_HASH_FIND_U32X16_2(_bk->hash, _fp, 0u,                           \
                                 &_hits_fp[_i], &_hits_zero[_i]);              \
-        u32 _hits = _hits_fp[_i];                                        \
+        u32 _hits = _hits_fp[_i];                                             \
         while (_hits) {                                                       \
             unsigned      _bit  = (unsigned)__builtin_ctz(_hits);             \
             _hits &= _hits - 1u;                                              \
             struct type  *_node = name##_hptr(base, _bk->idx[_bit]);          \
-            RIX_ASSUME_NONNULL(_node);                                       \
+            RIX_ASSUME_NONNULL(_node);                                        \
             if (cmp_fn(&elm->key_field, &_node->key_field) == 0)              \
                 return _node;                                                 \
         }                                                                     \
@@ -390,7 +390,7 @@ name##_insert(struct name *head,                                              \
     for (int _i = 0; _i < 2; _i++) {                                          \
         unsigned _bki = (_i == 0) ? _bk0 : _bk1;                              \
         struct rix_hash_bucket_s *_bk = buckets + _bki;                       \
-        u32 _nilm = _hits_zero[_i];                                      \
+        u32 _nilm = _hits_zero[_i];                                           \
         if (_nilm) {                                                          \
             unsigned _slot   = (unsigned)__builtin_ctz(_nilm);                \
             _bk->hash[_slot] = _fp;                                           \
@@ -399,7 +399,7 @@ name##_insert(struct name *head,                                              \
             return NULL;                                                      \
         }                                                                     \
     }                                                                         \
-    /* Slow path: non-destructive recursive kickout */                       \
+    /* Slow path: non-destructive recursive kickout */                        \
     {                                                                         \
         int _pos; unsigned _bki;                                              \
         _pos = name##_kickout(buckets, base, mask, _bk0,                      \
@@ -413,10 +413,10 @@ name##_insert(struct name *head,                                              \
         }                                                                     \
         struct rix_hash_bucket_s *_bk = buckets + _bki;                       \
         _bk->hash[_pos] = _fp;                                                \
-        _bk->idx [_pos] = name##_hidx(base, elm);                            \
+        _bk->idx [_pos] = name##_hidx(base, elm);                             \
         head->rhh_nb++;                                                       \
         return NULL;                                                          \
-    }                                                               \
+    }                                                                         \
 }                                                                             \
                                                                               \
 /* ================================================================== */      \
@@ -440,13 +440,13 @@ name##_remove(struct name *head,                                              \
         hash_fn((const _RIX_HASH_KEY_TYPE(type, key_field) *)&elm->key_field, \
                 mask);                                                        \
     unsigned _bk0, _bk1;                                                      \
-    u32 _fp;                                                             \
+    u32 _fp;                                                                  \
     _rix_hash_buckets(_h, mask, &_bk0, &_bk1, &_fp);                          \
     for (int _i = 0; _i < 2; _i++) {                                          \
         unsigned _bki = (_i == 0) ? _bk0 : _bk1;                              \
         struct rix_hash_bucket_s *_b = buckets + _bki;                        \
-        u32 _hits = _RIX_HASH_FIND_U32X16(_b->idx,                       \
-                                               (u32)node_idx);           \
+        u32 _hits = _RIX_HASH_FIND_U32X16(_b->idx,                            \
+                                               (u32)node_idx);                \
         if (_hits) {                                                          \
             unsigned _slot   = (unsigned)__builtin_ctz(_hits);                \
             if (name##_remove_at(head, buckets, _bki, _slot) !=               \
@@ -472,7 +472,7 @@ name##_remove_at(struct name *head,                                           \
     if (_idx == (unsigned)RIX_NIL)                                            \
         return (unsigned)RIX_NIL;                                             \
     _b->hash[slot] = 0u;                                                      \
-    _b->idx [slot] = (u32)RIX_NIL;                                       \
+    _b->idx [slot] = (u32)RIX_NIL;                                            \
     head->rhh_nb--;                                                           \
     return _idx;                                                              \
 }                                                                             \
@@ -503,5 +503,13 @@ name##_walk(struct name *head,                                                \
     return 0;                                                                 \
 }
 
-
 #endif /* _RIX_HASH_KEYONLY_H_ */
+
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

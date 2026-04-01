@@ -47,6 +47,9 @@ make -C samples ftable-test
   `samples/fcache/README.md`
 - Flow table design, API, tests, and benchmark plan:
   `samples/ftable/README.md`
+- Forward-looking design note for shared entry abstractions across flow cache
+  and a future flow table:
+  `samples/ENTRY_UNIFICATION_DESIGN_JP.md`
 
 The top-level `samples/` README files are only an index. Detailed design
 notes stay with each sample family so that `fcache` and `ftable` can evolve

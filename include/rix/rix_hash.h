@@ -72,74 +72,74 @@
  *===========================================================================*/
 
 /* ---- single-shot ops ---------------------------------------------------- */
-#  define RIX_HASH_INIT(name, head, nb_bk)                                      \
+#  define RIX_HASH_INIT(name, head, nb_bk)                                     \
     name##_init(head, nb_bk)
 
-#  define RIX_HASH_FIND(name, head, buckets, base, key)                         \
+#  define RIX_HASH_FIND(name, head, buckets, base, key)                        \
     name##_find(head, buckets, base, key)
 
-#  define RIX_HASH_INSERT(name, head, buckets, base, elm)                       \
+#  define RIX_HASH_INSERT(name, head, buckets, base, elm)                      \
     name##_insert(head, buckets, base, elm)
 
-#  define RIX_HASH_REMOVE(name, head, buckets, base, elm)                       \
+#  define RIX_HASH_REMOVE(name, head, buckets, base, elm)                      \
     name##_remove(head, buckets, base, elm)
 
-#  define RIX_HASH_REMOVE_AT(name, head, buckets, bk, slot)                     \
+#  define RIX_HASH_REMOVE_AT(name, head, buckets, bk, slot)                    \
     name##_remove_at(head, buckets, bk, slot)
 
-#  define RIX_HASH_WALK(name, head, buckets, base, cb, arg)                     \
+#  define RIX_HASH_WALK(name, head, buckets, base, cb, arg)                    \
     name##_walk(head, buckets, base, cb, arg)
 
 /* ---- staged find - x1 --------------------------------------------------- */
-#  define RIX_HASH_HASH_KEY(name, ctx, head, buckets, key)                      \
+#  define RIX_HASH_HASH_KEY(name, ctx, head, buckets, key)                     \
     name##_hash_key(ctx, head, buckets, key)
 
-#  define RIX_HASH_SCAN_BK(name, ctx, head, buckets)                            \
+#  define RIX_HASH_SCAN_BK(name, ctx, head, buckets)                           \
     name##_scan_bk(ctx, head, buckets)
 
-#  define RIX_HASH_PREFETCH_NODE(name, ctx, base)                               \
+#  define RIX_HASH_PREFETCH_NODE(name, ctx, base)                              \
     name##_prefetch_node(ctx, base)
 
-#  define RIX_HASH_CMP_KEY(name, ctx, base)                                     \
+#  define RIX_HASH_CMP_KEY(name, ctx, base)                                    \
     name##_cmp_key(ctx, base)
 
 /* ---- staged find - x2 --------------------------------------------------- */
-#  define RIX_HASH_HASH_KEY2(name, ctx, head, buckets, keys)                    \
+#  define RIX_HASH_HASH_KEY2(name, ctx, head, buckets, keys)                   \
     name##_hash_key_n(ctx, 2, head, buckets, keys)
 
-#  define RIX_HASH_SCAN_BK2(name, ctx, head, buckets)                           \
+#  define RIX_HASH_SCAN_BK2(name, ctx, head, buckets)                          \
     name##_scan_bk_n(ctx, 2, head, buckets)
 
-#  define RIX_HASH_PREFETCH_NODE2(name, ctx, base)                              \
+#  define RIX_HASH_PREFETCH_NODE2(name, ctx, base)                             \
     name##_prefetch_node_n(ctx, 2, base)
 
-#  define RIX_HASH_CMP_KEY2(name, ctx, base, results)                           \
+#  define RIX_HASH_CMP_KEY2(name, ctx, base, results)                          \
     name##_cmp_key_n(ctx, 2, base, results)
 
 /* ---- staged find - x4 --------------------------------------------------- */
-#  define RIX_HASH_HASH_KEY4(name, ctx, head, buckets, keys)                    \
+#  define RIX_HASH_HASH_KEY4(name, ctx, head, buckets, keys)                   \
     name##_hash_key_n(ctx, 4, head, buckets, keys)
 
-#  define RIX_HASH_SCAN_BK4(name, ctx, head, buckets)                           \
+#  define RIX_HASH_SCAN_BK4(name, ctx, head, buckets)                          \
     name##_scan_bk_n(ctx, 4, head, buckets)
 
-#  define RIX_HASH_PREFETCH_NODE4(name, ctx, base)                              \
+#  define RIX_HASH_PREFETCH_NODE4(name, ctx, base)                             \
     name##_prefetch_node_n(ctx, 4, base)
 
-#  define RIX_HASH_CMP_KEY4(name, ctx, base, results)                           \
+#  define RIX_HASH_CMP_KEY4(name, ctx, base, results)                          \
     name##_cmp_key_n(ctx, 4, base, results)
 
 /* ---- staged find - xN (arbitrary n) ------------------------------------- */
-#  define RIX_HASH_HASH_KEY_N(name, ctx, n, head, buckets, keys)                \
+#  define RIX_HASH_HASH_KEY_N(name, ctx, n, head, buckets, keys)               \
     name##_hash_key_n(ctx, n, head, buckets, keys)
 
-#  define RIX_HASH_SCAN_BK_N(name, ctx, n, head, buckets)                       \
+#  define RIX_HASH_SCAN_BK_N(name, ctx, n, head, buckets)                      \
     name##_scan_bk_n(ctx, n, head, buckets)
 
-#  define RIX_HASH_PREFETCH_NODE_N(name, ctx, n, base)                          \
+#  define RIX_HASH_PREFETCH_NODE_N(name, ctx, n, base)                         \
     name##_prefetch_node_n(ctx, n, base)
 
-#  define RIX_HASH_CMP_KEY_N(name, ctx, n, base, results)                       \
+#  define RIX_HASH_CMP_KEY_N(name, ctx, n, base, results)                      \
     name##_cmp_key_n(ctx, n, base, results)
 
 #endif /* _RIX_HASH_H_ */

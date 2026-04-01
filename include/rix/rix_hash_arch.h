@@ -258,11 +258,14 @@ _rix_hash_hash_bytes_GEN(const void *key, size_t key_bytes, u32 mask)
         h0 ^= p[i];
         h0 *= 16777619u;
     }
+    h0 |= !h0;
     u32 bk0 = h0 & mask;
     u32 h1  = (h0 ^ 0x5bd1e995u) * 2246822519u;
     u32 inc = 1u;
+    h1 |= !h1;
     while ((h1 & mask) == bk0) {
         h1  = (h1 ^ inc) * 2246822519u;
+        h1 |= !h1;
         inc++;
     }
     r.val32[0] = h0;
@@ -323,11 +326,13 @@ _rix_hash_hash_bytes_CRC32(const void *key, size_t key_bytes, u32 mask)
 {
     union rix_hash_hash_u r;
     u32 h0   = _rix_hash_crc32_bytes(0u, key, key_bytes);
+    h0 |= !h0;
     u32 bk0  = h0 & mask;
     u32 seed = ~h0;
     u32 h1;
     do {
         h1   = _rix_hash_crc32_bytes(seed, key, key_bytes);
+        h1 |= !h1;
         seed = (u32)__builtin_ia32_crc32di((u64)seed, (u64)h0);
     } while ((h1 & mask) == bk0);
     r.val32[0] = h0;

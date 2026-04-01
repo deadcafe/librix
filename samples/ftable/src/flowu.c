@@ -11,23 +11,8 @@
 
 #include "flowu_table.h"
 
-static inline union rix_hash_hash_u
-ft_flowu_hash_fn(const struct flowu_key *key, uint32_t mask)
-{
-    union rix_hash_hash_u r = rix_hash_hash_bytes_fast(key, sizeof(*key),
-                                                       mask);
-    if (r.val32[0] == 0u)
-        r.val32[0] = 1u;
-    if (r.val32[1] == 0u)
-        r.val32[1] = 1u;
-    return r;
-}
-
-static inline int
-ft_flowu_cmp(const struct flowu_key *a, const struct flowu_key *b)
-{
-    return memcmp(a, b, sizeof(*a));
-}
+#define ft_flowu_hash_fn flowu_key_hash
+#define ft_flowu_cmp     flowu_key_cmp
 
 static inline struct ft_flowu_entry *
 ft_flowu_layout_entry_ptr_(const struct ft_flowu_table *ft, unsigned idx)

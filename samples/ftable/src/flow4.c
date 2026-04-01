@@ -11,68 +11,8 @@
 
 #include "flow4_table.h"
 
-/*
- * Direct CRC32C hash for 24B flow4 key -- bypasses rix_hash_arch->hash_bytes
- * function-pointer dispatch.  24B = 3 x crc32q, no remainder handling.
- */
-static inline union rix_hash_hash_u
-ft_flow4_hash_fn(const struct flow4_key *key, uint32_t mask)
-{
-#if defined(__x86_64__) && defined(__SSE4_2__)
-    union rix_hash_hash_u r;
-    uint64_t w0, w1, w2;
-    uint32_t h0, bk0, seed, h1;
-
-    memcpy(&w0, (const char *)key,      8u);
-    memcpy(&w1, (const char *)key + 8u,  8u);
-    memcpy(&w2, (const char *)key + 16u, 8u);
-    h0  = (uint32_t)__builtin_ia32_crc32di(0ULL,          w0);
-    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w1);
-    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w2);
-    if (h0 == 0u)
-        h0 = 1u;
-    bk0  = h0 & mask;
-    seed = ~h0;
-    do {
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, w0);
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w1);
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w2);
-        if (h1 == 0u)
-            h1 = 1u;
-        seed = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, (uint64_t)h0);
-    } while ((h1 & mask) == bk0);
-
-    r.val32[0] = h0;
-    r.val32[1] = h1;
-    return r;
-#else
-    union rix_hash_hash_u r = rix_hash_hash_bytes_fast(key, sizeof(*key),
-                                                       mask);
-    if (r.val32[0] == 0u)
-        r.val32[0] = 1u;
-    if (r.val32[1] == 0u)
-        r.val32[1] = 1u;
-    return r;
-#endif
-}
-
-/*
- * Inline 24B key comparison -- avoids function-pointer overhead.
- * 24B = 3 x uint64_t XOR-OR.
- */
-static inline int
-ft_flow4_cmp(const struct flow4_key *a, const struct flow4_key *b)
-{
-    uint64_t a0, a1, a2, b0, b1, b2;
-
-    memcpy(&a0, a,                            8u);
-    memcpy(&a1, (const char *)a + 8u,         8u);
-    memcpy(&a2, (const char *)a + 16u,        8u);
-    memcpy(&b0, b,                            8u);
-    memcpy(&b1, (const char *)b + 8u,         8u);
-    memcpy(&b2, (const char *)b + 16u,        8u);
-    return ((a0 ^ b0) | (a1 ^ b1) | (a2 ^ b2)) ? 1 : 0;
-}
+#define ft_flow4_hash_fn flow4_key_hash
+#define ft_flow4_cmp     flow4_key_cmp
 
 static inline struct ft_flow4_entry *
 ft_flow4_layout_entry_ptr_(const struct ft_flow4_table *ft, unsigned idx)
@@ -92,6 +32,86 @@ ft_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
     return ft_record_index_from_member_ptr(ft->pool_base, ft->pool_stride,
                                            ft->pool_entry_offset, entry);
 }
+
+/*===========================================================================
+ * FCORE layer: flow4_entry_hdr slot + FCORE_GENERATE
+ *===========================================================================*/
+
+static inline struct flow4_entry_hdr *
+fcore_flow4_layout_entry_ptr_(const struct ft_flow4_table *ft, unsigned idx)
+{
+    return (struct flow4_entry_hdr *)(void *)
+        ft_flow4_layout_entry_ptr_(ft, idx);
+}
+
+static inline unsigned
+fcore_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
+                              const struct flow4_entry_hdr *hdr)
+{
+    return ft_flow4_layout_entry_idx_(
+        ft, (const struct ft_flow4_entry *)(const void *)hdr);
+}
+
+RIX_HASH_HEAD(fcore_flow4_ht);
+
+#undef RIX_HASH_SLOT_DEFINE_INDEXERS
+#define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
+static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
+name##_hidx(struct type *base, const struct type *p)                          \
+{                                                                             \
+    const struct ft_flow4_table *ft =                                         \
+        (const struct ft_flow4_table *)(const void *)base;                    \
+    return fcore_flow4_layout_entry_idx_(ft, p);                              \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
+name##_hptr(struct type *base, unsigned i)                                    \
+{                                                                             \
+    const struct ft_flow4_table *ft =                                         \
+        (const struct ft_flow4_table *)(const void *)base;                    \
+    return fcore_flow4_layout_entry_ptr_(ft, i);                              \
+}
+
+RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry_hdr,
+    key, htbl_elm.cur_hash, htbl_elm.slot, ft_flow4_cmp, ft_flow4_hash_fn)
+
+#define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
+    fcore_flow4_layout_entry_ptr_((owner), (idx))
+
+#define FCORE_LAYOUT_ENTRY_INDEX(owner, entry) \
+    fcore_flow4_layout_entry_idx_((owner), (entry))
+
+#undef FCORE_LAYOUT_HASH_BASE
+#define FCORE_LAYOUT_HASH_BASE(owner) \
+    ((struct flow4_entry_hdr *)(void *)(owner))
+
+/*
+ * FCORE_ON_REMOVE: clear cur_hash so the entry is no longer "active".
+ * Must be defined before FCORE_GENERATE which expands it.
+ */
+#undef FCORE_ON_REMOVE
+#define FCORE_ON_REMOVE(owner, entry, idx) \
+    do { (entry)->htbl_elm.cur_hash = 0u; } while (0)
+
+/*
+ * fcore_flow4_ht and ft_flow4_ht are layout-compatible RIX_HASH_HEAD types
+ * (both are { unsigned rhh_mask; unsigned rhh_nb; }).  The _FCORE_HT_HEAD
+ * cast is safe but triggers GCC strict-aliasing level 2.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
+               ft_flow4_hash_fn, ft_flow4_cmp)
+#pragma GCC diagnostic pop
+
+/* Clean up FCORE hooks before FT_TABLE_GENERATE */
+#undef FCORE_LAYOUT_ENTRY_PTR
+#undef FCORE_LAYOUT_ENTRY_INDEX
+#undef FCORE_LAYOUT_HASH_BASE
+#undef RIX_HASH_SLOT_DEFINE_INDEXERS
+
+/*===========================================================================
+ * FT_TABLE layer: ft_flow4_entry slot + FT_TABLE_GENERATE
+ *===========================================================================*/
 
 #define FTG_LAYOUT_INIT_STORAGE(ft, array, stride, entry_offset)               \
     do {                                                                       \
@@ -113,7 +133,6 @@ ft_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
 #define FTG_LAYOUT_ENTRY_AT(ft, off0)                                          \
     ft_flow4_layout_entry_ptr_((ft), (unsigned)(off0) + 1u)
 
-#undef RIX_HASH_SLOT_DEFINE_INDEXERS
 #define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
 name##_hidx(struct type *base, const struct type *p)                          \
@@ -132,6 +151,9 @@ name##_hptr(struct type *base, unsigned i)                                    \
 
 RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow4_ht, ft_flow4_entry, key, cur_hash,
                                  slot, ft_flow4_cmp, ft_flow4_hash_fn)
+
+/* Enable FCORE-delegating bulk ops in FT_TABLE_GENERATE */
+#define FTG_USE_FCORE 1
 
 #include "ft_table_generate.h"
 
@@ -185,7 +207,7 @@ FT_TABLE_GENERATE(flow4,
                   FT_FLOW4_DEFAULT_MIN_NB_BK,
                   FT_FLOW4_DEFAULT_MAX_NB_BK,
                   FT_FLOW4_DEFAULT_GROW_FILL_PCT,
-                  FT_FLOW4_ENTRY_FLAG_ACTIVE,
+                  0u,
                   ft_flow4_hash_fn, ft_flow4_cmp)
 
 #ifdef FT_ARCH_SUFFIX

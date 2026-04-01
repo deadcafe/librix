@@ -10,57 +10,8 @@
 
 #include "flow4_cache.h"
 
-/*
- * Direct CRC32C hash for 24B flow4 key -- bypasses rix_hash_arch->hash_bytes
- * function-pointer dispatch.  24B = 3 x crc32q, no remainder handling.
- */
-static inline union rix_hash_hash_u
-fc_flow4_hash_fn(const struct flow4_key *key, uint32_t mask)
-{
-#if defined(__x86_64__) && defined(__SSE4_2__)
-    union rix_hash_hash_u r;
-    uint64_t w0, w1, w2;
-    uint32_t h0, bk0, seed, h1;
-
-    memcpy(&w0, (const char *)key,      8u);
-    memcpy(&w1, (const char *)key + 8u,  8u);
-    memcpy(&w2, (const char *)key + 16u, 8u);
-    h0  = (uint32_t)__builtin_ia32_crc32di(0ULL,          w0);
-    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w1);
-    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w2);
-    bk0  = h0 & mask;
-    seed = ~h0;
-    do {
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, w0);
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w1);
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w2);
-        seed = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, (uint64_t)h0);
-    } while ((h1 & mask) == bk0);
-    r.val32[0] = h0;
-    r.val32[1] = h1;
-    return r;
-#else
-    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
-#endif
-}
-
-/*
- * Inline 24B key comparison -- avoids function-pointer overhead.
- * 24B = 3 x uint64_t XOR-OR.
- */
-static inline int
-fc_flow4_cmp(const struct flow4_key *a, const struct flow4_key *b)
-{
-    uint64_t a0, a1, a2, b0, b1, b2;
-
-    memcpy(&a0, a,                            8u);
-    memcpy(&a1, (const char *)a + 8u,         8u);
-    memcpy(&a2, (const char *)a + 16u,        8u);
-    memcpy(&b0, b,                            8u);
-    memcpy(&b1, (const char *)b + 8u,         8u);
-    memcpy(&b2, (const char *)b + 16u,        8u);
-    return ((a0 ^ b0) | (a1 ^ b1) | (a2 ^ b2)) ? 1 : 0;
-}
+#define fc_flow4_hash_fn flow4_key_hash
+#define fc_flow4_cmp     flow4_key_cmp
 
 static inline struct fc_flow4_entry *
 fc_flow4_layout_entry_ptr_(const struct fc_flow4_cache *fc, unsigned idx)

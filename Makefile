@@ -13,7 +13,7 @@ PREFIX       ?= /usr/local
 
 RIX_PUB_HDRS := $(filter-out %_private.h, $(wildcard include/rix/*.h))
 
-.PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help
+.PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help ftable
 all: build run-tests run-bench
 
 help:
@@ -26,6 +26,7 @@ help:
 	  '  test         Build and run all tests' \
 	  '  bench        Build and run the representative benchmark suite' \
 	  '  bench-full   Build and run the full long-running benchmark suite' \
+	  '  ftable       Build ftable library and run ftable tests' \
 	  '  clean        Remove build artifacts and generated HTML' \
 	  '  install      Install headers and sample library under PREFIX' \
 	  '  htags        Generate HTML source browsing output under HTML/' \
@@ -75,6 +76,9 @@ clean:
 	  $(MAKE) -C $$d clean; \
 	done
 	rm -rf HTML
+
+ftable:
+	@$(MAKE) -C samples ftable
 
 install:
 	install -d $(PREFIX)/include/rix $(PREFIX)/lib

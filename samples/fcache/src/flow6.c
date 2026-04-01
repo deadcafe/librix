@@ -10,17 +10,8 @@
 
 #include "flow6_cache.h"
 
-static inline union rix_hash_hash_u
-fc_flow6_hash_fn(const struct flow6_key *key, uint32_t mask)
-{
-    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
-}
-
-static inline int
-fc_flow6_cmp(const struct flow6_key *a, const struct flow6_key *b)
-{
-    return memcmp(a, b, sizeof(*a));
-}
+#define fc_flow6_hash_fn flow6_key_hash
+#define fc_flow6_cmp     flow6_key_cmp
 
 static inline struct fc_flow6_entry *
 fc_flow6_layout_entry_ptr_(const struct fc_flow6_cache *fc, unsigned idx)

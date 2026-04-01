@@ -11,23 +11,8 @@
 
 #include "flow6_table.h"
 
-static inline union rix_hash_hash_u
-ft_flow6_hash_fn(const struct flow6_key *key, uint32_t mask)
-{
-    union rix_hash_hash_u r = rix_hash_hash_bytes_fast(key, sizeof(*key),
-                                                       mask);
-    if (r.val32[0] == 0u)
-        r.val32[0] = 1u;
-    if (r.val32[1] == 0u)
-        r.val32[1] = 1u;
-    return r;
-}
-
-static inline int
-ft_flow6_cmp(const struct flow6_key *a, const struct flow6_key *b)
-{
-    return memcmp(a, b, sizeof(*a));
-}
+#define ft_flow6_hash_fn flow6_key_hash
+#define ft_flow6_cmp     flow6_key_cmp
 
 static inline struct ft_flow6_entry *
 ft_flow6_layout_entry_ptr_(const struct ft_flow6_table *ft, unsigned idx)

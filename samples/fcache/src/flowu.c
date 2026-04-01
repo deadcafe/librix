@@ -10,17 +10,8 @@
 
 #include "flowu_cache.h"
 
-static inline union rix_hash_hash_u
-fc_flowu_hash_fn(const struct flowu_key *key, uint32_t mask)
-{
-    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
-}
-
-static inline int
-fc_flowu_cmp(const struct flowu_key *a, const struct flowu_key *b)
-{
-    return memcmp(a, b, sizeof(*a));
-}
+#define fc_flowu_hash_fn flowu_key_hash
+#define fc_flowu_cmp     flowu_key_cmp
 
 static inline struct fc_flowu_entry *
 fc_flowu_layout_entry_ptr_(const struct fc_flowu_cache *fc, unsigned idx)

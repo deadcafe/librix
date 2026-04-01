@@ -309,23 +309,23 @@ _rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
     __typeof__(((struct type *)0)->slot_field)
 
 #  define RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, attr) \
-    attr void name##_init(struct name *head, unsigned nb_bk);                        \
-    attr struct type *name##_insert(struct name *head,                               \
-                                    struct rix_hash_bucket_s *buckets,               \
-                                    struct type *base,                               \
-                                    struct type *elm);                               \
-    attr unsigned name##_remove_at(struct name *head,                                \
-                                   struct rix_hash_bucket_s *buckets,                \
-                                   unsigned bk,                                      \
-                                   unsigned slot);                                   \
-    attr struct type *name##_remove(struct name *head,                               \
-                                    struct rix_hash_bucket_s *buckets,               \
-                                    struct type *base,                               \
-                                    struct type *elm);                               \
-    attr int name##_walk(struct name *head,                                          \
-                         struct rix_hash_bucket_s *buckets,                          \
-                         struct type *base,                                          \
-                         int (*cb)(struct type *, void *),                           \
+    attr void name##_init(struct name *head, unsigned nb_bk);                  \
+    attr struct type *name##_insert(struct name *head,                         \
+                                    struct rix_hash_bucket_s *buckets,         \
+                                    struct type *base,                         \
+                                    struct type *elm);                         \
+    attr unsigned name##_remove_at(struct name *head,                          \
+                                   struct rix_hash_bucket_s *buckets,          \
+                                   unsigned bk,                                \
+                                   unsigned slot);                             \
+    attr struct type *name##_remove(struct name *head,                         \
+                                    struct rix_hash_bucket_s *buckets,         \
+                                    struct type *base,                         \
+                                    struct type *elm);                         \
+    attr int name##_walk(struct name *head,                                    \
+                         struct rix_hash_bucket_s *buckets,                    \
+                         struct type *base,                                    \
+                         int (*cb)(struct type *, void *),                     \
                          void *arg);
 
 #  define RIX_HASH_PROTOTYPE_EX(name, type, key_field, hash_field, cmp_fn, hash_fn) \
@@ -354,14 +354,14 @@ _rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
 
 #  define _RIX_HASH_DEFAULT_HASH_FN_NAME(name) name ## _default_hash
 
-#  define _RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)               \
-    static RIX_UNUSED RIX_FORCE_INLINE union rix_hash_hash_u                    \
-    _RIX_HASH_DEFAULT_HASH_FN_NAME(name)(                                       \
-        const _RIX_HASH_KEY_TYPE(type, key_field) *key, u32 mask)          \
-    {                                                                           \
-        return rix_hash_hash_bytes_fast((const void *)key,                      \
-                                        sizeof(((struct type *)0)->key_field),  \
-                                        mask);                                  \
+#  define _RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)              \
+    static RIX_UNUSED RIX_FORCE_INLINE union rix_hash_hash_u                   \
+    _RIX_HASH_DEFAULT_HASH_FN_NAME(name)(                                      \
+        const _RIX_HASH_KEY_TYPE(type, key_field) *key, u32 mask)              \
+    {                                                                          \
+        return rix_hash_hash_bytes_fast((const void *)key,                     \
+                                        sizeof(((struct type *)0)->key_field), \
+                                        mask);                                 \
     }
 
 /*===========================================================================
@@ -391,5 +391,13 @@ rix_hash_nb_bk_hint(unsigned max_entries)
     return n + 1u;
 }
 
-
 #endif /* _RIX_HASH_COMMON_H_ */
+
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

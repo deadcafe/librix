@@ -16,12 +16,11 @@
 
 #include "ft_table_common.h"
 #include <flow/flow_key.h>
+#include <flow/flow_core.h>
 
 #define FT_FLOW4_DEFAULT_GROW_FILL_PCT 60u
 #define FT_FLOW4_DEFAULT_MIN_NB_BK    16384u
 #define FT_FLOW4_DEFAULT_MAX_NB_BK    1048576u
-#define FT_FLOW4_ENTRY_FLAG_ACTIVE     0x0001u
-
 struct ft_flow4_entry {
     union {
         struct flow4_entry_hdr hdr;
@@ -39,8 +38,7 @@ struct ft_flow4_entry {
     };
     uint32_t hash0;
     uint32_t hash1;
-    uint16_t flags;
-    uint8_t  reserved0[22];
+    uint8_t  reserved0[24];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
 RIX_STATIC_ASSERT(sizeof(struct ft_flow4_entry) == FT_TABLE_CACHE_LINE_SIZE,
@@ -86,6 +84,7 @@ struct ft_flow4_table {
     unsigned                    nb_bk;
     unsigned                    max_nb_bk;
     unsigned                    max_entries;
+    uint32_t                    free_head;
     unsigned                    grow_fill_pct;
     unsigned                    need_grow;
     struct ft_flow4_stats       stats;

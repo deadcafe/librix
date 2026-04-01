@@ -9,6 +9,9 @@
 #define _SAMPLES_FLOW_KEY_H_
 
 #include <stdint.h>
+#include <string.h>
+
+#include <rix/rix_hash.h>
 
 struct flow_hashtbl_elm {
     uint32_t cur_hash;
@@ -27,6 +30,7 @@ struct flow4_key {
     uint32_t dst_ip;
     uint32_t zero;
 };
+
 struct flow4_entry_hdr {
     struct flow4_key key;
     struct flow_hashtbl_elm htbl_elm;
@@ -42,6 +46,7 @@ struct flow6_key {
     uint8_t src_ip[16];
     uint8_t dst_ip[16];
 } __attribute__((packed));
+
 struct flow6_entry_hdr {
     struct flow6_key key;
     struct flow_hashtbl_elm htbl_elm;
@@ -66,9 +71,109 @@ struct flowu_key {
         } v6;
     } addr;
 } __attribute__((packed));
+
 struct flowu_entry_hdr {
     struct flowu_key key;
     struct flow_hashtbl_elm htbl_elm;
 };
 
+/*===========================================================================
+ * flow4 key hash / cmp
+ *
+ * 24B key: 3x CRC32C unrolled on x86+SSE4.2, fallback to
+ * rix_hash_hash_bytes_fast.  Non-zero guaranteed by rix_hash layer.
+ *===========================================================================*/
+
+static inline union rix_hash_hash_u
+flow4_key_hash(const struct flow4_key *key, uint32_t mask)
+{
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    union rix_hash_hash_u r;
+    uint64_t w0, w1, w2;
+    uint32_t h0, bk0, seed, h1;
+
+    memcpy(&w0, (const char *)key,      8u);
+    memcpy(&w1, (const char *)key + 8u,  8u);
+    memcpy(&w2, (const char *)key + 16u, 8u);
+    h0  = (uint32_t)__builtin_ia32_crc32di(0ULL,          w0);
+    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w1);
+    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w2);
+    h0 |= !h0;
+    bk0  = h0 & mask;
+    seed = ~h0;
+    do {
+        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, w0);
+        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w1);
+        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w2);
+        h1 |= !h1;
+        seed = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, (uint64_t)h0);
+    } while ((h1 & mask) == bk0);
+
+    r.val32[0] = h0;
+    r.val32[1] = h1;
+    return r;
+#else
+    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
 #endif
+}
+
+/*
+ * Inline 24B key comparison -- avoids function-pointer overhead.
+ * 24B = 3 x uint64_t XOR-OR.
+ */
+static inline int
+flow4_key_cmp(const struct flow4_key *a, const struct flow4_key *b)
+{
+    uint64_t a0, a1, a2, b0, b1, b2;
+
+    memcpy(&a0, a,                            8u);
+    memcpy(&a1, (const char *)a + 8u,         8u);
+    memcpy(&a2, (const char *)a + 16u,        8u);
+    memcpy(&b0, b,                            8u);
+    memcpy(&b1, (const char *)b + 8u,         8u);
+    memcpy(&b2, (const char *)b + 16u,        8u);
+    return ((a0 ^ b0) | (a1 ^ b1) | (a2 ^ b2)) ? 1 : 0;
+}
+
+/*===========================================================================
+ * flow6 key hash / cmp
+ *===========================================================================*/
+
+static inline union rix_hash_hash_u
+flow6_key_hash(const struct flow6_key *key, uint32_t mask)
+{
+    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
+}
+
+static inline int
+flow6_key_cmp(const struct flow6_key *a, const struct flow6_key *b)
+{
+    return memcmp(a, b, sizeof(*a));
+}
+
+/*===========================================================================
+ * flowu key hash / cmp
+ *===========================================================================*/
+
+static inline union rix_hash_hash_u
+flowu_key_hash(const struct flowu_key *key, uint32_t mask)
+{
+    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
+}
+
+static inline int
+flowu_key_cmp(const struct flowu_key *a, const struct flowu_key *b)
+{
+    return memcmp(a, b, sizeof(*a));
+}
+
+#endif
+
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

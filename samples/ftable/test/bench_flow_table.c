@@ -256,15 +256,20 @@ ftb_cfg(void)
     return cfg;
 }
 
-static struct ft_flow4_key
+static struct flow4_key
 ftb_key(unsigned i)
 {
-    return ft_flow4_key_make(UINT32_C(0x0a000001) + i,
-                             UINT32_C(0x0a100001) + i,
-                             (uint16_t)(1000u + i),
-                             (uint16_t)(2000u + i),
-                             6u,
-                             1u);
+    struct flow4_key k;
+
+    memset(&k, 0, sizeof(k));
+    k.family   = 2u;
+    k.proto    = 6u;
+    k.src_port = (uint16_t)(1000u + i);
+    k.dst_port = (uint16_t)(2000u + i);
+    k.vrfid    = 1u;
+    k.src_ip   = UINT32_C(0x0a000001) + i;
+    k.dst_ip   = UINT32_C(0x0a100001) + i;
+    return k;
 }
 
 static unsigned
@@ -275,7 +280,7 @@ ftb_fill_target(unsigned entries, unsigned pct)
 
 static void
 ftb_bind_key(struct ft_flow4_table *ft, uint32_t entry_idx,
-             const struct ft_flow4_key *key)
+             const struct flow4_key *key)
 {
     struct ft_flow4_entry *entry = ft_flow4_table_entry_ptr(ft, entry_idx);
 
@@ -290,10 +295,10 @@ static void
 ftb_prefill(struct ft_flow4_table *ft, unsigned n, unsigned key_base)
 {
     for (unsigned i = 0; i < n; i++) {
-        struct ft_flow4_key key = ftb_key(key_base + i);
+        struct flow4_key key = ftb_key(key_base + i);
 
         ftb_bind_key(ft, i + 1u, &key);
-        if (ft_flow4_table_add_idx(ft, i + 1u) != i + 1u) {
+        if (ft_flow4_table_add_entry(ft, i + 1u) != i + 1u) {
             fprintf(stderr, "prefill failed at %u\n", i);
             exit(1);
         }
@@ -302,7 +307,7 @@ ftb_prefill(struct ft_flow4_table *ft, unsigned n, unsigned key_base)
 
 static double
 ftb_measure_find(struct ft_flow4_table *ft,
-                 const struct ft_flow4_key *keys,
+                 const struct flow4_key *keys,
                  unsigned repeat)
 {
     struct ft_flow4_result results[FTB_QUERY];
@@ -318,7 +323,7 @@ ftb_measure_find(struct ft_flow4_table *ft,
 }
 
 static double
-ftb_sample_find(struct ft_flow4_table *ft, const struct ft_flow4_key *keys)
+ftb_sample_find(struct ft_flow4_table *ft, const struct flow4_key *keys)
 {
     double samples[FTB_SAMPLE_MAX];
 
@@ -331,7 +336,7 @@ ftb_sample_find(struct ft_flow4_table *ft, const struct ft_flow4_key *keys)
 static double
 ftb_measure_add_only(struct ft_flow4_table *ft, unsigned key_base)
 {
-    struct ft_flow4_key keys[FTB_QUERY];
+    struct flow4_key keys[FTB_QUERY];
     uint32_t idxv[FTB_QUERY];
     struct ft_flow4_result results[FTB_QUERY];
     uint64_t samples[FTB_UPDATE_REPEAT];
@@ -348,7 +353,7 @@ ftb_measure_add_only(struct ft_flow4_table *ft, unsigned key_base)
         for (unsigned i = 0; i < FTB_QUERY; i++)
             ftb_bind_key(ft, idxv[i], &keys[i]);
         t0 = ftb_rdtsc();
-        ft_flow4_table_add_idx_bulk(ft, idxv, FTB_QUERY, results);
+        ft_flow4_table_add_entry_bulk(ft, idxv, FTB_QUERY, results);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -369,7 +374,7 @@ ftb_sample_add_only(struct ft_flow4_table *ft, unsigned key_base)
 static double
 ftb_measure_del_bulk(struct ft_flow4_table *ft, unsigned key_base)
 {
-    struct ft_flow4_key keys[FTB_QUERY];
+    struct flow4_key keys[FTB_QUERY];
     uint32_t idxv[FTB_QUERY];
     struct ft_flow4_result results[FTB_QUERY];
     uint64_t samples[FTB_UPDATE_REPEAT];
@@ -385,7 +390,7 @@ ftb_measure_del_bulk(struct ft_flow4_table *ft, unsigned key_base)
         ft_flow4_table_flush(ft);
         for (unsigned i = 0; i < FTB_QUERY; i++)
             ftb_bind_key(ft, idxv[i], &keys[i]);
-        ft_flow4_table_add_idx_bulk(ft, idxv, FTB_QUERY, results);
+        ft_flow4_table_add_entry_bulk(ft, idxv, FTB_QUERY, results);
         t0 = ftb_rdtsc();
         ft_flow4_table_del_bulk(ft, keys, FTB_QUERY, results);
         t1 = ftb_rdtsc();
@@ -453,8 +458,8 @@ static void
 ftb_run_datapath(void)
 {
     const unsigned sizes[] = { 32768u, 1048576u };
-    struct ft_flow4_key hit_keys[FTB_QUERY];
-    struct ft_flow4_key miss_keys[FTB_QUERY];
+    struct flow4_key hit_keys[FTB_QUERY];
+    struct flow4_key miss_keys[FTB_QUERY];
     printf("\nftable datapath comparison\n\n");
     ftb_print_sampling_config();
 

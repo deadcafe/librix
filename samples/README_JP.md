@@ -47,6 +47,8 @@ make -C samples ftable-test
   `samples/fcache/README_JP.md`
 - flow table の設計、API、test、benchmark 計画:
   `samples/ftable/README_JP.md`
+- flow cache / flow table の将来 entry 共通化に向けた設計ノート:
+  `samples/ENTRY_UNIFICATION_DESIGN_JP.md`
 
 `samples/` 直下の README は索引のみとし、詳細な設計ノートは
 `fcache` / `ftable` ごとの README に分離して管理する。
