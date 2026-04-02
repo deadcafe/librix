@@ -114,23 +114,34 @@ name##_hptr(struct type *base, unsigned i) {                                  \
 /* Stage 1: compute hash, resolve bucket pointers, issue prefetches. */       \
 /* Must be called before name_scan_bk.                               */       \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key(struct rix_hash_find_ctx_s *ctx,                              \
-                struct name *head,                                            \
-                struct rix_hash_bucket_s *buckets,                            \
-                const _RIX_HASH_KEY_TYPE(type, key_field) *key)               \
+name##_hash_key_masked(struct rix_hash_find_ctx_s *ctx,                       \
+                       struct name *head __attribute__((unused)),             \
+                       struct rix_hash_bucket_s *buckets,                     \
+                       const _RIX_HASH_KEY_TYPE(type, key_field) *key,        \
+                       unsigned hash_mask,                                    \
+                       unsigned bk_mask)                                      \
 {                                                                             \
-    unsigned mask = head->rhh_mask;                                           \
     union rix_hash_hash_u _h =                                                \
-        hash_fn(key, mask);                                                   \
+        hash_fn(key, hash_mask);                                              \
     unsigned _bk0, _bk1;                                                      \
-    u32 _fp;                                                             \
-    _rix_hash_buckets(_h, mask, &_bk0, &_bk1, &_fp);                          \
+    u32 _fp;                                                                  \
+    _rix_hash_buckets(_h, bk_mask, &_bk0, &_bk1, &_fp);                       \
     ctx->hash  = _h;                                                          \
     ctx->fp    = _fp;                                                         \
     ctx->key   = (const void *)key;                                           \
     ctx->bk[0] = buckets + _bk0;                                              \
     ctx->bk[1] = buckets + _bk1;                                              \
     rix_hash_prefetch_bucket_of(ctx->bk[0]);                                  \
+}                                                                             \
+                                                                              \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_hash_key(struct rix_hash_find_ctx_s *ctx,                              \
+                struct name *head,                                            \
+                struct rix_hash_bucket_s *buckets,                            \
+                const _RIX_HASH_KEY_TYPE(type, key_field) *key)               \
+{                                                                             \
+    unsigned mask = head->rhh_mask;                                           \
+    name##_hash_key_masked(ctx, head, buckets, key, mask, mask);              \
 }                                                                             \
                                                                               \
 /* Stage 2: scan bk_0 fingerprints only; produce fp_hits[0] bitmask.  */      \
@@ -197,14 +208,28 @@ name##_cmp_key(struct rix_hash_find_ctx_s *ctx,                               \
 /* FORCE_INLINE + constant n -> compiler unrolls identically to xN.   */      \
 /* ================================================================== */      \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_hash_key_n_masked(struct rix_hash_find_ctx_s *ctx,                     \
+                         int n,                                               \
+                         struct name *head,                                   \
+                         struct rix_hash_bucket_s *buckets,                   \
+                         const _RIX_HASH_KEY_TYPE(type, key_field) * const *keys, \
+                         unsigned hash_mask,                                  \
+                         unsigned bk_mask)                                    \
+{                                                                             \
+    for (int _j = 0; _j < n; _j++)                                            \
+        name##_hash_key_masked(&ctx[_j], head, buckets, keys[_j],             \
+                               hash_mask, bk_mask);                           \
+}                                                                             \
+                                                                              \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 name##_hash_key_n(struct rix_hash_find_ctx_s *ctx,                            \
                   int n,                                                      \
                   struct name *head,                                          \
                   struct rix_hash_bucket_s *buckets,                          \
                   const _RIX_HASH_KEY_TYPE(type, key_field) * const *keys)    \
 {                                                                             \
-    for (int _j = 0; _j < n; _j++)                                            \
-        name##_hash_key(&ctx[_j], head, buckets, keys[_j]);                   \
+    unsigned mask = head->rhh_mask;                                           \
+    name##_hash_key_n_masked(ctx, n, head, buckets, keys, mask, mask);        \
 }                                                                             \
                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \

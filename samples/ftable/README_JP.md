@@ -282,15 +282,17 @@ bucket memory は `struct ft_bucket_allocator` の callback で受け取る。
 - `ft_flow4_table_destroy()`
 - `ft_flow4_table_flush()`
 - `ft_flow4_table_find()`
-- `ft_flow4_table_add_idx()`
-- `ft_flow4_table_add_entry()`
-- `ft_flow4_table_add()`
-- `ft_flow4_table_del()`
+- `ft_flow4_table_add_entry_idx()`
+- `ft_flow4_table_add_entry_ptr()`
+- `ft_flow4_table_del_key()`
+- `ft_flow4_table_del_entry_idx()`
+- `ft_flow4_table_del_entry_ptr()`
 - `ft_flow4_table_find_bulk()`
-- `ft_flow4_table_add_idx_bulk()`
-- `ft_flow4_table_add_entry_bulk()`
-- `ft_flow4_table_add_bulk()`
-- `ft_flow4_table_del_bulk()`
+- `ft_flow4_table_add_entry_idx_bulk()`
+- `ft_flow4_table_add_entry_ptr_bulk()`
+- `ft_flow4_table_del_key_bulk()`
+- `ft_flow4_table_del_entry_idx_bulk()`
+- `ft_flow4_table_del_entry_ptr_bulk()`
 - `ft_flow4_table_need_grow()`
 - `ft_flow4_table_grow_2x()`
 - `ft_flow4_table_reserve()`
@@ -334,7 +336,7 @@ caller-owned record を登録する典型例:
 
 ```c
 struct my_flow4_record {
-    struct ft_flow4_entry entry;
+    struct flow4_entry entry;
     unsigned char body[128];
 };
 
@@ -353,7 +355,7 @@ ft_flow4_table_add_idx(&ft, idx);
 ```c
 struct my_flow4_record {
     unsigned char pad[64];
-    struct ft_flow4_entry entry;
+    struct flow4_entry entry;
     unsigned char body[128];
 };
 

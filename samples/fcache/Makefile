@@ -32,6 +32,7 @@ CFLAGS_BASE  = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
                -I$(CURDIR)/include -I$(CURDIR)/src -fPIC \
                $(EXTRA_CFLAGS)
+DEPFLAGS     = -MMD -MP
 
 SRCDIR       = src
 INCDIR       = include
@@ -58,6 +59,7 @@ OBJS         = $(ARCH_OBJS) $(DISPATCH_OBJ)
 LIB_STATIC   = $(LIBDIR)/libfcache.a
 LIB_SHARED   = $(LIBDIR)/libfcache.so
 LIB_SONAME   = libfcache.so.1
+DEPS         = $(OBJS:.o=.d)
 
 PREFIX       ?= /usr/local
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
@@ -88,25 +90,25 @@ $(LIBDIR):
 #---------------------------------------------------------------------------
 # GEN (portable, no SIMD flags)
 $(LIBDIR)/%_gen.o: $(SRCDIR)/%.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -DFC_ARCH_SUFFIX=_gen -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -DFC_ARCH_SUFFIX=_gen -c -o $@ $<
 
 # SSE4.2
 $(LIBDIR)/%_sse.o: $(SRCDIR)/%.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -msse4.2 -DFC_ARCH_SUFFIX=_sse -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -msse4.2 -DFC_ARCH_SUFFIX=_sse -c -o $@ $<
 
 # AVX2
 $(LIBDIR)/%_avx2.o: $(SRCDIR)/%.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx2 -msse4.2 -DFC_ARCH_SUFFIX=_avx2 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx2 -msse4.2 -DFC_ARCH_SUFFIX=_avx2 -c -o $@ $<
 
 # AVX-512
 $(LIBDIR)/%_avx512.o: $(SRCDIR)/%.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx512f -mavx2 -msse4.2 -DFC_ARCH_SUFFIX=_avx512 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx512f -mavx2 -msse4.2 -DFC_ARCH_SUFFIX=_avx512 -c -o $@ $<
 
 #---------------------------------------------------------------------------
 # Dispatch wrapper (no arch flags, no FC_ARCH_SUFFIX)
 #---------------------------------------------------------------------------
 $(DISPATCH_OBJ): $(SRCDIR)/fc_dispatch.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
 
 #---------------------------------------------------------------------------
 # Library targets
@@ -118,7 +120,7 @@ $(LIB_SHARED): $(OBJS)
 	$(CC) -shared -Wl,-soname,$(LIB_SONAME) -o $@ $^
 
 clean:
-	rm -f $(OBJS) $(LIB_STATIC) $(LIB_SHARED) *~ core core.*
+	rm -f $(OBJS) $(DEPS) $(LIB_STATIC) $(LIB_SHARED) *~ core core.*
 	rm -rf lib_ndebug
 
 install: $(LIB_STATIC) $(LIB_SHARED)
@@ -126,3 +128,5 @@ install: $(LIB_STATIC) $(LIB_SHARED)
 	install -m 644 $(LIB_STATIC) $(PREFIX)/lib/
 	install -m 755 $(LIB_SHARED) $(PREFIX)/lib/
 	install -m 644 $(PUB_HDRS) $(PREFIX)/include/fcache/
+
+-include $(DEPS)

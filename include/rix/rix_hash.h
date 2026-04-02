@@ -49,6 +49,7 @@
  *
  * Staged find - x1:
  *   RIX_HASH_HASH_KEY    (name, ctx, head, buckets, key) key: const key_type *
+ *   RIX_HASH_HASH_KEY_MASKED(name, ctx, head, buckets, key, hash_mask, bk_mask)
  *   RIX_HASH_SCAN_BK     (name, ctx, head, buckets)
  *   RIX_HASH_PREFETCH_NODE(name, ctx, base)
  *   RIX_HASH_CMP_KEY     (name, ctx, base)
@@ -66,6 +67,8 @@
  *
  * Staged find - xN  (arbitrary n; FORCE_INLINE + constant n -> unrolled):
  *   RIX_HASH_HASH_KEY_N  (name, ctx, n, head, buckets, keys)
+ *   RIX_HASH_HASH_KEY_N_MASKED(name, ctx, n, head, buckets, keys,
+ *                              hash_mask, bk_mask)
  *   RIX_HASH_SCAN_BK_N   (name, ctx, n, head, buckets)
  *   RIX_HASH_PREFETCH_NODE_N(name, ctx, n, base)
  *   RIX_HASH_CMP_KEY_N   (name, ctx, n, base, results)
@@ -93,6 +96,10 @@
 /* ---- staged find - x1 --------------------------------------------------- */
 #  define RIX_HASH_HASH_KEY(name, ctx, head, buckets, key)                     \
     name##_hash_key(ctx, head, buckets, key)
+
+#  define RIX_HASH_HASH_KEY_MASKED(name, ctx, head, buckets, key,             \
+                                   hash_mask, bk_mask)                        \
+    name##_hash_key_masked(ctx, head, buckets, key, hash_mask, bk_mask)
 
 #  define RIX_HASH_SCAN_BK(name, ctx, head, buckets)                           \
     name##_scan_bk(ctx, head, buckets)
@@ -132,6 +139,10 @@
 /* ---- staged find - xN (arbitrary n) ------------------------------------- */
 #  define RIX_HASH_HASH_KEY_N(name, ctx, n, head, buckets, keys)               \
     name##_hash_key_n(ctx, n, head, buckets, keys)
+
+#  define RIX_HASH_HASH_KEY_N_MASKED(name, ctx, n, head, buckets, keys,       \
+                                     hash_mask, bk_mask)                      \
+    name##_hash_key_n_masked(ctx, n, head, buckets, keys, hash_mask, bk_mask)
 
 #  define RIX_HASH_SCAN_BK_N(name, ctx, n, head, buckets)                      \
     name##_scan_bk_n(ctx, n, head, buckets)

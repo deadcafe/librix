@@ -4,7 +4,7 @@
 # samples/Makefile - Top-level delegating Makefile
 #
 # Targets:
-#   all    - build library, run fcache tests, and run bench-short (default)
+#   all    - build library, run fcache tests, and run bench-light (default)
 #   static - build libfcache.a only
 #   shared - build libfcache.so only
 #   test   - build and run functional tests
@@ -21,12 +21,15 @@
 
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
 BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
+BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
+BENCH_FT_FULL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 
 build: static shared
 	$(MAKE) -C ftable static
 
 all:
 	$(MAKE) -C fcache all
+	$(MAKE) -C ftable/test all
 
 static:
 	$(MAKE) -C fcache static
@@ -47,7 +50,7 @@ ftable-test:
 	$(MAKE) -C ftable/test test
 
 ftable-bench:
-	$(MAKE) -C ftable/test bench
+	$(MAKE) -C ftable/test bench-light BENCH_FT_OPTS="$(BENCH_FT_OPTS)"
 
 ftable-clean:
 	$(MAKE) -C ftable clean
@@ -56,10 +59,12 @@ ftable-clean:
 bench:
 	$(MAKE) -C fcache/test bench-short BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
 	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
+	$(MAKE) -C ftable/test bench-light BENCH_FT_OPTS="$(BENCH_FT_OPTS)"
 
 bench-full:
 	$(MAKE) -C fcache/test bench-full BENCH_EXTRA_CFLAGS="$(BENCH_EXTRA_CFLAGS)" \
 	    BENCH_FC_OPTS="$(BENCH_FC_OPTS)"
+	$(MAKE) -C ftable/test bench-full BENCH_FT_FULL_OPTS="$(BENCH_FT_FULL_OPTS)"
 
 clean:
 	$(MAKE) -C fcache clean

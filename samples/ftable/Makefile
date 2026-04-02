@@ -31,6 +31,7 @@ CFLAGS_BASE  = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
                -I$(CURDIR)/include -I$(CURDIR)/src \
                -fPIC $(EXTRA_CFLAGS)
+DEPFLAGS     = -MMD -MP
 
 LIBDIR      ?= lib
 SRCDIR       = src
@@ -57,6 +58,7 @@ OBJS         = $(LIBDIR)/flow4_gen.o \
                $(LIBDIR)/flowu_avx512.o \
                $(LIBDIR)/ft_dispatch.o
 LIB_STATIC   = $(LIBDIR)/libftable.a
+DEPS         = $(OBJS:.o=.d)
 
 .PHONY: all static clean
 
@@ -68,49 +70,51 @@ $(LIBDIR):
 
 # flow4
 $(LIBDIR)/flow4_gen.o: $(SRCDIR)/flow4.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
 
 $(LIBDIR)/flow4_sse.o: $(SRCDIR)/flow4.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
 
 $(LIBDIR)/flow4_avx2.o: $(SRCDIR)/flow4.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
 
 $(LIBDIR)/flow4_avx512.o: $(SRCDIR)/flow4.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
 
 # flow6
 $(LIBDIR)/flow6_gen.o: $(SRCDIR)/flow6.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
 
 $(LIBDIR)/flow6_sse.o: $(SRCDIR)/flow6.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
 
 $(LIBDIR)/flow6_avx2.o: $(SRCDIR)/flow6.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
 
 $(LIBDIR)/flow6_avx512.o: $(SRCDIR)/flow6.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
 
 # flowu
 $(LIBDIR)/flowu_gen.o: $(SRCDIR)/flowu.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
 
 $(LIBDIR)/flowu_sse.o: $(SRCDIR)/flowu.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
 
 $(LIBDIR)/flowu_avx2.o: $(SRCDIR)/flowu.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
 
 $(LIBDIR)/flowu_avx512.o: $(SRCDIR)/flowu.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
 
 # dispatch
 $(LIBDIR)/ft_dispatch.o: $(DISPATCH_SRC) | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) -c -o $@ $<
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
 
 $(LIB_STATIC): $(OBJS)
 	$(AR) rcs $@ $^
 
 clean:
-	rm -f $(OBJS) $(LIB_STATIC) *~ core core.*
+	rm -f $(OBJS) $(DEPS) $(LIB_STATIC) *~ core core.*
+
+-include $(DEPS)

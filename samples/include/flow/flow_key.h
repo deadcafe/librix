@@ -31,7 +31,7 @@ struct flow4_key {
     uint32_t zero;
 };
 
-struct flow4_entry_hdr {
+struct flow4_entry {
     struct flow4_key key;
     struct flow_hashtbl_elm htbl_elm;
 };
@@ -47,7 +47,7 @@ struct flow6_key {
     uint8_t dst_ip[16];
 } __attribute__((packed));
 
-struct flow6_entry_hdr {
+struct flow6_entry {
     struct flow6_key key;
     struct flow_hashtbl_elm htbl_elm;
 };
@@ -72,7 +72,7 @@ struct flowu_key {
     } addr;
 } __attribute__((packed));
 
-struct flowu_entry_hdr {
+struct flowu_entry {
     struct flowu_key key;
     struct flow_hashtbl_elm htbl_elm;
 };

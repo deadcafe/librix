@@ -17,24 +17,24 @@
 struct ft_##prefix##_ops {                                                     \
     uint32_t (*find)(struct ft_##prefix##_table *ft,                           \
                      const struct prefix##_key *key);                          \
-    uint32_t (*add_entry)(struct ft_##prefix##_table *ft,                      \
-                          uint32_t entry_idx);                                 \
-    uint32_t (*del)(struct ft_##prefix##_table *ft,                            \
-                    const struct prefix##_key *key);                           \
-    uint32_t (*del_idx)(struct ft_##prefix##_table *ft,                        \
-                        uint32_t entry_idx);                                   \
     void (*find_bulk)(struct ft_##prefix##_table *ft,                          \
                       const struct prefix##_key *keys,                         \
                       unsigned nb_keys,                                        \
-                      struct ft_##prefix##_result *results);                   \
-    void (*add_entry_bulk)(struct ft_##prefix##_table *ft,                     \
-                           const uint32_t *entry_idxv,                         \
-                           unsigned nb_keys,                                   \
-                           struct ft_##prefix##_result *results);              \
-    void (*del_bulk)(struct ft_##prefix##_table *ft,                           \
-                     const struct prefix##_key *keys,                          \
-                     unsigned nb_keys,                                         \
-                     struct ft_##prefix##_result *results);                    \
+                      struct ft_table_result *results);                   \
+    uint32_t (*add_entry_idx)(struct ft_##prefix##_table *ft,                  \
+                              uint32_t entry_idx);                             \
+    void (*add_entry_idx_bulk)(struct ft_##prefix##_table *ft,                 \
+                               const uint32_t *entry_idxv,                     \
+                               unsigned nb_keys,                               \
+                               struct ft_table_result *results);          \
+    uint32_t (*del_key)(struct ft_##prefix##_table *ft,                        \
+                        const struct prefix##_key *key);                       \
+    uint32_t (*del_entry_idx)(struct ft_##prefix##_table *ft,                  \
+                              uint32_t entry_idx);                             \
+    void (*del_key_bulk)(struct ft_##prefix##_table *ft,                       \
+                         const struct prefix##_key *keys,                      \
+                         unsigned nb_keys,                                     \
+                         struct ft_table_result *results);                \
 }
 
 FT_OPS_DEFINE(flow4);

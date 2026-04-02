@@ -115,7 +115,7 @@ struct fc_flow4_result {
  * Managed internally; callers access entries through pool + entry_idx.
  */
 struct fc_flow4_entry {
-    struct flow4_entry_hdr hdr;        /**< Shared hash-table entry header. */
+    struct flow4_entry hdr;        /**< Shared hash-table entry. */
     uint64_t               last_ts;      /**< Last-access TSC; 0 = free. */
     RIX_SLIST_ENTRY(struct fc_flow4_entry) free_link;
 } __attribute__((aligned(8)));

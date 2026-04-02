@@ -45,7 +45,7 @@ struct fc_flow6_result {
 };
 
 struct fc_flow6_entry {
-    struct flow6_entry_hdr hdr;
+    struct flow6_entry hdr;
     uint64_t last_ts;            /* 0 = free / invalid */
     RIX_SLIST_ENTRY(struct fc_flow6_entry) free_link;
 } __attribute__((packed, aligned(FC_CACHE_LINE_SIZE)));

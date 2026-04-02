@@ -6,6 +6,7 @@ CURDIR:=$(PWD)
 
 CFLAGS  = -std=gnu11 -g -O3 -Werror -Wextra -Wall -Wvla -Wstrict-aliasing -pedantic -pipe
 CPPFLAGS = -c -I$(CURDIR) -I../../include -D_GNU_SOURCE
+DEPFLAGS = -MMD -MP
 LIBS =
 
 #CFLAGS += -funroll-loops -frerun-loop-opt
@@ -16,17 +17,17 @@ SRCS    =       \
 	test_rix_slist.c
 
 OBJS = ${SRCS:.c=.o}
-DEPENDS = .depend
+DEPS = ${OBJS:.o=.d}
 TARGET = slist_test
 
 .SUFFIXES:	.o .c
-.PHONY:	all clean depend test
-all:	depend $(TARGET)
+.PHONY:	all clean test
+all:	$(TARGET)
 test:
 	./$(TARGET)
 
 .c.o:
-	$(CC) $(CFLAGS) $(CPPFLAGS) $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ $<
 
 $(TARGET):	$(OBJS)
 	$(CC) -o $@ $^ $(LIBS) $(LDFLAGS)
@@ -34,9 +35,6 @@ $(TARGET):	$(OBJS)
 $(OBJS):	Makefile
 
 clean:
-	rm -f $(OBJS) $(TARGET) $(DEPENDS) *~ core core.*
+	rm -f $(OBJS) $(DEPS) $(TARGET) *~ core core.*
 
-depend:	$(SRCS) Makefile
-	-@ $(CC) $(CPPFLAGS) -MM -MG $(SRCS) > $(DEPENDS)
-
--include $(DEPENDS)
+-include $(DEPS)

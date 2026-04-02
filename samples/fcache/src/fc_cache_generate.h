@@ -749,13 +749,29 @@ do {                                                                        \
     unsigned _bk1i =                                                        \
         (unsigned)((ctx_ptr)->bk[1] - (fc)->buckets);                       \
     _FCG_ENTRY_T(p) *_entry;                                                \
-    _entry = _FCG_HT(p, cmp_key_empties)((ctx_ptr),                         \
-                                          FCG_LAYOUT_HASH_BASE(fc));         \
-    if (RIX_LIKELY(_entry != NULL)) {                                        \
+    uint32_t _hit_idx;                                                      \
+    _hit_idx = _FCG_HT(p, cmp_key_empties)((ctx_ptr),                       \
+                                           FCG_LAYOUT_HASH_BASE(fc), 0u);    \
+    if (RIX_LIKELY(_hit_idx != (uint32_t)RIX_NIL)) {                        \
         /* --- HIT --- */                                                    \
+        _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
+        RIX_ASSUME_NONNULL(_entry);                                          \
         _entry->last_ts = (now);                                             \
         _FCG_INT(p, result_set_hit)(&(results)[(idx)],                       \
-            FCG_LAYOUT_ENTRY_INDEX((fc), _entry));                           \
+            _hit_idx);                                                       \
+        (hit_counter)++;                                                     \
+        break;                                                               \
+    }                                                                        \
+    _FCG_HT(p, scan_bk_empties)((ctx_ptr), 1u);                              \
+    _hit_idx = _FCG_HT(p, cmp_key_empties)((ctx_ptr),                        \
+                                           FCG_LAYOUT_HASH_BASE(fc), 1u);    \
+    if (RIX_LIKELY(_hit_idx != (uint32_t)RIX_NIL)) {                        \
+        /* --- HIT in bk1 --- */                                             \
+        _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
+        RIX_ASSUME_NONNULL(_entry);                                          \
+        _entry->last_ts = (now);                                             \
+        _FCG_INT(p, result_set_hit)(&(results)[(idx)],                       \
+            _hit_idx);                                                       \
         (hit_counter)++;                                                     \
         break;                                                               \
     }                                                                        \
@@ -977,7 +993,7 @@ do {                                                                        \
             for (unsigned _j = 0; _j < _n; _j++)                             \
                 _FCG_HT(p, scan_bk_empties)(                                 \
                     &_ctx[(_base + _j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],    \
-                    &(fc)->ht_head, (fc)->buckets);                           \
+                    0u);                                                     \
         }                                                                    \
         if (_i >= 2u * _ahead_keys &&                                        \
             _i - 2u * _ahead_keys < (nb_keys)) {                             \
@@ -1156,7 +1172,7 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
             for (unsigned j = 0; j < n; j++)                               \
                 _FCG_HT(p, scan_bk_empties)(                               \
                     &ctx[(base + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],     \
-                    &fc->ht_head, fc->buckets);                            \
+                    0u);                                                    \
         }                                                                  \
         /* Stage 3: prefetch_node */                                       \
         if (i >= 2u * ahead_keys &&                                        \

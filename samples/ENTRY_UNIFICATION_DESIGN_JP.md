@@ -699,7 +699,7 @@ struct flow_record {
 実装上、必ずしも上記の struct 分割そのものを採用する必要はない。
 重要なのは、共通部と個別部の責務境界を固定することである。
 
-`fcache` における `struct fc_flow4_entry` は、`flow4_entry_hdr` を含む entry metadata を包む intrusively embedded な部分で、`user_record` がその外側に body を足す構造だった。今後の共通化では `flowX_entry` 自体を metadata の代表とし、`user_record` はその entry に任意の body（cookie/timestamp/callback data）を重ねた構造体と見ると分かりやすい。つまり `fc_flow4_entry` をそのまま保持するのではなく、metadata は `flowX_entry` に、body は `user_record` に移して `flowX_entry` を共通化の中心に据える方向へ移行する。
+`fcache` における `struct fc_flow4_entry` は、`flow4_entry` を含む entry metadata を包む intrusively embedded な部分で、`user_record` がその外側に body を足す構造だった。今後の共通化では `flowX_entry` 自体を metadata の代表とし、`user_record` はその entry に任意の body（cookie/timestamp/callback data）を重ねた構造体と見ると分かりやすい。つまり `fc_flow4_entry` をそのまま保持するのではなく、metadata は `flowX_entry` に、body は `user_record` に移して `flowX_entry` を共通化の中心に据える方向へ移行する。
 
 ## 15. 検討すべき論点
 

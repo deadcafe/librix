@@ -69,7 +69,7 @@ struct fc_flowu_result {
 };
 
 struct fc_flowu_entry {
-    struct flowu_entry_hdr hdr;
+    struct flowu_entry hdr;
     uint64_t last_ts;            /* 0 = free / invalid */
     RIX_SLIST_ENTRY(struct fc_flowu_entry) free_link;
 } __attribute__((packed, aligned(FC_CACHE_LINE_SIZE)));

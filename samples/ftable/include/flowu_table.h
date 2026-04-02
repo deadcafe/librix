@@ -16,67 +16,18 @@
 
 #include "ft_table_common.h"
 #include <flow/flow_key.h>
+#include <flow/flow_core.h>
 
 #define FT_FLOWU_DEFAULT_GROW_FILL_PCT 60u
 #define FT_FLOWU_DEFAULT_MIN_NB_BK    16384u
 #define FT_FLOWU_DEFAULT_MAX_NB_BK    1048576u
-#define FT_FLOWU_ENTRY_FLAG_ACTIVE     0x0001u
-
-struct ft_flowu_entry {
-    union {
-        struct flowu_entry_hdr hdr;
-        struct {
-            struct flowu_key key;
-            union {
-                struct flow_hashtbl_elm htbl_elm;
-                struct {
-                    uint32_t cur_hash;
-                    uint16_t slot;
-                    uint16_t reserved1;
-                };
-            };
-        };
-    };
-    uint32_t hash0;
-    uint32_t hash1;
-    uint16_t flags;
-    uint8_t  reserved0[2];
-} __attribute__((packed, aligned(FT_TABLE_CACHE_LINE_SIZE)));
-
-RIX_STATIC_ASSERT(sizeof(struct ft_flowu_entry) == FT_TABLE_CACHE_LINE_SIZE,
-                  "ft_flowu_entry must be 64 bytes");
 
 RIX_HASH_HEAD(ft_flowu_ht);
 
-struct ft_flowu_result {
-    uint32_t entry_idx;
-};
-
-struct ft_flowu_config {
-    unsigned start_nb_bk;
-    unsigned max_nb_bk;
-    unsigned grow_fill_pct;
-    struct ft_bucket_allocator bucket_alloc;
-};
-
-struct ft_flowu_stats {
-    uint64_t lookups;
-    uint64_t hits;
-    uint64_t misses;
-    uint64_t adds;
-    uint64_t add_existing;
-    uint64_t add_failed;
-    uint64_t dels;
-    uint64_t del_miss;
-    uint64_t grow_marks;
-    uint64_t grow_execs;
-    uint64_t grow_failures;
-    uint64_t reserve_calls;
-};
 
 struct ft_flowu_table {
     struct rix_hash_bucket_s   *buckets;
-    struct ft_flowu_entry      *pool;
+    struct flowu_entry         *pool;
     unsigned char              *pool_base;
     size_t                      pool_stride;
     size_t                      pool_entry_offset;
@@ -86,9 +37,10 @@ struct ft_flowu_table {
     unsigned                    nb_bk;
     unsigned                    max_nb_bk;
     unsigned                    max_entries;
+    uint32_t                    free_head;
     unsigned                    grow_fill_pct;
     unsigned                    need_grow;
-    struct ft_flowu_stats       stats;
+    struct ft_table_stats       stats;
 };
 
 /*===========================================================================
@@ -100,12 +52,12 @@ int ft_flowu_table_init_ex(struct ft_flowu_table *ft,
                            unsigned max_entries,
                            size_t stride,
                            size_t entry_offset,
-                           const struct ft_flowu_config *cfg);
+                           const struct ft_table_config *cfg);
 
 int ft_flowu_table_init(struct ft_flowu_table *ft,
-                        struct ft_flowu_entry *pool,
+                        struct flowu_entry *pool,
                         unsigned max_entries,
-                        const struct ft_flowu_config *cfg);
+                        const struct ft_table_config *cfg);
 
 void ft_flowu_table_destroy(struct ft_flowu_table *ft);
 void ft_flowu_table_flush(struct ft_flowu_table *ft);
@@ -113,7 +65,7 @@ unsigned ft_flowu_table_nb_entries(const struct ft_flowu_table *ft);
 unsigned ft_flowu_table_nb_bk(const struct ft_flowu_table *ft);
 unsigned ft_flowu_table_need_grow(const struct ft_flowu_table *ft);
 void ft_flowu_table_stats(const struct ft_flowu_table *ft,
-                          struct ft_flowu_stats *out);
+                          struct ft_table_stats *out);
 
 /*===========================================================================
  * Single-key operations
@@ -122,33 +74,29 @@ void ft_flowu_table_stats(const struct ft_flowu_table *ft,
 uint32_t ft_flowu_table_find(struct ft_flowu_table *ft,
                              const struct flowu_key *key);
 
-uint32_t ft_flowu_table_add_entry(struct ft_flowu_table *ft,
-                                  uint32_t entry_idx);
-
-uint32_t ft_flowu_table_del(struct ft_flowu_table *ft,
-                            const struct flowu_key *key);
-
-uint32_t ft_flowu_table_del_idx(struct ft_flowu_table *ft,
-                                uint32_t entry_idx);
-
-/*===========================================================================
- * Bulk operations
- *===========================================================================*/
-
 void ft_flowu_table_find_bulk(struct ft_flowu_table *ft,
                               const struct flowu_key *keys,
                               unsigned nb_keys,
-                              struct ft_flowu_result *results);
+                              struct ft_table_result *results);
 
-void ft_flowu_table_add_entry_bulk(struct ft_flowu_table *ft,
-                                   const uint32_t *entry_idxv,
-                                   unsigned nb_keys,
-                                   struct ft_flowu_result *results);
+uint32_t ft_flowu_table_add_entry_idx(struct ft_flowu_table *ft,
+                                      uint32_t entry_idx);
 
-void ft_flowu_table_del_bulk(struct ft_flowu_table *ft,
-                             const struct flowu_key *keys,
-                             unsigned nb_keys,
-                             struct ft_flowu_result *results);
+void ft_flowu_table_add_entry_idx_bulk(struct ft_flowu_table *ft,
+                                       const uint32_t *entry_idxv,
+                                       unsigned nb_keys,
+                                       struct ft_table_result *results);
+
+uint32_t ft_flowu_table_del_key(struct ft_flowu_table *ft,
+                                const struct flowu_key *key);
+
+uint32_t ft_flowu_table_del_entry_idx(struct ft_flowu_table *ft,
+                                      uint32_t entry_idx);
+
+void ft_flowu_table_del_key_bulk(struct ft_flowu_table *ft,
+                                 const struct flowu_key *keys,
+                                 unsigned nb_keys,
+                                 struct ft_table_result *results);
 
 /*===========================================================================
  * Walk / grow
@@ -186,23 +134,33 @@ ft_flowu_table_record_cptr(const struct ft_flowu_table *ft, uint32_t entry_idx)
     return FT_RECORD_CPTR(ft->pool_base, ft->pool_stride, entry_idx);
 }
 
-static inline struct ft_flowu_entry *
+static inline struct flowu_entry *
 ft_flowu_table_entry_ptr(struct ft_flowu_table *ft, uint32_t entry_idx)
 {
     if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
         return NULL;
     return FT_RECORD_MEMBER_PTR(ft->pool_base, ft->pool_stride, entry_idx,
-                                ft->pool_entry_offset, struct ft_flowu_entry);
+                                ft->pool_entry_offset, struct flowu_entry);
 }
 
-static inline const struct ft_flowu_entry *
+static inline const struct flowu_entry *
 ft_flowu_table_entry_cptr(const struct ft_flowu_table *ft, uint32_t entry_idx)
 {
     if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
         return NULL;
     return FT_RECORD_MEMBER_CPTR(ft->pool_base, ft->pool_stride, entry_idx,
                                  ft->pool_entry_offset,
-                                 struct ft_flowu_entry);
+                                 struct flowu_entry);
+}
+
+static inline uint32_t
+ft_flowu_table_entry_idx(const struct ft_flowu_table *ft,
+                         const struct flowu_entry *entry)
+{
+    if (ft == NULL || entry == NULL)
+        return 0u;
+    return ft_record_index_from_member_ptr(ft->pool_base, ft->pool_stride,
+                                           ft->pool_entry_offset, entry);
 }
 
 static inline size_t
@@ -228,5 +186,99 @@ ft_flowu_table_entry_offset(const struct ft_flowu_table *ft)
 
 #define FT_FLOWU_TABLE_ENTRY_FROM_RECORD(record_ptr, member) \
     FT_MEMBER_PTR((record_ptr), member)
+
+static inline uint32_t
+ft_flowu_table_add_entry_ptr(struct ft_flowu_table *ft,
+                             const struct flowu_entry *entry)
+{
+    return ft_flowu_table_add_entry_idx(ft,
+                                        ft_flowu_table_entry_idx(ft, entry));
+}
+
+static inline void
+ft_flowu_table_add_entry_ptr_bulk(struct ft_flowu_table *ft,
+                                  const struct flowu_entry *const *entryv,
+                                  unsigned nb_keys,
+                                  struct ft_table_result *results)
+{
+    if (results == NULL)
+        return;
+    for (unsigned i = 0; i < nb_keys; i++) {
+        const struct flowu_entry *entry = (entryv != NULL) ? entryv[i] : NULL;
+        results[i].entry_idx = ft_flowu_table_add_entry_ptr(ft, entry);
+    }
+}
+
+static inline uint32_t
+ft_flowu_table_del_entry_ptr(struct ft_flowu_table *ft,
+                             const struct flowu_entry *entry)
+{
+    return ft_flowu_table_del_entry_idx(ft,
+                                        ft_flowu_table_entry_idx(ft, entry));
+}
+
+static inline void
+ft_flowu_table_del_entry_idx_bulk(struct ft_flowu_table *ft,
+                                  const uint32_t *entry_idxv,
+                                  unsigned nb_keys,
+                                  struct ft_table_result *results)
+{
+    if (results == NULL)
+        return;
+    for (unsigned i = 0; i < nb_keys; i++) {
+        uint32_t entry_idx = (entry_idxv != NULL) ? entry_idxv[i] : 0u;
+        results[i].entry_idx = ft_flowu_table_del_entry_idx(ft, entry_idx);
+    }
+}
+
+static inline void
+ft_flowu_table_del_entry_ptr_bulk(struct ft_flowu_table *ft,
+                                  const struct flowu_entry *const *entryv,
+                                  unsigned nb_keys,
+                                  struct ft_table_result *results)
+{
+    if (results == NULL)
+        return;
+    for (unsigned i = 0; i < nb_keys; i++) {
+        const struct flowu_entry *entry = (entryv != NULL) ? entryv[i] : NULL;
+        results[i].entry_idx = ft_flowu_table_del_entry_ptr(ft, entry);
+    }
+}
+
+static inline uint32_t
+ft_flowu_table_add_entry(struct ft_flowu_table *ft, uint32_t entry_idx)
+{
+    return ft_flowu_table_add_entry_idx(ft, entry_idx);
+}
+
+static inline void
+ft_flowu_table_add_entry_bulk(struct ft_flowu_table *ft,
+                              const uint32_t *entry_idxv,
+                              unsigned nb_keys,
+                              struct ft_table_result *results)
+{
+    ft_flowu_table_add_entry_idx_bulk(ft, entry_idxv, nb_keys, results);
+}
+
+static inline uint32_t
+ft_flowu_table_del(struct ft_flowu_table *ft, const struct flowu_key *key)
+{
+    return ft_flowu_table_del_key(ft, key);
+}
+
+static inline uint32_t
+ft_flowu_table_del_idx(struct ft_flowu_table *ft, uint32_t entry_idx)
+{
+    return ft_flowu_table_del_entry_idx(ft, entry_idx);
+}
+
+static inline void
+ft_flowu_table_del_bulk(struct ft_flowu_table *ft,
+                        const struct flowu_key *keys,
+                        unsigned nb_keys,
+                        struct ft_table_result *results)
+{
+    ft_flowu_table_del_key_bulk(ft, keys, nb_keys, results);
+}
 
 #endif /* _FLOWU_TABLE_H_ */

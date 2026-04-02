@@ -151,6 +151,36 @@ struct ft_bucket_allocator {
     void              *arg;
 };
 
+/*===========================================================================
+ * Protocol-independent types (shared by all flow variants)
+ *===========================================================================*/
+
+struct ft_table_result {
+    uint32_t entry_idx;
+};
+
+struct ft_table_config {
+    unsigned start_nb_bk;
+    unsigned max_nb_bk;
+    unsigned grow_fill_pct;
+    struct ft_bucket_allocator bucket_alloc;
+};
+
+struct ft_table_stats {
+    uint64_t lookups;
+    uint64_t hits;
+    uint64_t misses;
+    uint64_t adds;
+    uint64_t add_existing;
+    uint64_t add_failed;
+    uint64_t dels;
+    uint64_t del_miss;
+    uint64_t grow_marks;
+    uint64_t grow_execs;
+    uint64_t grow_failures;
+    uint64_t reserve_calls;
+};
+
 /**
  * @brief One-time CPU detection and SIMD dispatch selection.
  *

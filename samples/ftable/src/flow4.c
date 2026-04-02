@@ -14,18 +14,18 @@
 #define ft_flow4_hash_fn flow4_key_hash
 #define ft_flow4_cmp     flow4_key_cmp
 
-static inline struct ft_flow4_entry *
+static inline struct flow4_entry *
 ft_flow4_layout_entry_ptr_(const struct ft_flow4_table *ft, unsigned idx)
 {
     if (idx == RIX_NIL)
         return NULL;
     return FT_RECORD_MEMBER_PTR(ft->pool_base, ft->pool_stride, idx,
-                                ft->pool_entry_offset, struct ft_flow4_entry);
+                                ft->pool_entry_offset, struct flow4_entry);
 }
 
 static inline unsigned
 ft_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
-                           const struct ft_flow4_entry *entry)
+                           const struct flow4_entry *entry)
 {
     if (entry == NULL)
         return RIX_NIL;
@@ -34,22 +34,22 @@ ft_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
 }
 
 /*===========================================================================
- * FCORE layer: flow4_entry_hdr slot + FCORE_GENERATE
+ * FCORE layer: flow4_entry slot + FCORE_GENERATE
  *===========================================================================*/
 
-static inline struct flow4_entry_hdr *
+static inline struct flow4_entry *
 fcore_flow4_layout_entry_ptr_(const struct ft_flow4_table *ft, unsigned idx)
 {
-    return (struct flow4_entry_hdr *)(void *)
+    return (struct flow4_entry *)(void *)
         ft_flow4_layout_entry_ptr_(ft, idx);
 }
 
 static inline unsigned
 fcore_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
-                              const struct flow4_entry_hdr *hdr)
+                              const struct flow4_entry *hdr)
 {
     return ft_flow4_layout_entry_idx_(
-        ft, (const struct ft_flow4_entry *)(const void *)hdr);
+        ft, hdr);
 }
 
 RIX_HASH_HEAD(fcore_flow4_ht);
@@ -71,7 +71,7 @@ name##_hptr(struct type *base, unsigned i)                                    \
     return fcore_flow4_layout_entry_ptr_(ft, i);                              \
 }
 
-RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry_hdr,
+RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
     key, htbl_elm.cur_hash, htbl_elm.slot, ft_flow4_cmp, ft_flow4_hash_fn)
 
 #define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
@@ -82,7 +82,7 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry_hdr,
 
 #undef FCORE_LAYOUT_HASH_BASE
 #define FCORE_LAYOUT_HASH_BASE(owner) \
-    ((struct flow4_entry_hdr *)(void *)(owner))
+    ((struct flow4_entry *)(void *)(owner))
 
 /*
  * FCORE_ON_REMOVE: clear cur_hash so the entry is no longer "active".
@@ -91,6 +91,37 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry_hdr,
 #undef FCORE_ON_REMOVE
 #define FCORE_ON_REMOVE(owner, entry, idx) \
     do { (entry)->htbl_elm.cur_hash = 0u; } while (0)
+
+#undef FCORE_ON_INSERT
+#define FCORE_ON_INSERT(owner, entry, idx)                                    \
+    do {                                                                       \
+        (void)(entry);                                                         \
+        (void)(idx);                                                           \
+        if ((owner)->need_grow == 0u &&                                        \
+            (owner)->nb_bk < (owner)->max_nb_bk &&                             \
+            _FCORE_INT(flow4, fill_pct_)(owner) >= (owner)->grow_fill_pct) {   \
+            (owner)->need_grow = 1u;                                           \
+            (owner)->stats.grow_marks++;                                       \
+        }                                                                      \
+    } while (0)
+
+#undef FCORE_ON_ADD_FAIL
+#define FCORE_ON_ADD_FAIL(owner, entry, idx)                                  \
+    do {                                                                       \
+        (void)(entry);                                                         \
+        (void)(idx);                                                           \
+        if ((owner)->nb_bk < (owner)->max_nb_bk && (owner)->need_grow == 0u) {\
+            (owner)->need_grow = 1u;                                           \
+            (owner)->stats.grow_marks++;                                       \
+        }                                                                      \
+    } while (0)
+
+/*
+ * ftable uses start_mask (not ht_head.rhh_mask) so that entries hashed
+ * before grow_2x keep their original bucket mapping.
+ */
+#undef FCORE_HASH_MASK
+#define FCORE_HASH_MASK(owner, ht) ((owner)->start_mask)
 
 /*
  * fcore_flow4_ht and ft_flow4_ht are layout-compatible RIX_HASH_HEAD types
@@ -103,14 +134,18 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
                ft_flow4_hash_fn, ft_flow4_cmp)
 #pragma GCC diagnostic pop
 
+#undef FCORE_HASH_MASK
+
 /* Clean up FCORE hooks before FT_TABLE_GENERATE */
 #undef FCORE_LAYOUT_ENTRY_PTR
 #undef FCORE_LAYOUT_ENTRY_INDEX
 #undef FCORE_LAYOUT_HASH_BASE
+#undef FCORE_ON_INSERT
+#undef FCORE_ON_ADD_FAIL
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 
 /*===========================================================================
- * FT_TABLE layer: ft_flow4_entry slot + FT_TABLE_GENERATE
+ * FT_TABLE layer: flow4_entry slot + FT_TABLE_GENERATE
  *===========================================================================*/
 
 #define FTG_LAYOUT_INIT_STORAGE(ft, array, stride, entry_offset)               \
@@ -120,11 +155,11 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
         (ft)->pool_entry_offset = (entry_offset);                              \
         (ft)->pool = FT_RECORD_MEMBER_PTR((ft)->pool_base, (ft)->pool_stride, \
                                           1u, (ft)->pool_entry_offset,         \
-                                          struct ft_flow4_entry);              \
+                                          struct flow4_entry);                 \
     } while (0)
 
 #define FTG_LAYOUT_HASH_BASE(ft)                                               \
-    ((struct ft_flow4_entry *)(void *)(ft))
+    ((struct flow4_entry *)(void *)(ft))
 
 #define FTG_LAYOUT_ENTRY_PTR(ft, idx) ft_flow4_layout_entry_ptr_((ft), (idx))
 #define FTG_LAYOUT_ENTRY_INDEX(ft, entry)                                      \
@@ -132,6 +167,9 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
 
 #define FTG_LAYOUT_ENTRY_AT(ft, off0)                                          \
     ft_flow4_layout_entry_ptr_((ft), (unsigned)(off0) + 1u)
+
+#define FTG_ENTRY_TYPE(p) struct flow4_entry
+#define FTG_ENTRY_META_CLEAR_TAIL(entry) ((void)(entry))
 
 #define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
@@ -149,8 +187,9 @@ name##_hptr(struct type *base, unsigned i)                                    \
     return ft_flow4_layout_entry_ptr_(ft, i);                                 \
 }
 
-RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow4_ht, ft_flow4_entry, key, cur_hash,
-                                 slot, ft_flow4_cmp, ft_flow4_hash_fn)
+RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow4_ht, flow4_entry, key,
+                                 htbl_elm.cur_hash, htbl_elm.slot,
+                                 ft_flow4_cmp, ft_flow4_hash_fn)
 
 /* Enable FCORE-delegating bulk ops in FT_TABLE_GENERATE */
 #define FTG_USE_FCORE 1
@@ -163,38 +202,38 @@ int _FTG_API(flow4, init_ex)(struct ft_flow4_table *ft,
                              unsigned max_entries,
                              size_t stride,
                              size_t entry_offset,
-                             const struct ft_flow4_config *cfg);
+                             const struct ft_table_config *cfg);
 int _FTG_API(flow4, init)(struct ft_flow4_table *ft,
-                          struct ft_flow4_entry *pool,
+                          struct flow4_entry *pool,
                           unsigned max_entries,
-                          const struct ft_flow4_config *cfg);
+                          const struct ft_table_config *cfg);
 void _FTG_API(flow4, destroy)(struct ft_flow4_table *ft);
 void _FTG_API(flow4, flush)(struct ft_flow4_table *ft);
 unsigned _FTG_API(flow4, nb_entries)(const struct ft_flow4_table *ft);
 unsigned _FTG_API(flow4, nb_bk)(const struct ft_flow4_table *ft);
 unsigned _FTG_API(flow4, need_grow)(const struct ft_flow4_table *ft);
 void _FTG_API(flow4, stats)(const struct ft_flow4_table *ft,
-                            struct ft_flow4_stats *out);
+                            struct ft_table_stats *out);
 uint32_t _FTG_API(flow4, find)(struct ft_flow4_table *ft,
                                const struct flow4_key *key);
-uint32_t _FTG_API(flow4, add_entry)(struct ft_flow4_table *ft,
-                                    uint32_t entry_idx);
-uint32_t _FTG_API(flow4, del)(struct ft_flow4_table *ft,
-                              const struct flow4_key *key);
-uint32_t _FTG_API(flow4, del_idx)(struct ft_flow4_table *ft,
-                                  uint32_t entry_idx);
 void _FTG_API(flow4, find_bulk)(struct ft_flow4_table *ft,
                                 const struct flow4_key *keys,
                                 unsigned nb_keys,
-                                struct ft_flow4_result *results);
-void _FTG_API(flow4, add_entry_bulk)(struct ft_flow4_table *ft,
-                                     const uint32_t *entry_idxv,
-                                     unsigned nb_keys,
-                                     struct ft_flow4_result *results);
-void _FTG_API(flow4, del_bulk)(struct ft_flow4_table *ft,
-                               const struct flow4_key *keys,
-                               unsigned nb_keys,
-                               struct ft_flow4_result *results);
+                                struct ft_table_result *results);
+uint32_t _FTG_API(flow4, add_entry_idx)(struct ft_flow4_table *ft,
+                                        uint32_t entry_idx);
+void _FTG_API(flow4, add_entry_idx_bulk)(struct ft_flow4_table *ft,
+                                         const uint32_t *entry_idxv,
+                                         unsigned nb_keys,
+                                         struct ft_table_result *results);
+uint32_t _FTG_API(flow4, del_key)(struct ft_flow4_table *ft,
+                                  const struct flow4_key *key);
+uint32_t _FTG_API(flow4, del_entry_idx)(struct ft_flow4_table *ft,
+                                        uint32_t entry_idx);
+void _FTG_API(flow4, del_key_bulk)(struct ft_flow4_table *ft,
+                                   const struct flow4_key *keys,
+                                   unsigned nb_keys,
+                                   struct ft_table_result *results);
 int _FTG_API(flow4, walk)(struct ft_flow4_table *ft,
                           int (*cb)(uint32_t entry_idx, void *arg),
                           void *arg);

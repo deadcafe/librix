@@ -43,6 +43,7 @@ BENCH_CFLAGS = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
                -I$(FCDIR)/include \
                $(BENCH_EXTRA_CFLAGS)
+DEPFLAGS     = -MMD -MP
 
 VARIANT     ?= flow4
 
@@ -55,19 +56,20 @@ LIBFC        = $(FCDIR)/lib/libfcache.a
 NDEBUG_LIBDIR ?= lib_ndebug
 NDEBUG_LIBFC   = $(FCDIR)/$(NDEBUG_LIBDIR)/libfcache.a
 NDEBUG_BENCH   = fc_bench_ndebug
+DEPS          = $(TARGET).d $(BENCH).d $(NDEBUG_BENCH).d
 
 .PHONY: all test ndebug-check bench-build bench-build-short bench-short bench bench-full matrix matrix-full clean
 
 all: test bench-short
 
 $(TARGET): $(SRC) $(LIBFC)
-	$(CC) $(CFLAGS) -o $@ $(SRC) $(LIBFC)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(SRC) $(LIBFC)
 
 $(BENCH): $(BENCH_SRC) $(BENCH_HDRS) $(LIBFC)
-	$(CC) $(BENCH_CFLAGS) -o $@ $(BENCH_SRC) $(LIBFC)
+	$(CC) $(BENCH_CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SRC) $(LIBFC)
 
 $(NDEBUG_BENCH): $(BENCH_SRC) $(BENCH_HDRS) $(NDEBUG_LIBFC)
-	$(CC) $(BENCH_CFLAGS) -o $@ $(BENCH_SRC) $(NDEBUG_LIBFC)
+	$(CC) $(BENCH_CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SRC) $(NDEBUG_LIBFC)
 
 $(LIBFC):
 	$(MAKE) -C $(FCDIR) static
@@ -106,4 +108,6 @@ matrix-full: bench-build
 	BENCH_FC_OPTS="$(BENCH_FC_OPTS)" ./run_fc_bench_matrix.sh $(VARIANT) full
 
 clean:
-	rm -f $(TARGET) $(BENCH) $(NDEBUG_BENCH) *.o *~ core core.*
+	rm -f $(TARGET) $(BENCH) $(NDEBUG_BENCH) $(DEPS) *.o *~ core core.*
+
+-include $(DEPS)
