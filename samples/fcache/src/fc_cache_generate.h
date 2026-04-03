@@ -982,9 +982,10 @@ do {                                                                        \
             unsigned _n = (_i + _step_keys <= (nb_keys)) ?                   \
                 _step_keys : ((nb_keys) - _i);                               \
             for (unsigned _j = 0; _j < _n; _j++)                             \
-                _FCG_HT(p, hash_key_2bk)(                                    \
+                _FCG_HT(p, hash_key_2bk_masked)(                             \
                     &_ctx[(_i + _j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],       \
-                    &(fc)->ht_head, (fc)->buckets, &(keys)[_i + _j]);        \
+                    (fc)->buckets, &(keys)[_i + _j],                         \
+                    (fc)->ht_head.rhh_mask, (fc)->ht_head.rhh_mask);         \
         }                                                                    \
         if (_i >= _ahead_keys && _i - _ahead_keys < (nb_keys)) {             \
             unsigned _base = _i - _ahead_keys;                               \
@@ -1074,9 +1075,10 @@ _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *fc,                                \
             unsigned n = (i + step_keys <= nb_keys) ?                      \
                 step_keys : (nb_keys - i);                                 \
             for (unsigned j = 0; j < n; j++)                               \
-                _FCG_HT(p, hash_key_2bk)(                                  \
+                _FCG_HT(p, hash_key_2bk_masked)(                           \
                     &ctx[(i + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],        \
-                    &fc->ht_head, fc->buckets, &keys[i + j]);              \
+                    fc->buckets, &keys[i + j],                             \
+                    fc->ht_head.rhh_mask, fc->ht_head.rhh_mask);           \
         }                                                                  \
         /* Stage 2: scan_bk (no empty tracking needed) */                  \
         if (i >= ahead_keys && i - ahead_keys < nb_keys) {                 \
@@ -1160,9 +1162,10 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
             unsigned n = (i + step_keys <= nb_keys) ?                      \
                 step_keys : (nb_keys - i);                                 \
             for (unsigned j = 0; j < n; j++)                               \
-                _FCG_HT(p, hash_key_2bk)(                                  \
+                _FCG_HT(p, hash_key_2bk_masked)(                           \
                     &ctx[(i + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],        \
-                    &fc->ht_head, fc->buckets, &keys[i + j]);              \
+                    fc->buckets, &keys[i + j],                             \
+                    fc->ht_head.rhh_mask, fc->ht_head.rhh_mask);           \
         }                                                                  \
         /* Stage 2: scan_bk_empties (bk[0] fp + empty scan) */            \
         if (i >= ahead_keys && i - ahead_keys < nb_keys) {                \
@@ -1441,9 +1444,10 @@ _FCG_API(p, del_bulk)(_FCG_CACHE_T(p) *fc,                              \
             unsigned n = (i + step_keys <= nb_keys) ?                      \
                 step_keys : (nb_keys - i);                                 \
             for (unsigned j = 0; j < n; j++)                               \
-                _FCG_HT(p, hash_key_2bk)(                                  \
+                _FCG_HT(p, hash_key_2bk_masked)(                           \
                     &ctx[(i + j) & (FC_CACHE_BULK_CTX_COUNT - 1u)],        \
-                    &fc->ht_head, fc->buckets, &keys[i + j]);              \
+                    fc->buckets, &keys[i + j],                             \
+                    fc->ht_head.rhh_mask, fc->ht_head.rhh_mask);           \
         }                                                                  \
         /* Stage 2: scan_bk (no empty tracking needed) */                   \
         if (i >= ahead_keys && i - ahead_keys < nb_keys) {                \

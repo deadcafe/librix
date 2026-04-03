@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include <rix/rix_hash.h>
+#include <flow/flow_core.h>
 
 #ifndef FT_TABLE_CACHE_LINE_SIZE
 #define FT_TABLE_CACHE_LINE_SIZE 64u
@@ -172,14 +173,7 @@ struct ft_table_config {
 };
 
 struct ft_table_stats {
-    uint64_t lookups;
-    uint64_t hits;
-    uint64_t misses;
-    uint64_t adds;
-    uint64_t add_existing;
-    uint64_t add_failed;
-    uint64_t dels;
-    uint64_t del_miss;
+    struct fcore_stats core;
     uint64_t grow_execs;
     uint64_t grow_failures;
     uint64_t reserve_calls;

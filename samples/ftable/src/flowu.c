@@ -84,6 +84,9 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flowu_ht, flowu_entry,
 #define FCORE_LAYOUT_HASH_BASE(owner) \
     ((struct flowu_entry *)(void *)(owner))
 
+#undef FCORE_STATS
+#define FCORE_STATS(owner) ((owner)->stats.core)
+
 #undef FCORE_HASH_MASK
 #define FCORE_HASH_MASK(owner, ht) ((owner)->start_mask)
 
@@ -99,6 +102,7 @@ FCORE_GENERATE(flowu, ft_flowu_table, fcore_flowu_ht,
 #undef FCORE_LAYOUT_ENTRY_PTR
 #undef FCORE_LAYOUT_ENTRY_INDEX
 #undef FCORE_LAYOUT_HASH_BASE
+#undef FCORE_STATS
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 
 /*===========================================================================
@@ -171,6 +175,8 @@ unsigned _FTG_API(flowu, nb_entries)(const struct ft_flowu_table *ft);
 unsigned _FTG_API(flowu, nb_bk)(const struct ft_flowu_table *ft);
 void _FTG_API(flowu, stats)(const struct ft_flowu_table *ft,
                             struct ft_table_stats *out);
+void _FTG_API(flowu, status)(const struct ft_flowu_table *ft,
+                             struct fcore_status *out);
 uint32_t _FTG_API(flowu, find)(struct ft_flowu_table *ft,
                                const struct flowu_key *key);
 void _FTG_API(flowu, find_bulk)(struct ft_flowu_table *ft,

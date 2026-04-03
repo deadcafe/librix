@@ -184,6 +184,7 @@ struct test_variant_ops {
     unsigned (*nb_entries)(const void *ft);
     unsigned (*nb_bk)(const void *ft);
     void (*stats)(const void *ft, struct ft_table_stats *out);
+    void (*status)(const void *ft, struct fcore_status *out);
     uint32_t (*find)(void *ft, const void *key);
     uint32_t (*add_idx)(void *ft, uint32_t entry_idx);
     uint32_t (*del_key)(void *ft, const void *key);
@@ -209,7 +210,7 @@ struct test_variant_ops {
 
 #define TEST_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, entry_t, init_ex_fn, \
                               destroy_fn, flush_fn, nb_entries_fn, nb_bk_fn,   \
-                              stats_fn, find_fn, add_idx_fn,                    \
+                              stats_fn, status_fn, find_fn, add_idx_fn,        \
                               del_key_fn, del_entry_idx_fn, find_bulk_fn,       \
                               add_idx_bulk_fn, add_idx_bulk2_fn,               \
                               del_entry_idx_bulk_fn,                           \
@@ -248,6 +249,11 @@ static void                                                                 \
 testv_stats_##tag(const void *ft, struct ft_table_stats *out)               \
 {                                                                          \
     stats_fn((const struct ft_##prefix##_table *)ft, out);                 \
+}                                                                          \
+static void                                                                 \
+testv_status_##tag(const void *ft, struct fcore_status *out)                \
+{                                                                          \
+    status_fn((const struct ft_##prefix##_table *)ft, out);                \
 }                                                                          \
 static uint32_t                                                             \
 testv_find_##tag(void *ft, const void *key)                                 \
@@ -347,6 +353,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .nb_entries = testv_nb_entries_##tag,                                   \
     .nb_bk = testv_nb_bk_##tag,                                             \
     .stats = testv_stats_##tag,                                             \
+    .status = testv_status_##tag,                                           \
     .find = testv_find_##tag,                                               \
     .add_idx = testv_add_idx_##tag,                                         \
     .del_key = testv_del_key_##tag,                                         \
@@ -367,7 +374,7 @@ TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
                       struct flow4_entry, ft_flow4_table_init_ex,
                       ft_flow4_table_destroy, ft_flow4_table_flush,
                       ft_flow4_table_nb_entries, ft_flow4_table_nb_bk,
-                      ft_flow4_table_stats,
+                      ft_flow4_table_stats, ft_flow4_table_status,
                       ft_flow4_table_find, ft_flow4_table_add_entry_idx,
                       ft_flow4_table_del_key, ft_flow4_table_del_entry_idx,
                       ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
@@ -381,7 +388,7 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       struct flow6_entry, ft_flow6_table_init_ex,
                       ft_flow6_table_destroy, ft_flow6_table_flush,
                       ft_flow6_table_nb_entries, ft_flow6_table_nb_bk,
-                      ft_flow6_table_stats,
+                      ft_flow6_table_stats, ft_flow6_table_status,
                       ft_flow6_table_find, ft_flow6_table_add_entry_idx,
                       ft_flow6_table_del_key, ft_flow6_table_del_entry_idx,
                       ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
@@ -395,7 +402,7 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       struct flowu_entry, ft_flowu_table_init_ex,
                       ft_flowu_table_destroy, ft_flowu_table_flush,
                       ft_flowu_table_nb_entries, ft_flowu_table_nb_bk,
-                      ft_flowu_table_stats,
+                      ft_flowu_table_stats, ft_flowu_table_status,
                       ft_flowu_table_find, ft_flowu_table_add_entry_idx,
                       ft_flowu_table_del_key, ft_flowu_table_del_entry_idx,
                       ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
@@ -645,20 +652,20 @@ test_bulk_ops_and_stats(void)
     }
 
     ft_flow4_table_stats(&ft, &stats);
-    if (stats.adds != 8u)
-        FAILF("adds=%llu", (unsigned long long)stats.adds);
-    if (stats.add_existing != 8u)
-        FAILF("add_existing=%llu", (unsigned long long)stats.add_existing);
-    if (stats.lookups != 16u)
-        FAILF("lookups=%llu", (unsigned long long)stats.lookups);
-    if (stats.hits != 12u)
-        FAILF("hits=%llu", (unsigned long long)stats.hits);
-    if (stats.misses != 4u)
-        FAILF("misses=%llu", (unsigned long long)stats.misses);
-    if (stats.dels != 4u)
-        FAILF("dels=%llu", (unsigned long long)stats.dels);
-    if (stats.del_miss != 0u)
-        FAILF("del_miss=%llu", (unsigned long long)stats.del_miss);
+    if (stats.core.adds != 8u)
+        FAILF("adds=%llu", (unsigned long long)stats.core.adds);
+    if (stats.core.add_existing != 8u)
+        FAILF("add_existing=%llu", (unsigned long long)stats.core.add_existing);
+    if (stats.core.lookups != 16u)
+        FAILF("lookups=%llu", (unsigned long long)stats.core.lookups);
+    if (stats.core.hits != 12u)
+        FAILF("hits=%llu", (unsigned long long)stats.core.hits);
+    if (stats.core.misses != 4u)
+        FAILF("misses=%llu", (unsigned long long)stats.core.misses);
+    if (stats.core.dels != 4u)
+        FAILF("dels=%llu", (unsigned long long)stats.core.dels);
+    if (stats.core.del_miss != 0u)
+        FAILF("del_miss=%llu", (unsigned long long)stats.core.del_miss);
 
     ft_flow4_table_destroy(&ft);
     free(pool);
@@ -695,8 +702,8 @@ test_walk_flush_and_stats_reset(void)
         FAILF("walk count=%u", ctx.count);
 
     ft_flow4_table_stats(&ft, &stats);
-    if (stats.adds != 16u)
-        FAILF("adds before flush=%llu", (unsigned long long)stats.adds);
+    if (stats.core.adds != 16u)
+        FAILF("adds before flush=%llu", (unsigned long long)stats.core.adds);
 
     ft_flow4_table_flush(&ft);
     if (ft_flow4_table_nb_entries(&ft) != 0u)
@@ -708,9 +715,9 @@ test_walk_flush_and_stats_reset(void)
         FAILF("walk after flush count=%u", ctx.count);
 
     ft_flow4_table_stats(&ft, &stats);
-    if (stats.adds != 16u)
+    if (stats.core.adds != 16u)
         FAILF("stats should be preserved across flush, adds=%llu",
-              (unsigned long long)stats.adds);
+              (unsigned long long)stats.core.adds);
 
     ft_flow4_table_destroy(&ft);
     free(pool);
@@ -781,14 +788,14 @@ test_duplicate_and_delete_miss_stats(void)
         FAIL("delete miss should return 0");
 
     ft_flow4_table_stats(&ft, &stats);
-    if (stats.adds != 1u)
-        FAILF("adds=%llu", (unsigned long long)stats.adds);
-    if (stats.add_existing != 1u)
-        FAILF("add_existing=%llu", (unsigned long long)stats.add_existing);
-    if (stats.del_miss != 1u)
-        FAILF("del_miss=%llu", (unsigned long long)stats.del_miss);
-    if (stats.add_failed != 0u)
-        FAILF("add_failed=%llu", (unsigned long long)stats.add_failed);
+    if (stats.core.adds != 1u)
+        FAILF("adds=%llu", (unsigned long long)stats.core.adds);
+    if (stats.core.add_existing != 1u)
+        FAILF("add_existing=%llu", (unsigned long long)stats.core.add_existing);
+    if (stats.core.del_miss != 1u)
+        FAILF("del_miss=%llu", (unsigned long long)stats.core.del_miss);
+    if (stats.core.add_failed != 0u)
+        FAILF("add_failed=%llu", (unsigned long long)stats.core.add_failed);
 
     ft_flow4_table_destroy(&ft);
     free(pool);
@@ -1414,9 +1421,10 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
     }
 
     ops->stats(&ft, &stats);
-    if (stats.adds != 8u || stats.add_existing != 8u || stats.lookups != 16u
-        || stats.hits != 12u || stats.misses != 4u || stats.dels != 4u
-        || stats.del_miss != 0u)
+    if (stats.core.adds != 8u || stats.core.add_existing != 8u
+        || stats.core.lookups != 16u || stats.core.hits != 12u
+        || stats.core.misses != 4u || stats.core.dels != 4u
+        || stats.core.del_miss != 0u)
         FAIL("bulk stats mismatch");
 
     ops->destroy(&ft);
@@ -1467,7 +1475,7 @@ testv_add_idx_bulk_duplicate_ignore(const struct test_variant_ops *ops)
         FAIL("duplicate ignore should not increase entry count");
 
     ops->stats(&ft, &stats);
-    if (stats.adds != 2u || stats.add_existing != 2u)
+    if (stats.core.adds != 2u || stats.core.add_existing != 2u)
         FAIL("duplicate ignore stats mismatch");
 
     ops->destroy(&ft);
@@ -1533,7 +1541,7 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
         FAIL("mixed batch should add exactly two entries");
 
     ops->stats(&ft, &stats);
-    if (stats.adds != 4u || stats.add_existing != 3u)
+    if (stats.core.adds != 4u || stats.core.add_existing != 3u)
         FAIL("mixed batch stats mismatch");
 
     ops->destroy(&ft);
@@ -1734,6 +1742,7 @@ testv_walk_flush_and_del_idx(const struct test_variant_ops *ops)
                                      FT_TABLE_CACHE_LINE_SIZE);
     struct walk_ctx ctx;
     union test_any_key key;
+    struct fcore_status status;
 
     printf("[T] %s table walk/flush/del_idx\n", ops->name);
     if (pool == NULL)
@@ -1745,17 +1754,29 @@ testv_walk_flush_and_del_idx(const struct test_variant_ops *ops)
         if (testv_add_idx_key(ops, &ft, i + 1u, &key) == 0u)
             FAILF("add failed at %u", i);
     }
+    ops->status(&ft, &status);
+    if (status.entries != 16u)
+        FAIL("status.entries mismatch after add");
+    if (status.add_bk0 + status.add_bk1 + status.kickouts != 16u)
+        FAIL("status add path counters mismatch after add");
     memset(&ctx, 0, sizeof(ctx));
     if (ops->walk(&ft, walk_count_cb, &ctx) != 0 || ctx.count != 16u)
         FAIL("walk count mismatch");
     if (ops->del_entry_idx(&ft, 2u) != 2u)
         FAIL("del_idx failed");
+    ops->status(&ft, &status);
+    if (status.entries != 15u)
+        FAIL("status.entries mismatch after del");
     ops->make_key(&key, 5001u);
     if (ops->find(&ft, &key) != 0u)
         FAIL("del_idx entry still found");
     ops->flush(&ft);
     if (ops->nb_entries(&ft) != 0u)
         FAIL("flush should clear entries");
+    ops->status(&ft, &status);
+    if (status.entries != 0u || status.kickouts != 0u
+        || status.add_bk0 != 0u || status.add_bk1 != 0u)
+        FAIL("status should reset on flush");
     ops->destroy(&ft);
     free(pool);
     return 0;

@@ -84,6 +84,9 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
 #define FCORE_LAYOUT_HASH_BASE(owner) \
     ((struct flow4_entry *)(void *)(owner))
 
+#undef FCORE_STATS
+#define FCORE_STATS(owner) ((owner)->stats.core)
+
 /*
  * ftable uses start_mask (not ht_head.rhh_mask) so that entries hashed
  * before grow_2x keep their original bucket mapping.
@@ -108,6 +111,7 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
 #undef FCORE_LAYOUT_ENTRY_PTR
 #undef FCORE_LAYOUT_ENTRY_INDEX
 #undef FCORE_LAYOUT_HASH_BASE
+#undef FCORE_STATS
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 
 /*===========================================================================
@@ -179,6 +183,8 @@ unsigned _FTG_API(flow4, nb_entries)(const struct ft_flow4_table *ft);
 unsigned _FTG_API(flow4, nb_bk)(const struct ft_flow4_table *ft);
 void _FTG_API(flow4, stats)(const struct ft_flow4_table *ft,
                             struct ft_table_stats *out);
+void _FTG_API(flow4, status)(const struct ft_flow4_table *ft,
+                             struct fcore_status *out);
 uint32_t _FTG_API(flow4, find)(struct ft_flow4_table *ft,
                                const struct flow4_key *key);
 void _FTG_API(flow4, find_bulk)(struct ft_flow4_table *ft,

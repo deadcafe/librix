@@ -63,7 +63,7 @@ DEPS         = $(OBJS:.o=.d)
 
 PREFIX       ?= /usr/local
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
-BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
+BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
 
 .PHONY: all static shared test bench-short bench-full clean install
 

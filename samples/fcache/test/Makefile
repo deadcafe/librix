@@ -34,7 +34,7 @@ WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 BENCH_EXTRA_CFLAGS ?= $(EXTRA_CFLAGS) -DNDEBUG
-BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
+BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include -I$(TOPDIR)/samples/include \
                -I$(FCDIR)/include \

@@ -33,6 +33,8 @@ extern unsigned ft_##prefix##_table_nb_bk_gen(                                 \
     const struct ft_##prefix##_table *ft);                                     \
 extern void ft_##prefix##_table_stats_gen(                                     \
     const struct ft_##prefix##_table *ft, struct ft_table_stats *out);    \
+extern void ft_##prefix##_table_status_gen(                                    \
+    const struct ft_##prefix##_table *ft, struct fcore_status *out);      \
 extern int ft_##prefix##_table_walk_gen(                                       \
     struct ft_##prefix##_table *ft,                                            \
     int (*cb)(uint32_t entry_idx, void *arg), void *arg);                     \
@@ -138,6 +140,13 @@ ft_##prefix##_table_stats(const struct ft_##prefix##_table *ft,                \
                           struct ft_table_stats *out)                     \
 {                                                                              \
     ft_##prefix##_table_stats_gen(ft, out);                                     \
+}                                                                              \
+                                                                               \
+void                                                                           \
+ft_##prefix##_table_status(const struct ft_##prefix##_table *ft,               \
+                           struct fcore_status *out)                           \
+{                                                                              \
+    ft_##prefix##_table_status_gen(ft, out);                                   \
 }                                                                              \
                                                                                \
 int                                                                            \

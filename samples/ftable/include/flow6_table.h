@@ -40,6 +40,7 @@ struct ft_flow6_table {
     uint32_t                    free_head;
     unsigned                    grow_fill_pct;
     struct ft_table_stats       stats;
+    struct fcore_status         status;
 };
 
 /*===========================================================================
@@ -64,6 +65,8 @@ unsigned ft_flow6_table_nb_entries(const struct ft_flow6_table *ft);
 unsigned ft_flow6_table_nb_bk(const struct ft_flow6_table *ft);
 void ft_flow6_table_stats(const struct ft_flow6_table *ft,
                           struct ft_table_stats *out);
+void ft_flow6_table_status(const struct ft_flow6_table *ft,
+                           struct fcore_status *out);
 
 /*===========================================================================
  * Single-key operations

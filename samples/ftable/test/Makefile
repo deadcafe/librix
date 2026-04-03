@@ -27,7 +27,7 @@ endif
 WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
-BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 1 --keep-n 1
+BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
 BENCH_FT_FULL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
