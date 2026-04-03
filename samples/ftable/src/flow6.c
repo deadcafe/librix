@@ -84,34 +84,6 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow6_ht, flow6_entry,
 #define FCORE_LAYOUT_HASH_BASE(owner) \
     ((struct flow6_entry *)(void *)(owner))
 
-#undef FCORE_ON_REMOVE
-#define FCORE_ON_REMOVE(owner, entry, idx) \
-    do { (entry)->htbl_elm.cur_hash = 0u; } while (0)
-
-#undef FCORE_ON_INSERT
-#define FCORE_ON_INSERT(owner, entry, idx)                                    \
-    do {                                                                       \
-        (void)(entry);                                                         \
-        (void)(idx);                                                           \
-        if ((owner)->need_grow == 0u &&                                        \
-            (owner)->nb_bk < (owner)->max_nb_bk &&                             \
-            _FCORE_INT(flow6, fill_pct_)(owner) >= (owner)->grow_fill_pct) {   \
-            (owner)->need_grow = 1u;                                           \
-            (owner)->stats.grow_marks++;                                       \
-        }                                                                      \
-    } while (0)
-
-#undef FCORE_ON_ADD_FAIL
-#define FCORE_ON_ADD_FAIL(owner, entry, idx)                                  \
-    do {                                                                       \
-        (void)(entry);                                                         \
-        (void)(idx);                                                           \
-        if ((owner)->nb_bk < (owner)->max_nb_bk && (owner)->need_grow == 0u) {\
-            (owner)->need_grow = 1u;                                           \
-            (owner)->stats.grow_marks++;                                       \
-        }                                                                      \
-    } while (0)
-
 #undef FCORE_HASH_MASK
 #define FCORE_HASH_MASK(owner, ht) ((owner)->start_mask)
 
@@ -127,8 +99,6 @@ FCORE_GENERATE(flow6, ft_flow6_table, fcore_flow6_ht,
 #undef FCORE_LAYOUT_ENTRY_PTR
 #undef FCORE_LAYOUT_ENTRY_INDEX
 #undef FCORE_LAYOUT_HASH_BASE
-#undef FCORE_ON_INSERT
-#undef FCORE_ON_ADD_FAIL
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 
 /*===========================================================================
@@ -199,7 +169,6 @@ void _FTG_API(flow6, destroy)(struct ft_flow6_table *ft);
 void _FTG_API(flow6, flush)(struct ft_flow6_table *ft);
 unsigned _FTG_API(flow6, nb_entries)(const struct ft_flow6_table *ft);
 unsigned _FTG_API(flow6, nb_bk)(const struct ft_flow6_table *ft);
-unsigned _FTG_API(flow6, need_grow)(const struct ft_flow6_table *ft);
 void _FTG_API(flow6, stats)(const struct ft_flow6_table *ft,
                             struct ft_table_stats *out);
 uint32_t _FTG_API(flow6, find)(struct ft_flow6_table *ft,
@@ -214,6 +183,11 @@ void _FTG_API(flow6, add_idx_bulk)(struct ft_flow6_table *ft,
                                    const uint32_t *entry_idxv,
                                    unsigned nb_keys,
                                    struct ft_table_result *results);
+unsigned _FTG_API(flow6, add_idx_bulk2)(struct ft_flow6_table *ft,
+                                        const uint32_t *entry_idxv,
+                                        unsigned nb_keys,
+                                        enum ft_add_policy policy,
+                                        struct ft_table_result *results);
 uint32_t _FTG_API(flow6, del_key)(struct ft_flow6_table *ft,
                                   const struct flow6_key *key);
 uint32_t _FTG_API(flow6, del_entry_idx)(struct ft_flow6_table *ft,

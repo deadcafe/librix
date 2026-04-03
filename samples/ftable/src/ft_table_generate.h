@@ -169,6 +169,12 @@
     _FTG_FCORE(p, add_idx_bulk_)((ft), (entry_idxv), (nb_keys), 0u,           \
                                  &(results)[0].entry_idx)
 
+#define _FTG_ADD_ENTRY_BULK2_BODY(p, ft, entry_idxv, nb_keys, policy,        \
+                                  results, hash_fn, cmp_fn)                  \
+    return _FTG_FCORE(p, add_idx_bulk2_)((ft), (entry_idxv), (nb_keys),      \
+                                         (policy), 0u,                       \
+                                         &(results)[0].entry_idx)
+
 #define _FTG_DEL_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)    \
     do {                                                                      \
     for (unsigned _i = 0; _i < (nb_keys); _i++)                               \
@@ -330,8 +336,6 @@
                         (results)[_idx].entry_idx = _out_idx;                 \
                     } else {                                                  \
                         (ft)->stats.add_failed++;                             \
-                        if ((ft)->nb_bk < (ft)->max_nb_bk)                    \
-                            _FTG_INT(p, mark_need_grow_)((ft));               \
                         (results)[_idx].entry_idx = 0u;                       \
                     }                                                         \
                 }                                                             \
@@ -362,7 +366,6 @@
     memset((ft)->buckets, 0,                                                  \
            _FTG_INT(p, bucket_bytes_)((ft)->nb_bk));                          \
     _FTG_HT(p, init)(&(ft)->ht_head, (ft)->nb_bk);                            \
-    (ft)->need_grow = 0u;                                                     \
     for (unsigned _i = 1u; _i <= (ft)->max_entries; _i++) {                   \
         _FTG_ENTRY_T(p) *_entry = FTG_LAYOUT_ENTRY_PTR((ft), _i);             \
         if (_entry != NULL) _FTG_INT(p, entry_meta_clear_)(_entry);           \
@@ -445,8 +448,6 @@
         return _out_idx;                                                      \
     }                                                                         \
     (ft)->stats.add_failed++;                                                 \
-    if ((ft)->nb_bk < (ft)->max_nb_bk)                                        \
-        _FTG_INT(p, mark_need_grow_)((ft));                                   \
     return 0u;
 
 #endif /* FTG_USE_FCORE */
@@ -510,25 +511,6 @@ _FTG_INT(p, required_nb_bk_)(unsigned entries, unsigned fill_pct)             \
     if (need_bk < (default_min_nb_bk))                                        \
         need_bk = (default_min_nb_bk);                                        \
     return ft_roundup_pow2_u32(need_bk);                                      \
-}                                                                             \
-                                                                               \
-static inline unsigned                                                        \
-_FTG_INT(p, fill_pct_)(const _FTG_TABLE_T(p) *ft)                             \
-{                                                                             \
-    uint64_t slots;                                                           \
-    if (ft->nb_bk == 0u)                                                      \
-        return 0u;                                                            \
-    slots = (uint64_t)ft->nb_bk * (uint64_t)RIX_HASH_BUCKET_ENTRY_SZ;         \
-    return (unsigned)(((uint64_t)ft->ht_head.rhh_nb * 100u) / slots);         \
-}                                                                             \
-                                                                               \
-static inline void                                                            \
-_FTG_INT(p, mark_need_grow_)(_FTG_TABLE_T(p) *ft)                             \
-{                                                                             \
-    if (ft->need_grow == 0u) {                                                \
-        ft->need_grow = 1u;                                                   \
-        ft->stats.grow_marks++;                                               \
-    }                                                                         \
 }                                                                             \
                                                                                \
 static inline size_t                                                          \
@@ -617,9 +599,6 @@ _FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
     if (ret == NULL) {                                                        \
         FTG_ON_INSERT_SUCCESS(entry, flag_active);                            \
         *entry_idx_out = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                   \
-        if (ft->need_grow == 0u && ft->nb_bk < ft->max_nb_bk &&               \
-            _FTG_INT(p, fill_pct_)(ft) >= ft->grow_fill_pct)                  \
-            _FTG_INT(p, mark_need_grow_)(ft);                                 \
         return 0;                                                             \
     }                                                                         \
     if (ret != entry) {                                                       \
@@ -740,7 +719,6 @@ _FTG_API(p, init_ex)(_FTG_TABLE_T(p) *ft,                                     \
     ft->buckets = buckets;                                                    \
     ft->nb_bk = start_nb_bk;                                                  \
     _FTG_HT(p, init)(&ft->ht_head, start_nb_bk);                              \
-    ft->need_grow = 0u;                                                       \
     return 0;                                                                 \
 }                                                                             \
                                                                                \
@@ -794,12 +772,6 @@ unsigned                                                                      \
 _FTG_API(p, nb_bk)(const _FTG_TABLE_T(p) *ft)                                 \
 {                                                                             \
     return ft == NULL ? 0u : ft->nb_bk;                                       \
-}                                                                             \
-                                                                               \
-unsigned                                                                      \
-_FTG_API(p, need_grow)(const _FTG_TABLE_T(p) *ft)                             \
-{                                                                             \
-    return ft == NULL ? 0u : ft->need_grow;                                   \
 }                                                                             \
                                                                                \
 void                                                                          \
@@ -873,6 +845,26 @@ _FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
     }                                                                         \
     _FTG_ADD_ENTRY_BULK_BODY(p, ft, entry_idxv, nb_keys, results,             \
                              hash_fn, cmp_fn);                                \
+}                                                                             \
+                                                                               \
+/* --- add_idx_bulk2 ----------------------------------------------------- */ \
+                                                                               \
+unsigned                                                                      \
+_FTG_API(p, add_idx_bulk2)(_FTG_TABLE_T(p) *ft,                               \
+                           const uint32_t *entry_idxv,                        \
+                           unsigned nb_keys,                                  \
+                           enum ft_add_policy policy,                         \
+                           _FTG_RESULT_T(p) *results)                         \
+{                                                                             \
+    if (results == NULL)                                                      \
+        return 0u;                                                            \
+    if (ft == NULL || ft->buckets == NULL || entry_idxv == NULL) {            \
+        for (unsigned i = 0; i < nb_keys; i++)                                \
+            results[i].entry_idx = (uint32_t)RIX_NIL;                         \
+        return 0u;                                                            \
+    }                                                                         \
+    _FTG_ADD_ENTRY_BULK2_BODY(p, ft, entry_idxv, nb_keys, policy, results,    \
+                              hash_fn, cmp_fn);                               \
 }                                                                             \
                                                                                \
 /* --- del_key (single, by key) ------------------------------------------ */ \
@@ -1036,8 +1028,6 @@ _FTG_API(p, grow_2x)(_FTG_TABLE_T(p) *ft)                                     \
     ft->buckets = new_buckets;                                                \
     ft->ht_head = new_head;                                                   \
     ft->nb_bk = new_nb_bk;                                                    \
-    ft->need_grow =                                                           \
-        _FTG_INT(p, fill_pct_)(ft) >= ft->grow_fill_pct ? 1u : 0u;            \
     ft->stats.grow_execs++;                                                   \
     return 0;                                                                 \
 }                                                                             \
@@ -1060,8 +1050,6 @@ _FTG_API(p, reserve)(_FTG_TABLE_T(p) *ft,                                     \
         if (_FTG_API(p, grow_2x)(ft) != 0)                                    \
             return -1;                                                        \
     }                                                                         \
-    ft->need_grow =                                                           \
-        _FTG_INT(p, fill_pct_)(ft) >= ft->grow_fill_pct ? 1u : 0u;            \
     return 0;                                                                 \
 }                                                                             \
 /* end FT_TABLE_GENERATE */
@@ -1081,6 +1069,7 @@ const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
     .add_idx         = _FT_OPS_FNAME(prefix, add_idx),                        \
     .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \
+    .add_idx_bulk2   = _FT_OPS_FNAME(prefix, add_idx_bulk2),                  \
     .del_key         = _FT_OPS_FNAME(prefix, del_key),                        \
     .del_entry_idx   = _FT_OPS_FNAME(prefix, del_entry_idx),                  \
     .del_entry_idx_bulk = _FT_OPS_FNAME(prefix, del_entry_idx_bulk),          \

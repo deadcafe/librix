@@ -85,38 +85,6 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
     ((struct flow4_entry *)(void *)(owner))
 
 /*
- * FCORE_ON_REMOVE: clear cur_hash so the entry is no longer "active".
- * Must be defined before FCORE_GENERATE which expands it.
- */
-#undef FCORE_ON_REMOVE
-#define FCORE_ON_REMOVE(owner, entry, idx) \
-    do { (entry)->htbl_elm.cur_hash = 0u; } while (0)
-
-#undef FCORE_ON_INSERT
-#define FCORE_ON_INSERT(owner, entry, idx)                                    \
-    do {                                                                       \
-        (void)(entry);                                                         \
-        (void)(idx);                                                           \
-        if ((owner)->need_grow == 0u &&                                        \
-            (owner)->nb_bk < (owner)->max_nb_bk &&                             \
-            _FCORE_INT(flow4, fill_pct_)(owner) >= (owner)->grow_fill_pct) {   \
-            (owner)->need_grow = 1u;                                           \
-            (owner)->stats.grow_marks++;                                       \
-        }                                                                      \
-    } while (0)
-
-#undef FCORE_ON_ADD_FAIL
-#define FCORE_ON_ADD_FAIL(owner, entry, idx)                                  \
-    do {                                                                       \
-        (void)(entry);                                                         \
-        (void)(idx);                                                           \
-        if ((owner)->nb_bk < (owner)->max_nb_bk && (owner)->need_grow == 0u) {\
-            (owner)->need_grow = 1u;                                           \
-            (owner)->stats.grow_marks++;                                       \
-        }                                                                      \
-    } while (0)
-
-/*
  * ftable uses start_mask (not ht_head.rhh_mask) so that entries hashed
  * before grow_2x keep their original bucket mapping.
  */
@@ -140,8 +108,6 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
 #undef FCORE_LAYOUT_ENTRY_PTR
 #undef FCORE_LAYOUT_ENTRY_INDEX
 #undef FCORE_LAYOUT_HASH_BASE
-#undef FCORE_ON_INSERT
-#undef FCORE_ON_ADD_FAIL
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 
 /*===========================================================================
@@ -211,7 +177,6 @@ void _FTG_API(flow4, destroy)(struct ft_flow4_table *ft);
 void _FTG_API(flow4, flush)(struct ft_flow4_table *ft);
 unsigned _FTG_API(flow4, nb_entries)(const struct ft_flow4_table *ft);
 unsigned _FTG_API(flow4, nb_bk)(const struct ft_flow4_table *ft);
-unsigned _FTG_API(flow4, need_grow)(const struct ft_flow4_table *ft);
 void _FTG_API(flow4, stats)(const struct ft_flow4_table *ft,
                             struct ft_table_stats *out);
 uint32_t _FTG_API(flow4, find)(struct ft_flow4_table *ft,
@@ -226,6 +191,11 @@ void _FTG_API(flow4, add_idx_bulk)(struct ft_flow4_table *ft,
                                    const uint32_t *entry_idxv,
                                    unsigned nb_keys,
                                    struct ft_table_result *results);
+unsigned _FTG_API(flow4, add_idx_bulk2)(struct ft_flow4_table *ft,
+                                        const uint32_t *entry_idxv,
+                                        unsigned nb_keys,
+                                        enum ft_add_policy policy,
+                                        struct ft_table_result *results);
 uint32_t _FTG_API(flow4, del_key)(struct ft_flow4_table *ft,
                                   const struct flow4_key *key);
 uint32_t _FTG_API(flow4, del_entry_idx)(struct ft_flow4_table *ft,

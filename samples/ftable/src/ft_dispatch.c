@@ -31,8 +31,6 @@ extern unsigned ft_##prefix##_table_nb_entries_gen(                            \
     const struct ft_##prefix##_table *ft);                                     \
 extern unsigned ft_##prefix##_table_nb_bk_gen(                                 \
     const struct ft_##prefix##_table *ft);                                     \
-extern unsigned ft_##prefix##_table_need_grow_gen(                             \
-    const struct ft_##prefix##_table *ft);                                     \
 extern void ft_##prefix##_table_stats_gen(                                     \
     const struct ft_##prefix##_table *ft, struct ft_table_stats *out);    \
 extern int ft_##prefix##_table_walk_gen(                                       \
@@ -135,12 +133,6 @@ ft_##prefix##_table_nb_bk(const struct ft_##prefix##_table *ft)                \
     return ft_##prefix##_table_nb_bk_gen(ft);                                  \
 }                                                                              \
                                                                                \
-unsigned                                                                       \
-ft_##prefix##_table_need_grow(const struct ft_##prefix##_table *ft)            \
-{                                                                              \
-    return ft_##prefix##_table_need_grow_gen(ft);                              \
-}                                                                              \
-                                                                               \
 void                                                                           \
 ft_##prefix##_table_stats(const struct ft_##prefix##_table *ft,                \
                           struct ft_table_stats *out)                     \
@@ -208,6 +200,16 @@ ft_##prefix##_table_add_idx_bulk(struct ft_##prefix##_table *ft,               \
                                  struct ft_table_result *results)              \
 {                                                                              \
     active_ptr->add_idx_bulk(ft, entry_idxv, nb_keys, results);                \
+}                                                                              \
+                                                                               \
+unsigned                                                                       \
+ft_##prefix##_table_add_idx_bulk2(struct ft_##prefix##_table *ft,              \
+                                  const uint32_t *entry_idxv,                  \
+                                  unsigned nb_keys,                            \
+                                  enum ft_add_policy policy,                   \
+                                  struct ft_table_result *results)             \
+{                                                                              \
+    return active_ptr->add_idx_bulk2(ft, entry_idxv, nb_keys, policy, results);\
 }                                                                              \
                                                                                \
 uint32_t                                                                       \

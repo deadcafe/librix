@@ -57,7 +57,7 @@ The current prototype implements:
 - scalar and bulk `find`, `add`, and `del`
 - intrusive `init_ex()` with caller-defined record layout
 - runtime arch dispatch with unsuffixed public APIs
-- `need_grow`, `grow_2x`, and `reserve`
+- `grow_2x` and `reserve`
 - bucket-table-only resize
 
 Not implemented yet:
@@ -287,7 +287,6 @@ Important APIs:
 - `ft_flow4_table_find_bulk()`
 - `ft_flow4_table_add_idx_bulk()`
 - `ft_flow4_table_del_entry_idx_bulk()`
-- `ft_flow4_table_need_grow()`
 - `ft_flow4_table_grow_2x()`
 - `ft_flow4_table_reserve()`
 - `ft_arch_init()`
@@ -404,8 +403,8 @@ Observed risks:
 The intended operating model is:
 
 - run with a conservative fill target, typically `50%` to `60%`
-- mark `need_grow` when the watermark is crossed
-- execute `grow_2x()` at a caller-selected time
+- decide whether to execute `grow_2x()` from stats and caller policy
+- use `reserve()` when the caller wants to expand ahead of time
 
 The prototype does not implement incremental migration. Growth is a single
 rebuild step.
@@ -433,7 +432,6 @@ It covers:
 - manual `grow_2x()` preserving existing entries
 - repeated `grow_2x()` preserving `hash0/hash1`
 - failed `grow_2x()` leaving the old table intact
-- `need_grow()` behavior after watermark crossing
 - `reserve()` growing the bucket table ahead of time
 - allocator failure on initial bucket allocation
 - max-bucket limit handling

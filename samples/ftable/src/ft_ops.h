@@ -27,6 +27,11 @@ struct ft_##prefix##_ops {                                                     \
                          const uint32_t *entry_idxv,                           \
                          unsigned nb_keys,                                     \
                          struct ft_table_result *results);                \
+    unsigned (*add_idx_bulk2)(struct ft_##prefix##_table *ft,                  \
+                              const uint32_t *entry_idxv,                      \
+                              unsigned nb_keys,                                \
+                              enum ft_add_policy policy,                       \
+                              struct ft_table_result *results);           \
     uint32_t (*del_key)(struct ft_##prefix##_table *ft,                        \
                         const struct prefix##_key *key);                       \
     uint32_t (*del_entry_idx)(struct ft_##prefix##_table *ft,                  \

@@ -183,7 +183,6 @@ struct test_variant_ops {
     void (*flush)(void *ft);
     unsigned (*nb_entries)(const void *ft);
     unsigned (*nb_bk)(const void *ft);
-    unsigned (*need_grow)(const void *ft);
     void (*stats)(const void *ft, struct ft_table_stats *out);
     uint32_t (*find)(void *ft, const void *key);
     uint32_t (*add_idx)(void *ft, uint32_t entry_idx);
@@ -194,6 +193,10 @@ struct test_variant_ops {
     void (*add_idx_bulk)(void *ft, const uint32_t *entry_idxv,
                          unsigned nb_keys,
                          struct ft_table_result *results);
+    unsigned (*add_idx_bulk2)(void *ft, const uint32_t *entry_idxv,
+                              unsigned nb_keys,
+                              enum ft_add_policy policy,
+                              struct ft_table_result *results);
     void (*del_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
                                unsigned nb_keys);
     int (*walk)(void *ft, int (*cb)(uint32_t entry_idx, void *arg), void *arg);
@@ -206,9 +209,9 @@ struct test_variant_ops {
 
 #define TEST_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, entry_t, init_ex_fn, \
                               destroy_fn, flush_fn, nb_entries_fn, nb_bk_fn,   \
-                              need_grow_fn, stats_fn, find_fn, add_idx_fn,      \
+                              stats_fn, find_fn, add_idx_fn,                    \
                               del_key_fn, del_entry_idx_fn, find_bulk_fn,       \
-                              add_idx_bulk_fn,                                 \
+                              add_idx_bulk_fn, add_idx_bulk2_fn,               \
                               del_entry_idx_bulk_fn,                           \
                               walk_fn, grow_2x_fn,                              \
                               reserve_fn, record_ptr_fn, entry_ptr_fn,          \
@@ -240,11 +243,6 @@ static unsigned                                                             \
 testv_nb_bk_##tag(const void *ft)                                           \
 {                                                                          \
     return nb_bk_fn((const struct ft_##prefix##_table *)ft);               \
-}                                                                          \
-static unsigned                                                             \
-testv_need_grow_##tag(const void *ft)                                       \
-{                                                                          \
-    return need_grow_fn((const struct ft_##prefix##_table *)ft);           \
 }                                                                          \
 static void                                                                 \
 testv_stats_##tag(const void *ft, struct ft_table_stats *out)               \
@@ -287,6 +285,15 @@ testv_add_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,              \
 {                                                                          \
     add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                       \
                     entry_idxv, nb_keys, results);                          \
+}                                                                          \
+static unsigned                                                             \
+testv_add_idx_bulk2_##tag(void *ft, const uint32_t *entry_idxv,            \
+                          unsigned nb_keys,                                 \
+                          enum ft_add_policy policy,                        \
+                          struct ft_table_result *results)                  \
+{                                                                          \
+    return add_idx_bulk2_fn((struct ft_##prefix##_table *)ft,               \
+                            entry_idxv, nb_keys, policy, results);          \
 }                                                                          \
 static void                                                                 \
 testv_del_entry_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,        \
@@ -339,7 +346,6 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .flush = testv_flush_##tag,                                             \
     .nb_entries = testv_nb_entries_##tag,                                   \
     .nb_bk = testv_nb_bk_##tag,                                             \
-    .need_grow = testv_need_grow_##tag,                                     \
     .stats = testv_stats_##tag,                                             \
     .find = testv_find_##tag,                                               \
     .add_idx = testv_add_idx_##tag,                                         \
@@ -347,6 +353,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .del_entry_idx = testv_del_entry_idx_##tag,                             \
     .find_bulk = testv_find_bulk_##tag,                                     \
     .add_idx_bulk = testv_add_idx_bulk_##tag,                               \
+    .add_idx_bulk2 = testv_add_idx_bulk2_##tag,                             \
     .del_entry_idx_bulk = testv_del_entry_idx_bulk_##tag,                   \
     .walk = testv_walk_##tag,                                               \
     .grow_2x = testv_grow_2x_##tag,                                         \
@@ -356,14 +363,29 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .make_key = testv_make_key_##tag                                        \
 }
 
+TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
+                      struct flow4_entry, ft_flow4_table_init_ex,
+                      ft_flow4_table_destroy, ft_flow4_table_flush,
+                      ft_flow4_table_nb_entries, ft_flow4_table_nb_bk,
+                      ft_flow4_table_stats,
+                      ft_flow4_table_find, ft_flow4_table_add_entry_idx,
+                      ft_flow4_table_del_key, ft_flow4_table_del_entry_idx,
+                      ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
+                      ft_flow4_table_add_idx_bulk2,
+                      ft_flow4_table_del_entry_idx_bulk, ft_flow4_table_walk,
+                      ft_flow4_table_grow_2x, ft_flow4_table_reserve,
+                      ft_flow4_table_record_ptr, ft_flow4_table_entry_ptr,
+                      test_key, FT_FLOW4_DEFAULT_MIN_NB_BK);
+
 TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       struct flow6_entry, ft_flow6_table_init_ex,
                       ft_flow6_table_destroy, ft_flow6_table_flush,
                       ft_flow6_table_nb_entries, ft_flow6_table_nb_bk,
-                      ft_flow6_table_need_grow, ft_flow6_table_stats,
+                      ft_flow6_table_stats,
                       ft_flow6_table_find, ft_flow6_table_add_entry_idx,
                       ft_flow6_table_del_key, ft_flow6_table_del_entry_idx,
                       ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
+                      ft_flow6_table_add_idx_bulk2,
                       ft_flow6_table_del_entry_idx_bulk, ft_flow6_table_walk,
                       ft_flow6_table_grow_2x, ft_flow6_table_reserve,
                       ft_flow6_table_record_ptr, ft_flow6_table_entry_ptr,
@@ -373,10 +395,11 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       struct flowu_entry, ft_flowu_table_init_ex,
                       ft_flowu_table_destroy, ft_flowu_table_flush,
                       ft_flowu_table_nb_entries, ft_flowu_table_nb_bk,
-                      ft_flowu_table_need_grow, ft_flowu_table_stats,
+                      ft_flowu_table_stats,
                       ft_flowu_table_find, ft_flowu_table_add_entry_idx,
                       ft_flowu_table_del_key, ft_flowu_table_del_entry_idx,
                       ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
+                      ft_flowu_table_add_idx_bulk2,
                       ft_flowu_table_del_entry_idx_bulk, ft_flowu_table_walk,
                       ft_flowu_table_grow_2x, ft_flowu_table_reserve,
                       ft_flowu_table_record_ptr, ft_flowu_table_entry_ptr,
@@ -538,13 +561,13 @@ test_manual_grow_preserves_entries(void)
 }
 
 static int
-test_need_grow_and_reserve(void)
+test_reserve(void)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
 
-    printf("[T] flow4 table need_grow/reserve\n");
+    printf("[T] flow4 table reserve\n");
     pool = test_aligned_calloc(200000u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
@@ -558,17 +581,6 @@ test_need_grow_and_reserve(void)
         FAILF("reserve should grow to %u, got %u",
               FT_FLOW4_DEFAULT_MIN_NB_BK << 1, ft_flow4_table_nb_bk(&ft));
 
-    ft_flow4_table_destroy(&ft);
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 200000u, struct test_user_record, entry, &cfg) != 0)
-        FAIL("reinit failed");
-    for (unsigned i = 0; i < 160000u; i++) {
-        struct flow4_key key = test_key(i + 1000u);
-
-        if (test_add_idx_key(&ft, i + 1u, &key) == 0u)
-            break;
-    }
-    if (ft_flow4_table_need_grow(&ft) == 0u)
-        FAIL("need_grow should be set after threshold crossing");
     ft_flow4_table_destroy(&ft);
     free(pool);
     return 0;
@@ -689,9 +701,6 @@ test_walk_flush_and_stats_reset(void)
     ft_flow4_table_flush(&ft);
     if (ft_flow4_table_nb_entries(&ft) != 0u)
         FAIL("flush should clear entries");
-    if (ft_flow4_table_need_grow(&ft) != 0u)
-        FAIL("flush should clear need_grow");
-
     memset(&ctx, 0, sizeof(ctx));
     if (ft_flow4_table_walk(&ft, walk_count_cb, &ctx) != 0)
         FAIL("walk after flush failed");
@@ -1417,6 +1426,248 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
 }
 
 static int
+testv_add_idx_bulk_duplicate_ignore(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(64u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(4u, ops->key_size);
+    uint32_t base_idxv[2] = { 1u, 2u };
+    uint32_t dup_idxv[2] = { 3u, 4u };
+    struct ft_table_result results[2];
+    struct ft_table_stats stats;
+
+    printf("[T] %s table add_idx_bulk duplicate ignore\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init(&ft, pool, 64u, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < 2u; i++) {
+        ops->make_key(TEST_KEY_AT(keys, ops, i), i + 6000u);
+        testv_bind_key(ops, &ft, base_idxv[i], TEST_KEY_AT(keys, ops, i));
+    }
+    ops->add_idx_bulk(&ft, base_idxv, 2u, results);
+
+    for (unsigned i = 0; i < 2u; i++)
+        testv_bind_key(ops, &ft, dup_idxv[i], TEST_KEY_AT(keys, ops, i));
+
+    memset(results, 0, sizeof(results));
+    ops->add_idx_bulk(&ft, dup_idxv, 2u, results);
+    if (results[0].entry_idx != base_idxv[0])
+        FAIL("duplicate ignore result mismatch at 0");
+    if (results[1].entry_idx != base_idxv[1])
+        FAIL("duplicate ignore result mismatch at 1");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 0)) != base_idxv[0])
+        FAIL("duplicate ignore retained idx mismatch at 0");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != base_idxv[1])
+        FAIL("duplicate ignore retained idx mismatch at 1");
+    if (ops->nb_entries(&ft) != 2u)
+        FAIL("duplicate ignore should not increase entry count");
+
+    ops->stats(&ft, &stats);
+    if (stats.adds != 2u || stats.add_existing != 2u)
+        FAIL("duplicate ignore stats mismatch");
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(64u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(4u, ops->key_size);
+    uint32_t base_idxv[2] = { 1u, 2u };
+    uint32_t mix_idxv[5] = { 1u, 3u, 4u, 5u, 6u };
+    struct ft_table_result results[5];
+    struct ft_table_stats stats;
+
+    printf("[T] %s table add_idx_bulk mixed batch\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init(&ft, pool, 64u, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < 2u; i++) {
+        ops->make_key(TEST_KEY_AT(keys, ops, i), i + 6100u);
+        testv_bind_key(ops, &ft, base_idxv[i], TEST_KEY_AT(keys, ops, i));
+    }
+    ops->add_idx_bulk(&ft, base_idxv, 2u, results);
+
+    ops->make_key(TEST_KEY_AT(keys, ops, 2u), 6200u);
+    ops->make_key(TEST_KEY_AT(keys, ops, 3u), 6201u);
+    testv_bind_key(ops, &ft, 1u, TEST_KEY_AT(keys, ops, 0));
+    testv_bind_key(ops, &ft, 3u, TEST_KEY_AT(keys, ops, 1));
+    testv_bind_key(ops, &ft, 4u, TEST_KEY_AT(keys, ops, 2u));
+    testv_bind_key(ops, &ft, 5u, TEST_KEY_AT(keys, ops, 2u));
+    testv_bind_key(ops, &ft, 6u, TEST_KEY_AT(keys, ops, 3u));
+
+    memset(results, 0, sizeof(results));
+    ops->add_idx_bulk(&ft, mix_idxv, 5u, results);
+    if (results[0].entry_idx != 1u)
+        FAIL("mixed self-duplicate result mismatch");
+    if (results[1].entry_idx != 2u)
+        FAIL("mixed existing-duplicate result mismatch");
+    if (results[2].entry_idx != 4u)
+        FAIL("mixed insert result mismatch at 2");
+    if (results[3].entry_idx != 4u)
+        FAIL("mixed batch-duplicate result mismatch");
+    if (results[4].entry_idx != 6u)
+        FAIL("mixed insert result mismatch at 4");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 0)) != 1u)
+        FAIL("mixed self-duplicate retained idx mismatch");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != 2u)
+        FAIL("mixed existing-duplicate retained idx mismatch");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 2u)) != 4u)
+        FAIL("mixed inserted/duplicated key mismatch");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 3u)) != 6u)
+        FAIL("mixed inserted key mismatch");
+    if (ops->nb_entries(&ft) != 4u)
+        FAIL("mixed batch should add exactly two entries");
+
+    ops->stats(&ft, &stats);
+    if (stats.adds != 4u || stats.add_existing != 3u)
+        FAIL("mixed batch stats mismatch");
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_add_idx_bulk2_policy(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(64u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(16u, ops->key_size);
+    uint32_t base_idxv[4] = { 1u, 2u, 3u, 4u };
+    uint32_t dup_idxv[4] = { 5u, 6u, 7u, 8u };
+    uint32_t ins_idxv[4] = { 9u, 10u, 11u, 12u };
+    uint32_t mix_idxv[4] = { 5u, 13u, 14u, 15u };
+    struct ft_table_result results[4];
+    unsigned free_n;
+
+    printf("[T] %s table add_idx_bulk2 policy\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init(&ft, pool, 64u, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < 4u; i++) {
+        ops->make_key(TEST_KEY_AT(keys, ops, i), i + 7000u);
+        testv_bind_key(ops, &ft, base_idxv[i], TEST_KEY_AT(keys, ops, i));
+    }
+    ops->add_idx_bulk(&ft, base_idxv, 4u, results);
+
+    for (unsigned i = 0; i < 4u; i++)
+        testv_bind_key(ops, &ft, dup_idxv[i], TEST_KEY_AT(keys, ops, i));
+
+    free_n = ops->add_idx_bulk2(&ft, dup_idxv, 4u, FT_ADD_IGNORE, results);
+    if (free_n != 4u)
+        FAILF("ignore free_n=%u", free_n);
+    for (unsigned i = 0; i < 4u; i++) {
+        if (results[i].entry_idx != dup_idxv[i])
+            FAILF("ignore result mismatch at %u", i);
+        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i)) != base_idxv[i])
+            FAILF("ignore find mismatch at %u", i);
+    }
+
+    free_n = ops->add_idx_bulk2(&ft, dup_idxv, 4u, FT_ADD_UPDATE, results);
+    if (free_n != 4u)
+        FAILF("update free_n=%u", free_n);
+    for (unsigned i = 0; i < 4u; i++) {
+        if (results[i].entry_idx != base_idxv[i])
+            FAILF("update result mismatch at %u", i);
+        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i)) != dup_idxv[i])
+            FAILF("update find mismatch at %u", i);
+    }
+
+    for (unsigned i = 0; i < 4u; i++) {
+        ops->make_key(TEST_KEY_AT(keys, ops, i + 4u), i + 8000u);
+        testv_bind_key(ops, &ft, ins_idxv[i], TEST_KEY_AT(keys, ops, i + 4u));
+    }
+    memset(results, 0xff, sizeof(results));
+    free_n = ops->add_idx_bulk2(&ft, ins_idxv, 4u, FT_ADD_IGNORE, results);
+    if (free_n != 0u)
+        FAILF("insert free_n=%u", free_n);
+    for (unsigned i = 0; i < 4u; i++) {
+        if (results[i].entry_idx != (uint32_t)RIX_NIL)
+            FAILF("insert result mismatch at %u", i);
+        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i + 4u)) != ins_idxv[i])
+            FAILF("insert find mismatch at %u", i);
+    }
+
+    testv_bind_key(ops, &ft, mix_idxv[0], TEST_KEY_AT(keys, ops, 0));
+    testv_bind_key(ops, &ft, mix_idxv[1], TEST_KEY_AT(keys, ops, 1));
+    ops->make_key(TEST_KEY_AT(keys, ops, 8u), 9000u);
+    testv_bind_key(ops, &ft, mix_idxv[2], TEST_KEY_AT(keys, ops, 8u));
+    ops->make_key(TEST_KEY_AT(keys, ops, 9u), 9001u);
+    testv_bind_key(ops, &ft, mix_idxv[3], TEST_KEY_AT(keys, ops, 9u));
+
+    memset(results, 0xff, sizeof(results));
+    free_n = ops->add_idx_bulk2(&ft, mix_idxv, 4u, FT_ADD_IGNORE, results);
+    if (free_n != 1u)
+        FAILF("mixed ignore free_n=%u", free_n);
+    if (results[0].entry_idx != (uint32_t)RIX_NIL)
+        FAIL("mixed ignore self result mismatch");
+    if (results[1].entry_idx != mix_idxv[1])
+        FAIL("mixed ignore dup result mismatch");
+    if (results[2].entry_idx != (uint32_t)RIX_NIL ||
+        results[3].entry_idx != (uint32_t)RIX_NIL)
+        FAIL("mixed ignore insert result mismatch");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != dup_idxv[1])
+        FAIL("mixed ignore retained idx mismatch");
+    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 8u)) != mix_idxv[2] ||
+        ops->find(&ft, TEST_KEY_AT(keys, ops, 9u)) != mix_idxv[3])
+        FAIL("mixed ignore inserted find mismatch");
+
+    ops->make_key(TEST_KEY_AT(keys, ops, 10u), 9002u);
+    ops->make_key(TEST_KEY_AT(keys, ops, 11u), 9003u);
+    testv_bind_key(ops, &ft, 16u, TEST_KEY_AT(keys, ops, 0));
+    testv_bind_key(ops, &ft, 17u, TEST_KEY_AT(keys, ops, 1));
+    testv_bind_key(ops, &ft, 18u, TEST_KEY_AT(keys, ops, 10u));
+    testv_bind_key(ops, &ft, 19u, TEST_KEY_AT(keys, ops, 11u));
+    {
+        uint32_t upd_mix_idxv[4] = { 5u, 17u, 18u, 19u };
+
+        memset(results, 0xff, sizeof(results));
+        free_n = ops->add_idx_bulk2(&ft, upd_mix_idxv, 4u,
+                                    FT_ADD_UPDATE, results);
+        if (free_n != 1u)
+            FAILF("mixed update free_n=%u", free_n);
+        if (results[0].entry_idx != (uint32_t)RIX_NIL)
+            FAIL("mixed update self result mismatch");
+        if (results[1].entry_idx != dup_idxv[1])
+            FAIL("mixed update replace result mismatch");
+        if (results[2].entry_idx != (uint32_t)RIX_NIL ||
+            results[3].entry_idx != (uint32_t)RIX_NIL)
+            FAIL("mixed update insert result mismatch");
+        if (ops->find(&ft, TEST_KEY_AT(keys, ops, 0)) != 5u)
+            FAIL("mixed update self find mismatch");
+        if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != 17u)
+            FAIL("mixed update replaced idx mismatch");
+        if (ops->find(&ft, TEST_KEY_AT(keys, ops, 10u)) != 18u ||
+            ops->find(&ft, TEST_KEY_AT(keys, ops, 11u)) != 19u)
+            FAIL("mixed update inserted find mismatch");
+    }
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
 testv_manual_grow_preserves_entries(const struct test_variant_ops *ops)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
@@ -1450,15 +1701,14 @@ testv_manual_grow_preserves_entries(const struct test_variant_ops *ops)
 }
 
 static int
-testv_need_grow_and_reserve(const struct test_variant_ops *ops)
+testv_reserve(const struct test_variant_ops *ops)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
     union test_any_table ft;
     void *pool = test_aligned_calloc(200000u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
-    union test_any_key key;
 
-    printf("[T] %s table need_grow/reserve\n", ops->name);
+    printf("[T] %s table reserve\n", ops->name);
     if (pool == NULL)
         FAIL("calloc pool");
     if (ops->init(&ft, pool, 200000u, &cfg) != 0)
@@ -1470,16 +1720,6 @@ testv_need_grow_and_reserve(const struct test_variant_ops *ops)
     if (ops->nb_bk(&ft) != (ops->default_min_nb_bk << 1))
         FAIL("reserve should double nb_bk");
 
-    ops->destroy(&ft);
-    if (ops->init(&ft, pool, 200000u, &cfg) != 0)
-        FAIL("reinit failed");
-    for (unsigned i = 0; i < 160000u; i++) {
-        ops->make_key(&key, i + 1000u);
-        if (testv_add_idx_key(ops, &ft, i + 1u, &key) == 0u)
-            break;
-    }
-    if (ops->need_grow(&ft) == 0u)
-        FAIL("need_grow should be set");
     ops->destroy(&ft);
     free(pool);
     return 0;
@@ -1600,17 +1840,23 @@ testv_fuzz(const struct test_variant_ops *ops,
 static int
 test_variant_suite(const struct test_variant_ops *ops)
 {
-    if (testv_basic_add_find_del(ops) != 0)
-        return 1;
     if (testv_init_ex_and_mapping(ops) != 0)
+        return 1;
+    if (testv_basic_add_find_del(ops) != 0)
         return 1;
     if (testv_bulk_ops_and_stats(ops) != 0)
         return 1;
-    if (testv_manual_grow_preserves_entries(ops) != 0)
+    if (testv_add_idx_bulk_duplicate_ignore(ops) != 0)
         return 1;
-    if (testv_need_grow_and_reserve(ops) != 0)
+    if (testv_add_idx_bulk_mixed_batch(ops) != 0)
+        return 1;
+    if (testv_add_idx_bulk2_policy(ops) != 0)
         return 1;
     if (testv_walk_flush_and_del_idx(ops) != 0)
+        return 1;
+    if (testv_manual_grow_preserves_entries(ops) != 0)
+        return 1;
+    if (testv_reserve(ops) != 0)
         return 1;
     if (testv_fuzz(ops, 3237998097u, 512u, 64u, 200000u) != 0)
         return 1;
@@ -1620,39 +1866,50 @@ test_variant_suite(const struct test_variant_ops *ops)
 int
 main(void)
 {
+    /* lifecycle / mapping */
+    if (test_init_ex_and_mapping() != 0)
+        return 1;
+
+    /* find / add / del */
     if (test_basic_add_find_del() != 0)
         return 1;
     if (test_duplicate_and_delete_miss_stats() != 0)
         return 1;
     if (test_bulk_ops_and_stats() != 0)
         return 1;
-    if (test_init_ex_and_mapping() != 0)
+    if (test_del_idx() != 0)
         return 1;
+
+    /* walk / flush / stats */
     if (test_walk_early_stop() != 0)
         return 1;
+    if (test_walk_flush_and_stats_reset() != 0)
+        return 1;
+
+    /* grow / reserve / config */
     if (test_manual_grow_preserves_entries() != 0)
         return 1;
     if (test_grow_failure_preserves_table() != 0)
         return 1;
-    if (test_need_grow_and_reserve() != 0)
-        return 1;
-    if (test_walk_flush_and_stats_reset() != 0)
+    if (test_reserve() != 0)
         return 1;
     if (test_allocator_failure_and_max_bucket_limit() != 0)
         return 1;
     if (test_config_rounding_and_clamp() != 0)
         return 1;
+
+    /* fill / kickout / fuzz */
     if (test_high_fill() != 0)
         return 1;
     if (test_max_fill() != 0)
         return 1;
     if (test_kickout_safety() != 0)
         return 1;
-    if (test_del_idx() != 0)
-        return 1;
     if (test_fuzz(3237998097u, 512u, 64u, 200000u) != 0)
         return 1;
     if (test_fuzz(3237998097u, 1000u, 64u, 500000u) != 0)
+        return 1;
+    if (test_variant_suite(&test_ops_flow4) != 0)
         return 1;
     if (test_variant_suite(&test_ops_flow6) != 0)
         return 1;

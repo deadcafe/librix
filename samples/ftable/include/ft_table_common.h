@@ -159,6 +159,11 @@ struct ft_table_result {
     uint32_t entry_idx;
 };
 
+enum ft_add_policy {
+    FT_ADD_IGNORE = 0u,
+    FT_ADD_UPDATE = 1u,
+};
+
 struct ft_table_config {
     unsigned start_nb_bk;
     unsigned max_nb_bk;
@@ -175,7 +180,6 @@ struct ft_table_stats {
     uint64_t add_failed;
     uint64_t dels;
     uint64_t del_miss;
-    uint64_t grow_marks;
     uint64_t grow_execs;
     uint64_t grow_failures;
     uint64_t reserve_calls;

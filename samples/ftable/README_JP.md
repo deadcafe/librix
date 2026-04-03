@@ -25,6 +25,9 @@ make -C samples/ftable static
 # 正当性テスト
 make -C samples/ftable/test test
 
+# 仕様表と test 対応表
+sed -n '1,220p' samples/ftable/TEST_SPEC_JP.md
+
 # 現在の benchmark 一式
 make -C samples/ftable/test bench
 
@@ -35,6 +38,9 @@ make -C samples ftable-bench
 ```
 
 ## 1. 設計目標
+
+test の基準表は [TEST_SPEC_JP.md](/home/tokuzo/work/deadcafe/librix/samples/ftable/TEST_SPEC_JP.md) を参照。
+最適化前に、まずこの仕様表と test 対応表を固定する。
 
 この実装の狙いは cache ではなく permanent-style flow table である。
 entry は caller が delete するまで生存する前提で扱う。
@@ -56,7 +62,7 @@ entry は caller が delete するまで生存する前提で扱う。
 - scalar / bulk の `find`、`add`、`del`
 - caller-defined record layout を扱う intrusive `init_ex()`
 - サフィックスなし公開 API + runtime arch dispatch
-- `need_grow`、`grow_2x`、`reserve`
+- `grow_2x`、`reserve`
 - bucket-table-only resize
 
 まだ未実装のもの:
@@ -288,7 +294,6 @@ bucket memory は `struct ft_bucket_allocator` の callback で受け取る。
 - `ft_flow4_table_find_bulk()`
 - `ft_flow4_table_add_idx_bulk()`
 - `ft_flow4_table_del_entry_idx_bulk()`
-- `ft_flow4_table_need_grow()`
 - `ft_flow4_table_grow_2x()`
 - `ft_flow4_table_reserve()`
 - `ft_arch_init()`
@@ -402,8 +407,8 @@ helper API / macro:
 想定する運用は以下である。
 
 - `50%`〜`60%` 程度の conservative fill を保つ
-- watermark を超えたら `need_grow` を立てる
-- 実際の `grow_2x()` は caller が都合のよいタイミングで実行する
+- `grow_2x()` を実行するかどうかは caller が stats と運用都合で決める
+- 必要なら `reserve()` で事前に bucket table を拡張する
 
 現行試作では incremental migration は持たない。grow は一括 rebuild である。
 
@@ -430,7 +435,6 @@ helper API / macro:
 - manual `grow_2x()` 後も既存 entry が保たれること
 - 複数回 `grow_2x()` 後も `hash0/hash1` が不変なこと
 - `grow_2x()` 失敗時に旧 table が壊れないこと
-- `need_grow()` の動作
 - `reserve()` による事前 grow
 - 初期 bucket 確保での allocator failure
 - max bucket 制約

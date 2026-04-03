@@ -39,7 +39,6 @@ struct ft_flowu_table {
     unsigned                    max_entries;
     uint32_t                    free_head;
     unsigned                    grow_fill_pct;
-    unsigned                    need_grow;
     struct ft_table_stats       stats;
 };
 
@@ -63,7 +62,6 @@ void ft_flowu_table_destroy(struct ft_flowu_table *ft);
 void ft_flowu_table_flush(struct ft_flowu_table *ft);
 unsigned ft_flowu_table_nb_entries(const struct ft_flowu_table *ft);
 unsigned ft_flowu_table_nb_bk(const struct ft_flowu_table *ft);
-unsigned ft_flowu_table_need_grow(const struct ft_flowu_table *ft);
 void ft_flowu_table_stats(const struct ft_flowu_table *ft,
                           struct ft_table_stats *out);
 
@@ -86,6 +84,12 @@ void ft_flowu_table_add_idx_bulk(struct ft_flowu_table *ft,
                                  const uint32_t *entry_idxv,
                                  unsigned nb_keys,
                                  struct ft_table_result *results);
+
+unsigned ft_flowu_table_add_idx_bulk2(struct ft_flowu_table *ft,
+                                      const uint32_t *entry_idxv,
+                                      unsigned nb_keys,
+                                      enum ft_add_policy policy,
+                                      struct ft_table_result *results);
 
 
 uint32_t ft_flowu_table_del_key(struct ft_flowu_table *ft,
