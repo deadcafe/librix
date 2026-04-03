@@ -282,16 +282,11 @@ Important APIs:
 - `ft_flow4_table_flush()`
 - `ft_flow4_table_find()`
 - `ft_flow4_table_add_entry_idx()`
-- `ft_flow4_table_add_entry_ptr()`
 - `ft_flow4_table_del_key()`
 - `ft_flow4_table_del_entry_idx()`
-- `ft_flow4_table_del_entry_ptr()`
 - `ft_flow4_table_find_bulk()`
-- `ft_flow4_table_add_entry_idx_bulk()`
-- `ft_flow4_table_add_entry_ptr_bulk()`
-- `ft_flow4_table_del_key_bulk()`
+- `ft_flow4_table_add_idx_bulk()`
 - `ft_flow4_table_del_entry_idx_bulk()`
-- `ft_flow4_table_del_entry_ptr_bulk()`
 - `ft_flow4_table_need_grow()`
 - `ft_flow4_table_grow_2x()`
 - `ft_flow4_table_reserve()`

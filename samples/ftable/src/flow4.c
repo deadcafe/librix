@@ -220,20 +220,19 @@ void _FTG_API(flow4, find_bulk)(struct ft_flow4_table *ft,
                                 const struct flow4_key *keys,
                                 unsigned nb_keys,
                                 struct ft_table_result *results);
-uint32_t _FTG_API(flow4, add_entry_idx)(struct ft_flow4_table *ft,
-                                        uint32_t entry_idx);
-void _FTG_API(flow4, add_entry_idx_bulk)(struct ft_flow4_table *ft,
-                                         const uint32_t *entry_idxv,
-                                         unsigned nb_keys,
-                                         struct ft_table_result *results);
+uint32_t _FTG_API(flow4, add_idx)(struct ft_flow4_table *ft,
+                                  uint32_t entry_idx);
+void _FTG_API(flow4, add_idx_bulk)(struct ft_flow4_table *ft,
+                                   const uint32_t *entry_idxv,
+                                   unsigned nb_keys,
+                                   struct ft_table_result *results);
 uint32_t _FTG_API(flow4, del_key)(struct ft_flow4_table *ft,
                                   const struct flow4_key *key);
 uint32_t _FTG_API(flow4, del_entry_idx)(struct ft_flow4_table *ft,
                                         uint32_t entry_idx);
-void _FTG_API(flow4, del_key_bulk)(struct ft_flow4_table *ft,
-                                   const struct flow4_key *keys,
-                                   unsigned nb_keys,
-                                   struct ft_table_result *results);
+void _FTG_API(flow4, del_entry_idx_bulk)(struct ft_flow4_table *ft,
+                                         const uint32_t *entry_idxv,
+                                         unsigned nb_keys);
 int _FTG_API(flow4, walk)(struct ft_flow4_table *ft,
                           int (*cb)(uint32_t entry_idx, void *arg),
                           void *arg);

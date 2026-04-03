@@ -186,25 +186,16 @@ struct test_variant_ops {
     unsigned (*need_grow)(const void *ft);
     void (*stats)(const void *ft, struct ft_table_stats *out);
     uint32_t (*find)(void *ft, const void *key);
-    uint32_t (*add_entry_idx)(void *ft, uint32_t entry_idx);
+    uint32_t (*add_idx)(void *ft, uint32_t entry_idx);
     uint32_t (*del_key)(void *ft, const void *key);
     uint32_t (*del_entry_idx)(void *ft, uint32_t entry_idx);
     void (*find_bulk)(void *ft, const void *keys, unsigned nb_keys,
                       struct ft_table_result *results);
-    void (*add_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
-                               unsigned nb_keys,
-                               struct ft_table_result *results);
-    void (*add_entry_ptr_bulk)(void *ft, const void *const *entryv,
-                               unsigned nb_keys,
-                               struct ft_table_result *results);
-    void (*del_key_bulk)(void *ft, const void *keys, unsigned nb_keys,
+    void (*add_idx_bulk)(void *ft, const uint32_t *entry_idxv,
+                         unsigned nb_keys,
                          struct ft_table_result *results);
     void (*del_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
-                               unsigned nb_keys,
-                               struct ft_table_result *results);
-    void (*del_entry_ptr_bulk)(void *ft, const void *const *entryv,
-                               unsigned nb_keys,
-                               struct ft_table_result *results);
+                               unsigned nb_keys);
     int (*walk)(void *ft, int (*cb)(uint32_t entry_idx, void *arg), void *arg);
     int (*grow_2x)(void *ft);
     int (*reserve)(void *ft, unsigned min_entries);
@@ -215,11 +206,11 @@ struct test_variant_ops {
 
 #define TEST_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, entry_t, init_ex_fn, \
                               destroy_fn, flush_fn, nb_entries_fn, nb_bk_fn,   \
-                              need_grow_fn, stats_fn, find_fn, add_entry_idx_fn,\
+                              need_grow_fn, stats_fn, find_fn, add_idx_fn,      \
                               del_key_fn, del_entry_idx_fn, find_bulk_fn,       \
-                              add_entry_idx_bulk_fn, add_entry_ptr_bulk_fn,     \
-                              del_key_bulk_fn, del_entry_idx_bulk_fn,           \
-                              del_entry_ptr_bulk_fn, walk_fn, grow_2x_fn,       \
+                              add_idx_bulk_fn,                                 \
+                              del_entry_idx_bulk_fn,                           \
+                              walk_fn, grow_2x_fn,                              \
                               reserve_fn, record_ptr_fn, entry_ptr_fn,          \
                               make_key_fn, default_min_nb_bk_v)                 \
 static int                                                                 \
@@ -267,9 +258,9 @@ testv_find_##tag(void *ft, const void *key)                                 \
                    (const key_t *)key);                                     \
 }                                                                          \
 static uint32_t                                                             \
-testv_add_entry_idx_##tag(void *ft, uint32_t entry_idx)                     \
+testv_add_idx_##tag(void *ft, uint32_t entry_idx)                           \
 {                                                                          \
-    return add_entry_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);  \
+    return add_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);        \
 }                                                                          \
 static uint32_t                                                             \
 testv_del_key_##tag(void *ft, const void *key)                              \
@@ -290,45 +281,19 @@ testv_find_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,         \
                  (const key_t *)keys, nb_keys, results);                    \
 }                                                                          \
 static void                                                                 \
-testv_add_entry_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,        \
-                               unsigned nb_keys,                             \
-                               struct ft_table_result *results)              \
-{                                                                          \
-    add_entry_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
-                          entry_idxv, nb_keys, results);                    \
-}                                                                          \
-static void                                                                 \
-testv_add_entry_ptr_bulk_##tag(void *ft, const void *const *entryv,         \
-                               unsigned nb_keys,                             \
-                               struct ft_table_result *results)              \
-{                                                                          \
-    add_entry_ptr_bulk_fn((struct ft_##prefix##_table *)ft,                 \
-                          (const entry_t *const *)entryv,                   \
-                          nb_keys, results);                                \
-}                                                                          \
-static void                                                                 \
-testv_del_key_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,      \
+testv_add_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,              \
+                         unsigned nb_keys,                                   \
                          struct ft_table_result *results)                    \
 {                                                                          \
-    del_key_bulk_fn((struct ft_##prefix##_table *)ft,                       \
-                    (const key_t *)keys, nb_keys, results);                 \
+    add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                       \
+                    entry_idxv, nb_keys, results);                          \
 }                                                                          \
 static void                                                                 \
 testv_del_entry_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,        \
-                               unsigned nb_keys,                             \
-                               struct ft_table_result *results)              \
+                               unsigned nb_keys)                             \
 {                                                                          \
     del_entry_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
-                          entry_idxv, nb_keys, results);                    \
-}                                                                          \
-static void                                                                 \
-testv_del_entry_ptr_bulk_##tag(void *ft, const void *const *entryv,         \
-                               unsigned nb_keys,                             \
-                               struct ft_table_result *results)              \
-{                                                                          \
-    del_entry_ptr_bulk_fn((struct ft_##prefix##_table *)ft,                 \
-                          (const entry_t *const *)entryv,                   \
-                          nb_keys, results);                                \
+                          entry_idxv, nb_keys);                             \
 }                                                                          \
 static int                                                                  \
 testv_walk_##tag(void *ft, int (*cb)(uint32_t entry_idx, void *arg),        \
@@ -377,15 +342,12 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .need_grow = testv_need_grow_##tag,                                     \
     .stats = testv_stats_##tag,                                             \
     .find = testv_find_##tag,                                               \
-    .add_entry_idx = testv_add_entry_idx_##tag,                             \
+    .add_idx = testv_add_idx_##tag,                                         \
     .del_key = testv_del_key_##tag,                                         \
     .del_entry_idx = testv_del_entry_idx_##tag,                             \
     .find_bulk = testv_find_bulk_##tag,                                     \
-    .add_entry_idx_bulk = testv_add_entry_idx_bulk_##tag,                   \
-    .add_entry_ptr_bulk = testv_add_entry_ptr_bulk_##tag,                   \
-    .del_key_bulk = testv_del_key_bulk_##tag,                               \
+    .add_idx_bulk = testv_add_idx_bulk_##tag,                               \
     .del_entry_idx_bulk = testv_del_entry_idx_bulk_##tag,                   \
-    .del_entry_ptr_bulk = testv_del_entry_ptr_bulk_##tag,                   \
     .walk = testv_walk_##tag,                                               \
     .grow_2x = testv_grow_2x_##tag,                                         \
     .reserve = testv_reserve_##tag,                                         \
@@ -401,10 +363,8 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       ft_flow6_table_need_grow, ft_flow6_table_stats,
                       ft_flow6_table_find, ft_flow6_table_add_entry_idx,
                       ft_flow6_table_del_key, ft_flow6_table_del_entry_idx,
-                      ft_flow6_table_find_bulk, ft_flow6_table_add_entry_idx_bulk,
-                      ft_flow6_table_add_entry_ptr_bulk, ft_flow6_table_del_key_bulk,
-                      ft_flow6_table_del_entry_idx_bulk,
-                      ft_flow6_table_del_entry_ptr_bulk, ft_flow6_table_walk,
+                      ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
+                      ft_flow6_table_del_entry_idx_bulk, ft_flow6_table_walk,
                       ft_flow6_table_grow_2x, ft_flow6_table_reserve,
                       ft_flow6_table_record_ptr, ft_flow6_table_entry_ptr,
                       test_key6, FT_FLOW6_DEFAULT_MIN_NB_BK);
@@ -416,10 +376,8 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       ft_flowu_table_need_grow, ft_flowu_table_stats,
                       ft_flowu_table_find, ft_flowu_table_add_entry_idx,
                       ft_flowu_table_del_key, ft_flowu_table_del_entry_idx,
-                      ft_flowu_table_find_bulk, ft_flowu_table_add_entry_idx_bulk,
-                      ft_flowu_table_add_entry_ptr_bulk, ft_flowu_table_del_key_bulk,
-                      ft_flowu_table_del_entry_idx_bulk,
-                      ft_flowu_table_del_entry_ptr_bulk, ft_flowu_table_walk,
+                      ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
+                      ft_flowu_table_del_entry_idx_bulk, ft_flowu_table_walk,
                       ft_flowu_table_grow_2x, ft_flowu_table_reserve,
                       ft_flowu_table_record_ptr, ft_flowu_table_entry_ptr,
                       test_keyu, FT_FLOWU_DEFAULT_MIN_NB_BK);
@@ -436,7 +394,7 @@ test_add_idx_key(struct ft_flow4_table *ft, uint32_t entry_idx,
     if (entry == NULL)
         return 0u;
     entry->key = *key;
-    return ft_flow4_table_add_entry_idx(ft, entry_idx);
+    return ft_flow4_table_add_idx(ft, entry_idx);
 }
 
 struct walk_ctx {
@@ -639,7 +597,7 @@ test_bulk_ops_and_stats(void)
         entry_idxv[i] = i + 1u;
     }
 
-    ft_flow4_table_add_entry_idx_bulk(&ft, entry_idxv, 8u, results);
+    ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 8u, results);
     for (unsigned i = 0; i < 8u; i++) {
         if (results[i].entry_idx != entry_idxv[i])
             FAILF("add_bulk failed at %u", i);
@@ -652,16 +610,15 @@ test_bulk_ops_and_stats(void)
             FAILF("find_bulk miss at %u", i);
     }
 
-    ft_flow4_table_add_entry_idx_bulk(&ft, entry_idxv, 8u, results);
+    ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 8u, results);
     for (unsigned i = 0; i < 8u; i++) {
         if (results[i].entry_idx != entry_idxv[i])
             FAILF("duplicate add_bulk failed at %u", i);
     }
 
-    ft_flow4_table_del_key_bulk(&ft, keys, 4u, results);
     for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx == 0u)
-            FAILF("del_bulk failed at %u", i);
+        if (ft_flow4_table_del_key(&ft, &keys[i]) == 0u)
+            FAILF("del_key failed at %u", i);
     }
 
     memset(results, 0, sizeof(results));
@@ -695,61 +652,6 @@ test_bulk_ops_and_stats(void)
     free(pool);
     return 0;
 }
-
-static int
-test_entry_bulk_registration(void)
-{
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
-    struct ft_flow4_table ft;
-    struct test_user_record *pool;
-    struct flow4_key keys[4];
-    uint32_t entry_idxv[4];
-    const struct flow4_entry *entryv[4];
-    struct ft_table_result results[4];
-
-    printf("[T] flow4 table entry bulk registration\n");
-    pool = test_aligned_calloc(64u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
-    if (pool == NULL)
-        FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 64u, struct test_user_record, entry, &cfg) != 0)
-        FAIL("init failed");
-
-    for (unsigned i = 0; i < 4u; i++) {
-        keys[i] = test_key(i + 2500u);
-        pool[8u + i].entry.key = keys[i];
-        entry_idxv[i] = 9u + i;
-        entryv[i] = &pool[8u + i].entry;
-    }
-
-    ft_flow4_table_add_entry_ptr_bulk(&ft, entryv, 4u, results);
-    for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx != 9u + i)
-            FAILF("add_entry_ptr_bulk failed at %u", i);
-        if (ft_flow4_table_find(&ft, &keys[i]) != 9u + i)
-            FAILF("find after add_entry_ptr_bulk failed at %u", i);
-    }
-
-    ft_flow4_table_del_entry_idx_bulk(&ft, entry_idxv, 2u, results);
-    for (unsigned i = 0; i < 2u; i++) {
-        if (results[i].entry_idx != entry_idxv[i])
-            FAILF("del_entry_idx_bulk failed at %u", i);
-        if (ft_flow4_table_find(&ft, &keys[i]) != 0u)
-            FAILF("find after del_entry_idx_bulk failed at %u", i);
-    }
-
-    ft_flow4_table_del_entry_ptr_bulk(&ft, &entryv[2], 2u, results);
-    for (unsigned i = 2u; i < 4u; i++) {
-        if (results[i - 2u].entry_idx != entry_idxv[i])
-            FAILF("del_entry_ptr_bulk failed at %u", i);
-        if (ft_flow4_table_find(&ft, &keys[i]) != 0u)
-            FAILF("find after del_entry_ptr_bulk failed at %u", i);
-    }
-
-    ft_flow4_table_destroy(&ft);
-    free(pool);
-    return 0;
-}
-
 
 static int
 test_walk_flush_and_stats_reset(void)
@@ -1360,7 +1262,7 @@ testv_add_idx_key(const struct test_variant_ops *ops, void *ft,
                   uint32_t entry_idx, const void *key)
 {
     testv_bind_key(ops, ft, entry_idx, key);
-    return ops->add_entry_idx(ft, entry_idx);
+    return ops->add_idx(ft, entry_idx);
 }
 
 static int
@@ -1467,7 +1369,7 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
         entry_idxv[i] = i + 1u;
     }
 
-    ops->add_entry_idx_bulk(&ft, entry_idxv, 8u, results);
+    ops->add_idx_bulk(&ft, entry_idxv, 8u, results);
     for (unsigned i = 0; i < 8u; i++) {
         if (results[i].entry_idx != entry_idxv[i])
             FAILF("add_bulk failed at %u", i);
@@ -1480,16 +1382,15 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
             FAILF("find_bulk miss at %u", i);
     }
 
-    ops->add_entry_idx_bulk(&ft, entry_idxv, 8u, results);
+    ops->add_idx_bulk(&ft, entry_idxv, 8u, results);
     for (unsigned i = 0; i < 8u; i++) {
         if (results[i].entry_idx != entry_idxv[i])
             FAILF("duplicate add_bulk failed at %u", i);
     }
 
-    ops->del_key_bulk(&ft, keys, 4u, results);
     for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx == 0u)
-            FAILF("del_bulk failed at %u", i);
+        if (ops->del_key(&ft, TEST_KEY_AT(keys, ops, i)) == 0u)
+            FAILF("del_key failed at %u", i);
     }
 
     memset(results, 0, sizeof(results));
@@ -1508,63 +1409,6 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
         || stats.hits != 12u || stats.misses != 4u || stats.dels != 4u
         || stats.del_miss != 0u)
         FAIL("bulk stats mismatch");
-
-    ops->destroy(&ft);
-    free(keys);
-    free(pool);
-    return 0;
-}
-
-static int
-testv_entry_bulk_api(const struct test_variant_ops *ops)
-{
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
-    union test_any_table ft;
-    void *pool = test_aligned_calloc(64u, ops->record_size,
-                                     FT_TABLE_CACHE_LINE_SIZE);
-    void *keys = calloc(4u, ops->key_size);
-    const void *entryv[4];
-    uint32_t entry_idxv[4];
-    struct ft_table_result results[4];
-
-    printf("[T] %s table entry bulk API\n", ops->name);
-    if (pool == NULL || keys == NULL)
-        FAIL("alloc failed");
-    if (ops->init(&ft, pool, 64u, &cfg) != 0)
-        FAIL("init failed");
-
-    for (unsigned i = 0; i < 4u; i++) {
-        entry_idxv[i] = 9u + i;
-        ops->make_key(TEST_KEY_AT(keys, ops, i), i + 2500u);
-        testv_bind_key(ops, &ft, entry_idxv[i], TEST_KEY_AT(keys, ops, i));
-        entryv[i] = ops->entry_ptr(&ft, entry_idxv[i]);
-        if (entryv[i] == NULL)
-            FAILF("entry_ptr failed at %u", i);
-    }
-
-    ops->add_entry_ptr_bulk(&ft, entryv, 4u, results);
-    for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx != entry_idxv[i])
-            FAILF("add_entry_ptr_bulk failed at %u", i);
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i)) != entry_idxv[i])
-            FAILF("find after add_entry_ptr_bulk failed at %u", i);
-    }
-
-    ops->del_entry_idx_bulk(&ft, entry_idxv, 2u, results);
-    for (unsigned i = 0; i < 2u; i++) {
-        if (results[i].entry_idx != entry_idxv[i])
-            FAILF("del_entry_idx_bulk failed at %u", i);
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i)) != 0u)
-            FAILF("find after del_entry_idx_bulk failed at %u", i);
-    }
-
-    ops->del_entry_ptr_bulk(&ft, &entryv[2], 2u, results);
-    for (unsigned i = 2u; i < 4u; i++) {
-        if (results[i - 2u].entry_idx != entry_idxv[i])
-            FAILF("del_entry_ptr_bulk failed at %u", i);
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i)) != 0u)
-            FAILF("find after del_entry_ptr_bulk failed at %u", i);
-    }
 
     ops->destroy(&ft);
     free(keys);
@@ -1762,8 +1606,6 @@ test_variant_suite(const struct test_variant_ops *ops)
         return 1;
     if (testv_bulk_ops_and_stats(ops) != 0)
         return 1;
-    if (testv_entry_bulk_api(ops) != 0)
-        return 1;
     if (testv_manual_grow_preserves_entries(ops) != 0)
         return 1;
     if (testv_need_grow_and_reserve(ops) != 0)
@@ -1783,8 +1625,6 @@ main(void)
     if (test_duplicate_and_delete_miss_stats() != 0)
         return 1;
     if (test_bulk_ops_and_stats() != 0)
-        return 1;
-    if (test_entry_bulk_registration() != 0)
         return 1;
     if (test_init_ex_and_mapping() != 0)
         return 1;

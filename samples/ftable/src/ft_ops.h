@@ -21,20 +21,19 @@ struct ft_##prefix##_ops {                                                     \
                       const struct prefix##_key *keys,                         \
                       unsigned nb_keys,                                        \
                       struct ft_table_result *results);                   \
-    uint32_t (*add_entry_idx)(struct ft_##prefix##_table *ft,                  \
-                              uint32_t entry_idx);                             \
-    void (*add_entry_idx_bulk)(struct ft_##prefix##_table *ft,                 \
-                               const uint32_t *entry_idxv,                     \
-                               unsigned nb_keys,                               \
-                               struct ft_table_result *results);          \
+    uint32_t (*add_idx)(struct ft_##prefix##_table *ft,                        \
+                        uint32_t entry_idx);                                   \
+    void (*add_idx_bulk)(struct ft_##prefix##_table *ft,                       \
+                         const uint32_t *entry_idxv,                           \
+                         unsigned nb_keys,                                     \
+                         struct ft_table_result *results);                \
     uint32_t (*del_key)(struct ft_##prefix##_table *ft,                        \
                         const struct prefix##_key *key);                       \
     uint32_t (*del_entry_idx)(struct ft_##prefix##_table *ft,                  \
                               uint32_t entry_idx);                             \
-    void (*del_key_bulk)(struct ft_##prefix##_table *ft,                       \
-                         const struct prefix##_key *keys,                      \
-                         unsigned nb_keys,                                     \
-                         struct ft_table_result *results);                \
+    void (*del_entry_idx_bulk)(struct ft_##prefix##_table *ft,                 \
+                               const uint32_t *entry_idxv,                     \
+                               unsigned nb_keys);                              \
 }
 
 FT_OPS_DEFINE(flow4);

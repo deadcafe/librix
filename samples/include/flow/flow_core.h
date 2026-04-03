@@ -9,8 +9,8 @@
  * Provides:
  *   1. Record pool macros (stride/offset-based indirection)
  *   2. Bucket allocator / record layout types
- *   3. FCORE_GENERATE macro: find_bulk, add_idx_bulk, del_key_bulk,
- *      del_idx_bulk, free list, counters, and optionally findadd_bulk
+ *   3. FCORE_GENERATE macro: find_bulk, add_idx_bulk, del_idx_bulk,
+ *      free list, counters, and optionally findadd_bulk
  *
  * Usage in variant .c files:
  *
@@ -431,82 +431,61 @@ _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
     _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
     const uint32_t hash_mask = FCORE_HASH_MASK(owner, ht);                    \
-    const unsigned ctx_mask = FCORE_BULK_CTX_COUNT - 1u;                      \
     struct rix_hash_find_ctx_s ctx[FCORE_BULK_CTX_COUNT];                     \
+    uint64_t hit_count = 0u;                                                  \
+    uint64_t miss_count = 0u;                                                 \
+    const unsigned ctx_mask = FCORE_BULK_CTX_COUNT - 1u;                      \
     const unsigned ahead = FCORE_BULK_AHEAD_KEYS;                             \
     const unsigned step  = FCORE_BULK_STEP_KEYS;                              \
     const unsigned total = nb_keys + 3u * ahead;                              \
     for (unsigned _i = 0; _i < total; _i += step) {                           \
-        /* Stage 1: hash + prefetch both buckets */                           \
         if (_i < nb_keys) {                                                   \
             unsigned _n = (_i + step <= nb_keys) ? step : (nb_keys - _i);     \
-            unsigned _ci = _i & ctx_mask;                                     \
-            const _FCORE_KEY_T(p) *_keyv[FCORE_BULK_STEP_KEYS];               \
-            if (RIX_LIKELY(_ci + _n <= FCORE_BULK_CTX_COUNT)) {               \
-                for (unsigned _j = 0; _j < _n; _j++)                          \
-                    _keyv[_j] = &keys[_i + _j];                               \
-                RIX_HASH_HASH_KEY_N_MASKED(ht, &ctx[_ci], _n, head, buckets,  \
-                                           _keyv, hash_mask,                  \
-                                           head->rhh_mask);                   \
-            } else {                                                          \
-                unsigned _n0 = FCORE_BULK_CTX_COUNT - _ci;                    \
-                unsigned _n1 = _n - _n0;                                      \
-                for (unsigned _j = 0; _j < _n0; _j++)                         \
-                    _keyv[_j] = &keys[_i + _j];                               \
-                RIX_HASH_HASH_KEY_N_MASKED(ht, &ctx[_ci], _n0, head, buckets, \
-                                           _keyv, hash_mask,                  \
-                                           head->rhh_mask);                   \
-                for (unsigned _j = 0; _j < _n1; _j++)                         \
-                    _keyv[_j] = &keys[_i + _n0 + _j];                         \
-                RIX_HASH_HASH_KEY_N_MASKED(ht, &ctx[0], _n1, head, buckets,   \
-                                           _keyv, hash_mask,                  \
-                                           head->rhh_mask);                   \
-            }                                                                 \
+            for (unsigned _j = 0; _j < _n; _j++)                              \
+                _FCORE_HT(ht, hash_key_2bk_masked)(                           \
+                    &ctx[(_i + _j) & ctx_mask], buckets,                     \
+                    &keys[_i + _j], hash_mask, head->rhh_mask);              \
         }                                                                     \
-        /* Stage 2: scan bucket fingerprints */                               \
         if (_i >= ahead && _i - ahead < nb_keys) {                            \
             unsigned _base = _i - ahead;                                      \
             unsigned _n = (_base + step <= nb_keys) ? step                    \
                                                     : (nb_keys - _base);      \
-            for (unsigned _j = 0; _j < _n; _j++)                             \
+            for (unsigned _j = 0; _j < _n; _j++)                              \
                 _FCORE_HT(ht, scan_bk)(                                       \
-                    &ctx[(_base + _j) & ctx_mask],                            \
-                    head, buckets);                                           \
+                    &ctx[(_base + _j) & ctx_mask], head, buckets);           \
         }                                                                     \
-        /* Stage 3: prefetch matched entry */                                 \
-        if (_i >= 2u * ahead && _i - 2u * ahead < nb_keys) {                 \
+        if (_i >= 2u * ahead && _i - 2u * ahead < nb_keys) {                  \
             unsigned _base = _i - 2u * ahead;                                 \
             unsigned _n = (_base + step <= nb_keys) ? step                    \
                                                     : (nb_keys - _base);      \
-            for (unsigned _j = 0; _j < _n; _j++)                             \
-                _FCORE_HT(ht, prefetch_node)(                                  \
+            for (unsigned _j = 0; _j < _n; _j++)                              \
+                _FCORE_HT(ht, prefetch_node)(                                 \
                     &ctx[(_base + _j) & ctx_mask],                            \
                     hash_base);                                               \
         }                                                                     \
-        /* Stage 4: compare key, resolve hit/miss */                          \
-        if (_i >= 3u * ahead && _i - 3u * ahead < nb_keys) {                 \
+        if (_i >= 3u * ahead && _i - 3u * ahead < nb_keys) {                  \
             unsigned _base = _i - 3u * ahead;                                 \
             unsigned _n = (_base + step <= nb_keys) ? step                    \
                                                     : (nb_keys - _base);      \
-            for (unsigned _j = 0; _j < _n; _j++) {                           \
+            for (unsigned _j = 0; _j < _n; _j++) {                            \
                 unsigned _idx = _base + _j;                                   \
                 _FCORE_ENTRY_T(p) *entry = _FCORE_HT(ht, cmp_key)(            \
-                    &ctx[_idx & ctx_mask],                                    \
-                    hash_base);                                               \
+                    &ctx[_idx & ctx_mask], hash_base);                        \
                 if (RIX_LIKELY(entry != NULL)) {                              \
-                    uint32_t _eidx =                                          \
-                        FCORE_LAYOUT_ENTRY_INDEX(owner, entry);               \
+                    uint32_t _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
                     FCORE_ON_HIT(owner, entry, _eidx);                        \
                     results[_idx] = _eidx;                                    \
-                    owner->stats.hits++;                                       \
+                    hit_count++;                                              \
                 } else {                                                      \
                     results[_idx] = 0u;                                       \
-                    owner->stats.misses++;                                     \
+                    miss_count++;                                             \
                 }                                                             \
             }                                                                 \
         }                                                                     \
     }                                                                         \
     owner->stats.lookups += nb_keys;                                          \
+    owner->stats.hits += hit_count;                                           \
+    owner->stats.misses += miss_count;                                        \
 }                                                                             \
                                                                               \
 /*=== add_idx_bulk (2-stage pipeline) ======================================*/\
@@ -706,8 +685,7 @@ _FCORE_INT(p, add_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
 static RIX_UNUSED void                                                        \
 _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                              const uint32_t *idxs,                            \
-                             unsigned nb_idxs,                                 \
-                             uint32_t *results)                                \
+                             unsigned nb_idxs)                                 \
 {                                                                             \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
@@ -717,20 +695,16 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
     const unsigned total = nb_idxs + ahead;                                   \
                                                                               \
     for (unsigned _i = 0; _i < total; _i += step) {                           \
-        /* Stage 1: prefetch entry */                                         \
         if (_i < nb_idxs) {                                                   \
             unsigned _n = (_i + step <= nb_idxs) ? step : (nb_idxs - _i);    \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
                 uint32_t _eidx = idxs[_i + _j];                              \
-                if (_eidx != 0u && _eidx <= owner->max_entries) {             \
-                    _FCORE_ENTRY_T(p) *entry =                                \
-                        FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                \
-                    if (entry != NULL)                                        \
-                        rix_hash_prefetch_entry_of(entry);                    \
-                }                                                             \
+                RIX_ASSERT(_eidx != 0u);                                      \
+                RIX_ASSERT(_eidx <= owner->max_entries);                      \
+                rix_hash_prefetch_entry_of(                                   \
+                    FCORE_LAYOUT_ENTRY_PTR(owner, _eidx));                    \
             }                                                                 \
         }                                                                     \
-        /* Stage 2: remove */                                                 \
         if (_i >= ahead && _i - ahead < nb_idxs) {                            \
             unsigned _base = _i - ahead;                                      \
             unsigned _n = (_base + step <= nb_idxs) ? step                    \
@@ -738,112 +712,16 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
                 uint32_t _eidx = idxs[_base + _j];                           \
                 _FCORE_ENTRY_T(p) *entry;                                     \
-                if (_eidx == 0u || _eidx > owner->max_entries) {              \
-                    if (results != NULL) results[_base + _j] = 0u;           \
-                    continue;                                                 \
-                }                                                             \
+                RIX_ASSERT(_eidx != 0u);                                      \
+                RIX_ASSERT(_eidx <= owner->max_entries);                      \
                 entry = FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                \
-                if (entry == NULL) {                                          \
-                    if (results != NULL) results[_base + _j] = 0u;           \
+                RIX_ASSUME_NONNULL(entry);                                    \
+                if (entry->htbl_elm.cur_hash == 0u)                           \
                     continue;                                                 \
-                }                                                             \
                 if (_FCORE_HT(ht, remove)(                                     \
                         head, buckets, hash_base, entry) != NULL) {           \
                     FCORE_ON_REMOVE(owner, entry, _eidx);                     \
                     owner->stats.dels++;                                       \
-                    if (results != NULL) results[_base + _j] = _eidx;        \
-                } else {                                                      \
-                    if (results != NULL) results[_base + _j] = 0u;           \
-                }                                                             \
-            }                                                                 \
-        }                                                                     \
-    }                                                                         \
-}                                                                             \
-                                                                              \
-/*=== del_key_bulk (4-stage ctx pipeline) ==================================*/\
-                                                                              \
-static RIX_UNUSED void                                                        \
-_FCORE_INT(p, del_key_bulk_)(_FCORE_OT(ot) *owner,                           \
-                             const _FCORE_KEY_T(p) *keys,                     \
-                             unsigned nb_keys,                                 \
-                             uint32_t *results)                                \
-{                                                                             \
-    _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
-    struct rix_hash_bucket_s *buckets = owner->buckets;                       \
-    _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
-    const uint32_t hash_mask = FCORE_HASH_MASK(owner, ht);                    \
-    const unsigned ctx_mask = FCORE_BULK_CTX_COUNT - 1u;                      \
-    struct rix_hash_find_ctx_s ctx[FCORE_BULK_CTX_COUNT];                     \
-    const unsigned ahead = FCORE_BULK_AHEAD_KEYS;                             \
-    const unsigned step  = FCORE_BULK_STEP_KEYS;                              \
-    const unsigned total = nb_keys + 3u * ahead;                              \
-                                                                              \
-    for (unsigned _i = 0; _i < total; _i += step) {                           \
-        if (_i < nb_keys) {                                                   \
-            unsigned _n = (_i + step <= nb_keys) ? step : (nb_keys - _i);     \
-            unsigned _ci = _i & ctx_mask;                                     \
-            const _FCORE_KEY_T(p) *_keyv[FCORE_BULK_STEP_KEYS];               \
-            if (RIX_LIKELY(_ci + _n <= FCORE_BULK_CTX_COUNT)) {               \
-                for (unsigned _j = 0; _j < _n; _j++)                          \
-                    _keyv[_j] = &keys[_i + _j];                               \
-                RIX_HASH_HASH_KEY_N_MASKED(ht, &ctx[_ci], _n, head, buckets,  \
-                                           _keyv, hash_mask,                  \
-                                           head->rhh_mask);                   \
-            } else {                                                          \
-                unsigned _n0 = FCORE_BULK_CTX_COUNT - _ci;                    \
-                unsigned _n1 = _n - _n0;                                      \
-                for (unsigned _j = 0; _j < _n0; _j++)                         \
-                    _keyv[_j] = &keys[_i + _j];                               \
-                RIX_HASH_HASH_KEY_N_MASKED(ht, &ctx[_ci], _n0, head, buckets, \
-                                           _keyv, hash_mask,                  \
-                                           head->rhh_mask);                   \
-                for (unsigned _j = 0; _j < _n1; _j++)                         \
-                    _keyv[_j] = &keys[_i + _n0 + _j];                         \
-                RIX_HASH_HASH_KEY_N_MASKED(ht, &ctx[0], _n1, head, buckets,   \
-                                           _keyv, hash_mask,                  \
-                                           head->rhh_mask);                   \
-            }                                                                 \
-        }                                                                     \
-        if (_i >= ahead && _i - ahead < nb_keys) {                            \
-            unsigned _base = _i - ahead;                                      \
-            unsigned _n = (_base + step <= nb_keys) ? step                    \
-                                                    : (nb_keys - _base);      \
-            for (unsigned _j = 0; _j < _n; _j++)                             \
-                _FCORE_HT(ht, scan_bk)(                                        \
-                    &ctx[(_base + _j) & ctx_mask],                            \
-                    head, buckets);                                           \
-        }                                                                     \
-        if (_i >= 2u * ahead && _i - 2u * ahead < nb_keys) {                 \
-            unsigned _base = _i - 2u * ahead;                                 \
-            unsigned _n = (_base + step <= nb_keys) ? step                    \
-                                                    : (nb_keys - _base);      \
-            for (unsigned _j = 0; _j < _n; _j++)                             \
-                _FCORE_HT(ht, prefetch_node)(                                  \
-                    &ctx[(_base + _j) & ctx_mask],                            \
-                    hash_base);                                               \
-        }                                                                     \
-        if (_i >= 3u * ahead && _i - 3u * ahead < nb_keys) {                 \
-            unsigned _base = _i - 3u * ahead;                                 \
-            unsigned _n = (_base + step <= nb_keys) ? step                    \
-                                                    : (nb_keys - _base);      \
-            for (unsigned _j = 0; _j < _n; _j++) {                           \
-                unsigned _idx = _base + _j;                                   \
-                _FCORE_ENTRY_T(p) *entry = _FCORE_HT(ht, cmp_key)(            \
-                    &ctx[_idx & ctx_mask],                                    \
-                    hash_base);                                               \
-                if (entry != NULL) {                                          \
-                    uint32_t _eidx =                                          \
-                        FCORE_LAYOUT_ENTRY_INDEX(owner, entry);               \
-                    _FCORE_HT(ht, remove)(                                     \
-                        head, buckets, hash_base, entry);                     \
-                    FCORE_ON_REMOVE(owner, entry, _eidx);                     \
-                    if (results != NULL)                                       \
-                        results[_idx] = _eidx;                                \
-                    owner->stats.dels++;                                       \
-                } else {                                                      \
-                    if (results != NULL)                                       \
-                        results[_idx] = 0u;                                   \
-                    owner->stats.del_miss++;                                   \
                 }                                                             \
             }                                                                 \
         }                                                                     \
@@ -856,20 +734,20 @@ static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
 _FCORE_INT(p, del_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
                                 uint32_t entry_idx)                           \
 {                                                                             \
-    uint32_t result = 0u;                                                     \
-    _FCORE_INT(p, del_idx_bulk_)(owner, &entry_idx, 1u, &result);            \
-    return result;                                                            \
-}                                                                             \
-                                                                              \
-/*=== del_key_oneshot (single key via bulk path) ===========================*/\
-                                                                              \
-static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
-_FCORE_INT(p, del_key_oneshot_)(_FCORE_OT(ot) *owner,                        \
-                                const _FCORE_KEY_T(p) *key)                   \
-{                                                                             \
-    uint32_t result = 0u;                                                     \
-    _FCORE_INT(p, del_key_bulk_)(owner, key, 1u, &result);                   \
-    return result;                                                            \
+    _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
+    _FCORE_ENTRY_T(p) *entry;                                                 \
+    if (entry_idx == 0u || entry_idx > owner->max_entries)                    \
+        return 0u;                                                            \
+    entry = FCORE_LAYOUT_ENTRY_PTR(owner, entry_idx);                         \
+    RIX_ASSUME_NONNULL(entry);                                                \
+    if (entry->htbl_elm.cur_hash == 0u)                                       \
+        return 0u;                                                            \
+    if (_FCORE_HT(ht, remove)(head, owner->buckets,                           \
+                              FCORE_LAYOUT_HASH_BASE(owner), entry) == NULL)   \
+        return 0u;                                                            \
+    FCORE_ON_REMOVE(owner, entry, entry_idx);                                 \
+    owner->stats.dels++;                                                      \
+    return entry_idx;                                                         \
 }                                                                             \
                                                                               \
 /*=== walk =================================================================*/\

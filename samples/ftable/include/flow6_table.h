@@ -79,13 +79,14 @@ void ft_flow6_table_find_bulk(struct ft_flow6_table *ft,
                               unsigned nb_keys,
                               struct ft_table_result *results);
 
-uint32_t ft_flow6_table_add_entry_idx(struct ft_flow6_table *ft,
-                                      uint32_t entry_idx);
+uint32_t ft_flow6_table_add_idx(struct ft_flow6_table *ft,
+                                uint32_t entry_idx);
 
-void ft_flow6_table_add_entry_idx_bulk(struct ft_flow6_table *ft,
-                                       const uint32_t *entry_idxv,
-                                       unsigned nb_keys,
-                                       struct ft_table_result *results);
+void ft_flow6_table_add_idx_bulk(struct ft_flow6_table *ft,
+                                 const uint32_t *entry_idxv,
+                                 unsigned nb_keys,
+                                 struct ft_table_result *results);
+
 
 uint32_t ft_flow6_table_del_key(struct ft_flow6_table *ft,
                                 const struct flow6_key *key);
@@ -93,10 +94,9 @@ uint32_t ft_flow6_table_del_key(struct ft_flow6_table *ft,
 uint32_t ft_flow6_table_del_entry_idx(struct ft_flow6_table *ft,
                                       uint32_t entry_idx);
 
-void ft_flow6_table_del_key_bulk(struct ft_flow6_table *ft,
-                                 const struct flow6_key *keys,
-                                 unsigned nb_keys,
-                                 struct ft_table_result *results);
+void ft_flow6_table_del_entry_idx_bulk(struct ft_flow6_table *ft,
+                                       const uint32_t *entry_idxv,
+                                       unsigned nb_keys);
 
 /*===========================================================================
  * Walk / grow
@@ -187,77 +187,17 @@ ft_flow6_table_entry_offset(const struct ft_flow6_table *ft)
 #define FT_FLOW6_TABLE_ENTRY_FROM_RECORD(record_ptr, member) \
     FT_MEMBER_PTR((record_ptr), member)
 
-static inline uint32_t
-ft_flow6_table_add_entry_ptr(struct ft_flow6_table *ft,
-                             const struct flow6_entry *entry)
-{
-    return ft_flow6_table_add_entry_idx(ft,
-                                        ft_flow6_table_entry_idx(ft, entry));
-}
-
-static inline void
-ft_flow6_table_add_entry_ptr_bulk(struct ft_flow6_table *ft,
-                                  const struct flow6_entry *const *entryv,
-                                  unsigned nb_keys,
-                                  struct ft_table_result *results)
-{
-    if (results == NULL)
-        return;
-    for (unsigned i = 0; i < nb_keys; i++) {
-        const struct flow6_entry *entry = (entryv != NULL) ? entryv[i] : NULL;
-        results[i].entry_idx = ft_flow6_table_add_entry_ptr(ft, entry);
-    }
-}
-
-static inline uint32_t
-ft_flow6_table_del_entry_ptr(struct ft_flow6_table *ft,
-                             const struct flow6_entry *entry)
-{
-    return ft_flow6_table_del_entry_idx(ft,
-                                        ft_flow6_table_entry_idx(ft, entry));
-}
-
-static inline void
-ft_flow6_table_del_entry_idx_bulk(struct ft_flow6_table *ft,
-                                  const uint32_t *entry_idxv,
-                                  unsigned nb_keys,
-                                  struct ft_table_result *results)
-{
-    if (results == NULL)
-        return;
-    for (unsigned i = 0; i < nb_keys; i++) {
-        uint32_t entry_idx = (entry_idxv != NULL) ? entry_idxv[i] : 0u;
-        results[i].entry_idx = ft_flow6_table_del_entry_idx(ft, entry_idx);
-    }
-}
-
-static inline void
-ft_flow6_table_del_entry_ptr_bulk(struct ft_flow6_table *ft,
-                                  const struct flow6_entry *const *entryv,
-                                  unsigned nb_keys,
-                                  struct ft_table_result *results)
-{
-    if (results == NULL)
-        return;
-    for (unsigned i = 0; i < nb_keys; i++) {
-        const struct flow6_entry *entry = (entryv != NULL) ? entryv[i] : NULL;
-        results[i].entry_idx = ft_flow6_table_del_entry_ptr(ft, entry);
-    }
-}
 
 static inline uint32_t
 ft_flow6_table_add_entry(struct ft_flow6_table *ft, uint32_t entry_idx)
 {
-    return ft_flow6_table_add_entry_idx(ft, entry_idx);
+    return ft_flow6_table_add_idx(ft, entry_idx);
 }
 
-static inline void
-ft_flow6_table_add_entry_bulk(struct ft_flow6_table *ft,
-                              const uint32_t *entry_idxv,
-                              unsigned nb_keys,
-                              struct ft_table_result *results)
+static inline uint32_t
+ft_flow6_table_add_entry_idx(struct ft_flow6_table *ft, uint32_t entry_idx)
 {
-    ft_flow6_table_add_entry_idx_bulk(ft, entry_idxv, nb_keys, results);
+    return ft_flow6_table_add_idx(ft, entry_idx);
 }
 
 static inline uint32_t
@@ -270,15 +210,6 @@ static inline uint32_t
 ft_flow6_table_del_idx(struct ft_flow6_table *ft, uint32_t entry_idx)
 {
     return ft_flow6_table_del_entry_idx(ft, entry_idx);
-}
-
-static inline void
-ft_flow6_table_del_bulk(struct ft_flow6_table *ft,
-                        const struct flow6_key *keys,
-                        unsigned nb_keys,
-                        struct ft_table_result *results)
-{
-    ft_flow6_table_del_key_bulk(ft, keys, nb_keys, results);
 }
 
 #endif /* _FLOW6_TABLE_H_ */

@@ -170,8 +170,10 @@
                                  &(results)[0].entry_idx)
 
 #define _FTG_DEL_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)    \
-    _FTG_FCORE(p, del_key_bulk_)((ft), (keys), (nb_keys),                     \
-                             &(results)[0].entry_idx)
+    do {                                                                      \
+    for (unsigned _i = 0; _i < (nb_keys); _i++)                               \
+        (results)[_i].entry_idx = _FTG_API(p, del_key)((ft), &(keys)[_i]);    \
+    } while (0)
 
 #define _FTG_WALK_BODY(p, ft, cb, arg)                                        \
     return _FTG_FCORE(p, walk_)((ft), (cb), (arg))
@@ -183,10 +185,29 @@
     return _FTG_FCORE(p, find_key_oneshot_)((ft), (key));
 
 #define _FTG_DEL_BODY(p, ft, key, hash_fn, cmp_fn)                            \
-    return _FTG_FCORE(p, del_key_oneshot_)((ft), (key));
+    _FTG_ENTRY_T(p) *_entry;                                                  \
+    union rix_hash_hash_u _h;                                                 \
+    unsigned _idx;                                                            \
+    _h = hash_fn((key), (ft)->start_mask);                                    \
+    _entry = _FTG_INT(p, find_hashed_)((ft), (key), _h);                      \
+    if (_entry == NULL) {                                                     \
+        (ft)->stats.del_miss++;                                               \
+        return 0u;                                                            \
+    }                                                                         \
+    _idx = FTG_LAYOUT_ENTRY_INDEX((ft), _entry);                              \
+    if (_FTG_HT(p, remove)(&(ft)->ht_head, (ft)->buckets,                     \
+                           _FTG_INT(p, hash_base_)((ft)),                     \
+                           _entry) == NULL)                                   \
+        return 0u;                                                            \
+    (ft)->stats.dels++;                                                       \
+    _FTG_INT(p, entry_meta_clear_)(_entry);                                   \
+    return _idx;
 
 #define _FTG_DEL_IDX_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                  \
     return _FTG_FCORE(p, del_idx_oneshot_)((ft), (entry_idx));
+
+#define _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys)              \
+    _FTG_FCORE(p, del_idx_bulk_)((ft), (entry_idxv), (nb_keys))
 
 #define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                \
     return _FTG_FCORE(p, add_idx_oneshot_)((ft), (entry_idx));
@@ -322,7 +343,7 @@
 #define _FTG_DEL_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)    \
     do {                                                                      \
     for (unsigned _i = 0; _i < (nb_keys); _i++)                               \
-        (results)[_i].entry_idx = _FTG_API(p, del)((ft), &(keys)[_i]);        \
+        (results)[_i].entry_idx = _FTG_API(p, del_key)((ft), &(keys)[_i]);    \
     } while (0)
 
 #define _FTG_WALK_BODY(p, ft, cb, arg)                                        \
@@ -393,6 +414,12 @@
     (ft)->stats.dels++;                                                       \
     _FTG_INT(p, entry_meta_clear_)(_entry);                                   \
     return (entry_idx);
+
+#define _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys)              \
+    do {                                                                      \
+        for (unsigned _i = 0; _i < (nb_keys); _i++)                           \
+            (void)_FTG_API(p, del_entry_idx)((ft), (entry_idxv)[_i]);         \
+    } while (0)
 
 #define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                \
     _FTG_ENTRY_T(p) *_entry;                                                  \
@@ -817,11 +844,11 @@ _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
     _FTG_FIND_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn);      \
 }                                                                             \
                                                                                \
-/* --- add_entry_idx (single, by index) ---------------------------------- */ \
+/* --- add_idx (single, by index) ---------------------------------------- */ \
                                                                                \
 uint32_t                                                                      \
-_FTG_API(p, add_entry_idx)(_FTG_TABLE_T(p) *ft,                               \
-                           uint32_t entry_idx)                                \
+_FTG_API(p, add_idx)(_FTG_TABLE_T(p) *ft,                                     \
+                     uint32_t entry_idx)                                      \
 {                                                                             \
     if (ft == NULL || ft->buckets == NULL ||                                  \
         entry_idx == 0u || entry_idx > ft->max_entries)                       \
@@ -829,13 +856,13 @@ _FTG_API(p, add_entry_idx)(_FTG_TABLE_T(p) *ft,                               \
     _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                    \
 }                                                                             \
                                                                                \
-/* --- add_entry_idx_bulk ------------------------------------------------ */ \
+/* --- add_idx_bulk ------------------------------------------------------ */ \
                                                                                \
 void                                                                          \
-_FTG_API(p, add_entry_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
-                                const uint32_t *entry_idxv,                   \
-                                unsigned nb_keys,                             \
-                                _FTG_RESULT_T(p) *results)                    \
+_FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
+                          const uint32_t *entry_idxv,                         \
+                          unsigned nb_keys,                                   \
+                          _FTG_RESULT_T(p) *results)                          \
 {                                                                             \
     if (results == NULL)                                                      \
         return;                                                               \
@@ -871,22 +898,16 @@ _FTG_API(p, del_entry_idx)(_FTG_TABLE_T(p) *ft,                               \
     _FTG_DEL_IDX_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                      \
 }                                                                             \
                                                                                \
-/* --- del_key_bulk ------------------------------------------------------ */ \
+/* --- del_entry_idx_bulk ------------------------------------------------ */ \
                                                                                \
 void                                                                          \
-_FTG_API(p, del_key_bulk)(_FTG_TABLE_T(p) *ft,                                \
-                          const _FTG_KEY_T(p) *keys,                          \
-                          unsigned nb_keys,                                   \
-                          _FTG_RESULT_T(p) *results)                          \
+_FTG_API(p, del_entry_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
+                                const uint32_t *entry_idxv,                   \
+                                unsigned nb_keys)                             \
 {                                                                             \
-    if (results == NULL)                                                      \
+    if (ft == NULL || ft->buckets == NULL || entry_idxv == NULL)              \
         return;                                                               \
-    if (ft == NULL || ft->buckets == NULL || keys == NULL) {                  \
-        for (unsigned i = 0; i < nb_keys; i++)                                \
-            results[i].entry_idx = 0u;                                        \
-        return;                                                               \
-    }                                                                         \
-    _FTG_DEL_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn);       \
+    _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys);                 \
 }                                                                             \
                                                                                \
 /* --- walk -------------------------------------------------------------- */ \
@@ -1058,11 +1079,11 @@ _FTG_API(p, reserve)(_FTG_TABLE_T(p) *ft,                                     \
 const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
     .find            = _FT_OPS_FNAME(prefix, find),                           \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
-    .add_entry_idx   = _FT_OPS_FNAME(prefix, add_entry_idx),                  \
-    .add_entry_idx_bulk = _FT_OPS_FNAME(prefix, add_entry_idx_bulk),          \
+    .add_idx         = _FT_OPS_FNAME(prefix, add_idx),                        \
+    .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \
     .del_key         = _FT_OPS_FNAME(prefix, del_key),                        \
     .del_entry_idx   = _FT_OPS_FNAME(prefix, del_entry_idx),                  \
-    .del_key_bulk    = _FT_OPS_FNAME(prefix, del_key_bulk),                   \
+    .del_entry_idx_bulk = _FT_OPS_FNAME(prefix, del_entry_idx_bulk),          \
 }
 
 /*===========================================================================

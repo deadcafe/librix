@@ -203,6 +203,26 @@ name##_hash_key_2bk(struct rix_hash_find_ctx_s *ctx,                          \
     rix_hash_prefetch_bucket_of(ctx->bk[1]);                                  \
 }                                                                             \
                                                                               \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_hash_key_2bk_masked(struct rix_hash_find_ctx_s *ctx,                   \
+                           struct rix_hash_bucket_s *buckets,                 \
+                           const _RIX_HASH_KEY_TYPE(type, key_field) *key,    \
+                           unsigned hash_mask,                                \
+                           unsigned bk_mask)                                  \
+{                                                                             \
+    union rix_hash_hash_u _h = hash_fn(key, hash_mask);                       \
+    unsigned _bk0, _bk1;                                                      \
+    u32 _fp;                                                                  \
+    _rix_hash_buckets(_h, bk_mask, &_bk0, &_bk1, &_fp);                       \
+    ctx->hash  = _h;                                                          \
+    ctx->fp    = _fp;                                                         \
+    ctx->key   = (const void *)key;                                           \
+    ctx->bk[0] = buckets + _bk0;                                              \
+    ctx->bk[1] = buckets + _bk1;                                              \
+    rix_hash_prefetch_bucket_of(ctx->bk[0]);                                  \
+    rix_hash_prefetch_bucket_of(ctx->bk[1]);                                  \
+}                                                                             \
+                                                                              \
 /* Stage 2: scan the selected bucket for fp matches and empty slots.  */      \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 name##_scan_bk_empties(struct rix_hash_find_ctx_s *ctx,                       \
