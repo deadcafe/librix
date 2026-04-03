@@ -70,7 +70,6 @@ struct fc_flowu_result {
 
 struct fc_flowu_entry {
     struct flowu_entry hdr;
-    uint64_t last_ts;            /* 0 = free / invalid */
     RIX_SLIST_ENTRY(struct fc_flowu_entry) free_link;
 } __attribute__((packed, aligned(FC_CACHE_LINE_SIZE)));
 
@@ -82,6 +81,7 @@ RIX_SLIST_HEAD(fc_flowu_free_head, fc_flowu_entry);
 
 struct fc_flowu_config {
     uint64_t timeout_tsc;
+    unsigned ts_shift;
     unsigned pressure_empty_slots;
     uint64_t maint_interval_tsc;
     unsigned maint_base_bk;
@@ -136,6 +136,7 @@ struct fc_flowu_cache {
     unsigned                   nb_bk;
     unsigned                   max_entries;
     unsigned                   total_slots;
+    uint8_t                    ts_shift;
     unsigned                   pressure_empty_slots;
     /* --- CL1 --- */
     unsigned                   timeout_lo_entries;

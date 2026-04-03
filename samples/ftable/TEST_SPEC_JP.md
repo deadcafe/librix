@@ -28,8 +28,8 @@
 | A5 | `add_idx_bulk` | idx 配列 | 各 idx を独立 add | `results[i].entry_idx` |
 | A6 | `add_idx_bulk` | 同一 key, 別 idx | ignore | `results[i]=existing idx` |
 | A7 | `add_idx_bulk` | self duplicate | ignore | `results[i]=request idx` |
-| A8 | `add_idx_bulk2(ignore)` | idx 配列 | duplicate を ignore | `results[i]=free すべき idx or NIL` |
-| A9 | `add_idx_bulk2(update)` | idx 配列 | duplicate を置換 | `results[i]=free すべき old idx or NIL` |
+| A8 | `add_idx_bulk(ignore)` | idx 配列 | duplicate を ignore | `results[i]=free すべき idx or NIL` |
+| A9 | `add_idx_bulk(update)` | idx 配列 | duplicate を置換 | `results[i]=free すべき old idx or NIL` |
 | A10 | `del_entry_idx` | valid idx | 既登録 entry を削除 | `deleted idx` |
 | A11 | `del_entry_idx_bulk` | valid idx 配列 | 各 idx を独立 delete | return なし |
 | A12 | `del_key` | key | hit なら削除、miss なら 0 | `deleted idx or 0` |
@@ -57,9 +57,9 @@
 - duplicate 判定は `bk0` / `bk1` の両方を確認してから insert 判定する
 - 同一 batch 内でも、先行要素が既に採用されていれば後続 duplicate は existing として扱う
 
-### 3.3 `add_idx_bulk2`
+### 3.3 `add_idx_bulk`
 
-`add_idx_bulk2` は `add_idx_bulk` に duplicate policy を追加した派生 API である。
+`add_idx_bulk` は duplicate policy を受け取る bulk add API である。
 
 - inserted:
   - `results[i].entry_idx = RIX_NIL`
@@ -83,8 +83,8 @@
 | A5 | `test_bulk_ops_and_stats`, `testv_bulk_ops_and_stats` | covered |
 | A6 | `testv_add_idx_bulk_duplicate_ignore` | covered |
 | A7 | `test_bulk_ops_and_stats`, `testv_bulk_ops_and_stats` | covered |
-| A8 | `testv_add_idx_bulk2_policy` | covered |
-| A9 | `testv_add_idx_bulk2_policy` | covered |
+| A8 | `testv_add_idx_bulk_policy` | covered |
+| A9 | `testv_add_idx_bulk_policy` | covered |
 | A10 | `test_del_idx`, `testv_walk_flush_and_del_idx` | covered |
 | A11 | `testv_walk_flush_and_del_idx` | covered |
 | A12 | `test_duplicate_and_delete_miss_stats`, `test_basic_add_find_del`, `testv_basic_add_find_del` | covered |
@@ -106,7 +106,7 @@
 1. lifecycle / mapping
 2. find
 3. add / add_bulk
-4. add_idx_bulk2
+4. add_idx_bulk
 5. del / del_bulk
 6. walk / flush / stats
 7. grow / reserve

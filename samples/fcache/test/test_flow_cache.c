@@ -179,6 +179,7 @@ static void                                                                     
 test_##PREFIX##_fill_miss_full_without_relief(void)                                          \
 {                                                                                            \
     enum { NB_BK = 4u, MAX_ENTRIES = 16u, FILL = 16u };                                      \
+    enum { TS_TICK = 1u << FLOW_TIMESTAMP_DEFAULT_SHIFT };                                   \
     struct rix_hash_bucket_s buckets[NB_BK];                                                 \
     ENTRY_T pool[MAX_ENTRIES];                                                               \
     CACHE_T fc;                                                                              \
@@ -192,16 +193,17 @@ test_##PREFIX##_fill_miss_full_without_relief(void)                             
     for (unsigned i = 0; i < FILL; i++)                                                      \
         keys[i] = MAKE_KEY(2000u + i);                                                       \
     fc_##PREFIX##_cache_findadd_bulk(&fc, keys, FILL, 100u, results);                        \
-    /* Newcomer: relief won't evict fresh entries, final fallback should. */                 \
+    /* Newcomer: one encoded tick later, relief won't evict fresh entries, */                \
+    /* final fallback should. */                                                             \
     newcomer = MAKE_KEY(3000u);                                                              \
-    fc_##PREFIX##_cache_findadd_bulk(&fc, &newcomer, 1u, 101u,                               \
+    fc_##PREFIX##_cache_findadd_bulk(&fc, &newcomer, 1u, 100u + TS_TICK,                     \
                                       &newcomer_result);                                     \
     if (newcomer_result.entry_idx == 0u)                                                     \
         FAIL("fresh-fill newcomer should insert via oldest fallback");                       \
     if (fc_##PREFIX##_cache_nb_entries(&fc) != FILL)                                         \
         FAILF("fresh-fill entries=%u expected %u",                                           \
               fc_##PREFIX##_cache_nb_entries(&fc), FILL);                                    \
-    fc_##PREFIX##_cache_find_bulk(&fc, keys, FILL, 102u, results);                           \
+    fc_##PREFIX##_cache_find_bulk(&fc, keys, FILL, 100u + TS_TICK + 1u, results);            \
     if (COUNT_HITS(RESULT_T, results, FILL) != FILL - 1u)                                    \
         FAILF("fresh-fill expected exactly one eviction, hits=%u",                           \
               COUNT_HITS(RESULT_T, results, FILL));                                          \
@@ -373,6 +375,7 @@ static void                                                                     
 test_##PREFIX##_timeout_boundary(void)                                                       \
 {                                                                                            \
     enum { NB_BK = 8u, MAX_ENTRIES = 16u };                                                  \
+    enum { TS_TICK = 1u << FLOW_TIMESTAMP_DEFAULT_SHIFT };                                   \
     struct rix_hash_bucket_s buckets[NB_BK];                                                 \
     ENTRY_T pool[MAX_ENTRIES];                                                               \
     CACHE_T fc;                                                                              \
@@ -388,7 +391,7 @@ test_##PREFIX##_timeout_boundary(void)                                          
         FAIL("should not evict before timeout boundary");                                    \
     if (fc_##PREFIX##_cache_nb_entries(&fc) != 2u)                                           \
         FAIL("entries should remain at timeout boundary - 1");                               \
-    if (fc_##PREFIX##_cache_maintain(&fc, 0u, NB_BK, 1101u) == 0u)                           \
+    if (fc_##PREFIX##_cache_maintain(&fc, 0u, NB_BK, 1100u + TS_TICK) == 0u)                 \
         FAIL("should evict after timeout boundary");                                         \
 }                                                                                            \
 static void                                                                                  \
@@ -705,16 +708,20 @@ test_##PREFIX##_find_bulk(void)                                                 
     }                                                                                        \
     /* Verify last_ts updated to 200 */                                                      \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
-        if (pool[results[i].entry_idx - 1u].last_ts != 200u)                                 \
-            FAILF("find_bulk touch: last_ts=%" PRIu64 " expected 200",                       \
-                  pool[results[i].entry_idx - 1u].last_ts);                                  \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+            != flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT))                     \
+            FAILF("find_bulk touch: last_ts=%" PRIu64 " expected %" PRIu64,                  \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),        \
+                  flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT));                 \
     }                                                                                        \
     /* now=0: no last_ts update */                                                           \
     fc_##PREFIX##_cache_find_bulk(&fc, keys, NB_KEYS, 0u, results);                          \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
-        if (pool[results[i].entry_idx - 1u].last_ts != 200u)                                 \
-            FAILF("find_bulk now=0: last_ts=%" PRIu64 " should stay 200",                    \
-                  pool[results[i].entry_idx - 1u].last_ts);                                  \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+            != flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT))                     \
+            FAILF("find_bulk now=0: last_ts=%" PRIu64 " should stay %" PRIu64,               \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),        \
+                  flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT));                 \
     }                                                                                        \
 }                                                                                            \
 static void                                                                                  \

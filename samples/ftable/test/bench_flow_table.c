@@ -42,6 +42,9 @@ static int ftb_pin_core = -1;
 static unsigned char *ftb_cold_buf;
 static volatile uint64_t ftb_cold_sink;
 
+#define FTB_NOW_ADD  UINT64_C(0x101)
+#define FTB_NOW_FIND UINT64_C(0x202)
+
 struct ftb_user_record4 {
     struct flow4_entry entry;
     uint32_t cookie;
@@ -84,16 +87,15 @@ struct ftb_variant_ops {
     unsigned (*nb_bk)(const void *ft);
     int (*reserve)(void *ft, unsigned min_entries);
     void *(*entry_ptr)(void *ft, uint32_t entry_idx);
-    uint32_t (*add_idx)(void *ft, uint32_t entry_idx);
+    uint32_t (*add_idx)(void *ft, uint32_t entry_idx, uint64_t now);
     void (*find_bulk)(void *ft, const void *keys, unsigned nb_keys,
+                      uint64_t now,
                       struct ft_table_result *results);
-    void (*add_idx_bulk)(void *ft, const uint32_t *entry_idxv,
-                         unsigned nb_keys,
-                         struct ft_table_result *results);
-    unsigned (*add_idx_bulk2)(void *ft, const uint32_t *entry_idxv,
-                              unsigned nb_keys,
-                              enum ft_add_policy policy,
-                              struct ft_table_result *results);
+    unsigned (*add_idx_bulk)(void *ft, uint32_t *entry_idxv,
+                             unsigned nb_keys,
+                             enum ft_add_policy policy,
+                             uint64_t now,
+                             uint32_t *unused_idxv);
     void (*del_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
                                unsigned nb_keys);
     int (*grow_2x)(void *ft);
@@ -495,7 +497,7 @@ ftb_keyu(unsigned i)
 #define FTB_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, init_ex_fn,       \
                              destroy_fn, flush_fn, nb_bk_fn, reserve_fn,      \
                              entry_ptr_fn, add_idx_fn, find_bulk_fn,          \
-                             add_idx_bulk_fn, add_idx_bulk2_fn,               \
+                             add_idx_bulk_fn,                                 \
                              del_entry_idx_bulk_fn,                           \
                              grow_2x_fn,                                      \
                              make_key_fn)                                     \
@@ -533,33 +535,27 @@ ftb_entry_ptr_##tag(void *ft, uint32_t entry_idx)                             \
     return entry_ptr_fn((struct ft_##prefix##_table *)ft, entry_idx);         \
 }                                                                             \
 static uint32_t                                                               \
-ftb_add_idx_##tag(void *ft, uint32_t entry_idx)                               \
+ftb_add_idx_##tag(void *ft, uint32_t entry_idx, uint64_t now)                 \
 {                                                                             \
-    return add_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);           \
+    return add_idx_fn((struct ft_##prefix##_table *)ft, entry_idx, now);      \
 }                                                                             \
 static void                                                                   \
 ftb_find_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,             \
+                    uint64_t now,                                             \
                     struct ft_table_result *results)                          \
 {                                                                             \
     find_bulk_fn((struct ft_##prefix##_table *)ft,                            \
-                 (const key_t *)keys, nb_keys, results);                      \
-}                                                                             \
-static void                                                                   \
-ftb_add_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,                  \
-                       unsigned nb_keys,                                      \
-                       struct ft_table_result *results)                       \
-{                                                                             \
-    add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                         \
-                    entry_idxv, nb_keys, results);                            \
+                 (const key_t *)keys, nb_keys, now, results);                 \
 }                                                                             \
 static unsigned                                                               \
-ftb_add_idx_bulk2_##tag(void *ft, const uint32_t *entry_idxv,                 \
-                        unsigned nb_keys,                                     \
-                        enum ft_add_policy policy,                            \
-                        struct ft_table_result *results)                      \
+ftb_add_idx_bulk_##tag(void *ft, uint32_t *entry_idxv,                        \
+                       unsigned nb_keys,                                      \
+                       enum ft_add_policy policy,                             \
+                       uint64_t now,                                          \
+                       uint32_t *unused_idxv)                                 \
 {                                                                             \
-    return add_idx_bulk2_fn((struct ft_##prefix##_table *)ft,                 \
-                            entry_idxv, nb_keys, policy, results);            \
+    return add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                  \
+                           entry_idxv, nb_keys, policy, now, unused_idxv);    \
 }                                                                             \
 static void                                                                   \
 ftb_del_entry_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,            \
@@ -592,7 +588,6 @@ static const struct ftb_variant_ops ftb_ops_##tag = {                         \
     .add_idx = ftb_add_idx_##tag,                                             \
     .find_bulk = ftb_find_bulk_##tag,                                         \
     .add_idx_bulk = ftb_add_idx_bulk_##tag,                                   \
-    .add_idx_bulk2 = ftb_add_idx_bulk2_##tag,                                 \
     .del_entry_idx_bulk = ftb_del_entry_idx_bulk_##tag,                       \
     .grow_2x = ftb_grow_2x_##tag,                                             \
     .make_key = ftb_make_key_##tag                                            \
@@ -603,7 +598,7 @@ FTB_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct ftb_user_record4,
                      ft_flow4_table_flush, ft_flow4_table_nb_bk,
                      ft_flow4_table_reserve, ft_flow4_table_entry_ptr,
                      ft_flow4_table_add_idx, ft_flow4_table_find_bulk,
-                     ft_flow4_table_add_idx_bulk, ft_flow4_table_add_idx_bulk2,
+                     ft_flow4_table_add_idx_bulk,
                      ft_flow4_table_del_entry_idx_bulk,
                      ft_flow4_table_grow_2x, ftb_key4);
 
@@ -612,7 +607,7 @@ FTB_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct ftb_user_record6,
                      ft_flow6_table_flush, ft_flow6_table_nb_bk,
                      ft_flow6_table_reserve, ft_flow6_table_entry_ptr,
                      ft_flow6_table_add_idx, ft_flow6_table_find_bulk,
-                     ft_flow6_table_add_idx_bulk, ft_flow6_table_add_idx_bulk2,
+                     ft_flow6_table_add_idx_bulk,
                      ft_flow6_table_del_entry_idx_bulk,
                      ft_flow6_table_grow_2x, ftb_key6);
 
@@ -621,7 +616,7 @@ FTB_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct ftb_user_recordu,
                      ft_flowu_table_flush, ft_flowu_table_nb_bk,
                      ft_flowu_table_reserve, ft_flowu_table_entry_ptr,
                      ft_flowu_table_add_idx, ft_flowu_table_find_bulk,
-                     ft_flowu_table_add_idx_bulk, ft_flowu_table_add_idx_bulk2,
+                     ft_flowu_table_add_idx_bulk,
                      ft_flowu_table_del_entry_idx_bulk,
                      ft_flowu_table_grow_2x, ftb_keyu);
 
@@ -657,7 +652,7 @@ ftb_prefill(const struct ftb_variant_ops *ops, void *ft, unsigned n,
     for (unsigned i = 0; i < n; i++) {
         ops->make_key(&key, key_base + i);
         ftb_bind_key(ops, ft, i + 1u, &key);
-        if (ops->add_idx(ft, i + 1u) != i + 1u) {
+        if (ops->add_idx(ft, i + 1u, FTB_NOW_ADD) != i + 1u) {
             fprintf(stderr, "prefill failed for %s at %u\n", ops->name, i);
             exit(1);
         }
@@ -708,7 +703,8 @@ ftb_measure_find_lookup(const struct ftb_variant_ops *ops,
     union ftb_any_table ft;
     void *pool = ftb_alloc_zero(max_entries, ops->record_size);
     void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
-    struct ft_table_result *results = ftb_xcalloc(ftb_query_n, sizeof(*results));
+    struct ft_table_result *results =
+        ftb_xcalloc(ftb_query_n, sizeof(*results));
     uint64_t samples[FTB_COLD_REPEAT];
     unsigned live = ftb_fill_target(max_entries, fill_pct);
 
@@ -723,7 +719,7 @@ ftb_measure_find_lookup(const struct ftb_variant_ops *ops,
 
         ftb_cold_touch();
         t0 = ftb_rdtsc();
-        ops->find_bulk(&ft, keys, ftb_query_n, results);
+        ops->find_bulk(&ft, keys, ftb_query_n, FTB_NOW_FIND, results);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -755,7 +751,7 @@ ftb_measure_add_idx(const struct ftb_variant_ops *ops, void *ft,
 {
     void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
     uint32_t *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
-    struct ft_table_result *results = ftb_xcalloc(ftb_query_n, sizeof(*results));
+    uint32_t *unused_idxv = ftb_xcalloc(ftb_query_n, sizeof(*unused_idxv));
     uint64_t samples[FTB_UPDATE_REPEAT];
 
     for (unsigned r = 0; r < FTB_UPDATE_REPEAT; r++) {
@@ -771,11 +767,12 @@ ftb_measure_add_idx(const struct ftb_variant_ops *ops, void *ft,
         }
         ftb_cold_touch();
         t0 = ftb_rdtsc();
-        (void)ops->add_idx_bulk2(ft, idxv, ftb_query_n, FT_ADD_IGNORE, results);
+        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
+                                FTB_NOW_ADD, unused_idxv);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
-    free(results);
+    free(unused_idxv);
     free(idxv);
     free(keys);
     return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;
@@ -802,7 +799,7 @@ ftb_measure_add_dup_policy(const struct ftb_variant_ops *ops, void *ft,
 {
     void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
     uint32_t *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
-    struct ft_table_result *results = ftb_xcalloc(ftb_query_n, sizeof(*results));
+    uint32_t *unused_idxv = ftb_xcalloc(ftb_query_n, sizeof(*unused_idxv));
     uint64_t samples[FTB_UPDATE_REPEAT];
 
     for (unsigned r = 0; r < FTB_UPDATE_REPEAT; r++) {
@@ -818,11 +815,12 @@ ftb_measure_add_dup_policy(const struct ftb_variant_ops *ops, void *ft,
         }
         ftb_cold_touch();
         t0 = ftb_rdtsc();
-        (void)ops->add_idx_bulk2(ft, idxv, ftb_query_n, policy, results);
+        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, policy,
+                                FTB_NOW_ADD, unused_idxv);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
-    free(results);
+    free(unused_idxv);
     free(idxv);
     free(keys);
     return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;
@@ -850,7 +848,7 @@ ftb_measure_del_idx(const struct ftb_variant_ops *ops, void *ft,
 {
     void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
     uint32_t *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
-    struct ft_table_result *results = ftb_xcalloc(ftb_query_n, sizeof(*results));
+    uint32_t *unused_idxv = ftb_xcalloc(ftb_query_n, sizeof(*unused_idxv));
     uint64_t samples[FTB_UPDATE_REPEAT];
 
     for (unsigned r = 0; r < FTB_UPDATE_REPEAT; r++) {
@@ -864,14 +862,15 @@ ftb_measure_del_idx(const struct ftb_variant_ops *ops, void *ft,
             idxv[i] = live + i + 1u;
             ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
         }
-        ops->add_idx_bulk(ft, idxv, ftb_query_n, results);
+        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
+                                FTB_NOW_ADD, unused_idxv);
         ftb_cold_touch();
         t0 = ftb_rdtsc();
         ops->del_entry_idx_bulk(ft, idxv, ftb_query_n);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
-    free(results);
+    free(unused_idxv);
     free(idxv);
     free(keys);
     return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;

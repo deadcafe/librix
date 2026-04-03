@@ -169,6 +169,7 @@ struct ft_table_config {
     unsigned start_nb_bk;
     unsigned max_nb_bk;
     unsigned grow_fill_pct;
+    unsigned ts_shift;
     struct ft_bucket_allocator bucket_alloc;
 };
 

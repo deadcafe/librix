@@ -16,8 +16,102 @@
 struct flow_hashtbl_elm {
     uint32_t cur_hash;
     uint16_t slot;
-    uint16_t reserved0;
+    uint8_t  timestamp_hi;
+    uint8_t  reserved0;
+    uint32_t timestamp;
 };
+
+#ifndef FLOW_TIMESTAMP_DEFAULT_SHIFT
+#define FLOW_TIMESTAMP_DEFAULT_SHIFT 4u
+#endif
+
+#ifndef FLOW_TIMESTAMP_MAX_SHIFT
+#define FLOW_TIMESTAMP_MAX_SHIFT 24u
+#endif
+
+#define FLOW_TIMESTAMP_MASK       UINT64_C(0x000000ffffffffff)
+#define FLOW_TIMESTAMP_HALF_RANGE UINT64_C(0x0000008000000000)
+
+static inline uint8_t
+flow_timestamp_shift_clamp(unsigned shift)
+{
+    return (uint8_t)((shift <= FLOW_TIMESTAMP_MAX_SHIFT)
+        ? shift : FLOW_TIMESTAMP_DEFAULT_SHIFT);
+}
+
+static inline uint64_t
+flow_timestamp_encode(uint64_t now, unsigned shift)
+{
+    return (now >> flow_timestamp_shift_clamp(shift)) & FLOW_TIMESTAMP_MASK;
+}
+
+static inline uint64_t
+flow_timestamp_timeout_encode(uint64_t timeout, unsigned shift)
+{
+    uint64_t encoded = timeout >> flow_timestamp_shift_clamp(shift);
+
+    if (timeout != 0u && encoded == 0u)
+        encoded = 1u;
+    return encoded;
+}
+
+static inline uint64_t
+flow_timestamp_get(const struct flow_hashtbl_elm *elm)
+{
+    return ((uint64_t)elm->timestamp_hi << 32) | elm->timestamp;
+}
+
+static inline void
+flow_timestamp_set_raw(struct flow_hashtbl_elm *elm, uint64_t encoded)
+{
+    encoded &= FLOW_TIMESTAMP_MASK;
+    elm->timestamp = (uint32_t)encoded;
+    elm->timestamp_hi = (uint8_t)(encoded >> 32);
+}
+
+static inline void
+flow_timestamp_store(struct flow_hashtbl_elm *elm, uint64_t now,
+                     unsigned shift)
+{
+    flow_timestamp_set_raw(elm, flow_timestamp_encode(now, shift));
+}
+
+static inline void
+flow_timestamp_clear(struct flow_hashtbl_elm *elm)
+{
+    elm->timestamp = 0u;
+    elm->timestamp_hi = 0u;
+}
+
+static inline int
+flow_timestamp_is_zero(const struct flow_hashtbl_elm *elm)
+{
+    return flow_timestamp_get(elm) == 0u;
+}
+
+static inline uint64_t
+flow_timestamp_elapsed(uint64_t now_encoded, uint64_t ts_encoded)
+{
+    return (now_encoded - ts_encoded) & FLOW_TIMESTAMP_MASK;
+}
+
+static inline int
+flow_timestamp_is_expired_raw(uint64_t ts_encoded, uint64_t now_encoded,
+                              uint64_t timeout_encoded)
+{
+    if (ts_encoded == 0u)
+        return 0;
+    return flow_timestamp_elapsed(now_encoded, ts_encoded) > timeout_encoded;
+}
+
+static inline int
+flow_timestamp_is_expired(const struct flow_hashtbl_elm *elm, uint64_t now,
+                          uint64_t timeout, unsigned shift)
+{
+    return flow_timestamp_is_expired_raw(flow_timestamp_get(elm),
+        flow_timestamp_encode(now, shift),
+        flow_timestamp_timeout_encode(timeout, shift));
+}
 
 struct flow4_key {
     uint8_t  family;

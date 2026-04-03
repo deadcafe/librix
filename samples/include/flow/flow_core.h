@@ -64,6 +64,7 @@
  *   FCORE_STATUS(owner).kickouts    : uint32_t
  *   FCORE_STATUS(owner).add_bk0     : uint32_t
  *   FCORE_STATUS(owner).add_bk1     : uint32_t
+ *   owner->ts_shift                 : uint8_t
  */
 
 #ifndef _FLOW_CORE_H_
@@ -317,6 +318,23 @@ struct fcore_record_layout {
 #define FCORE_ON_HIT(owner, entry, idx)     (void)0
 #endif
 
+#ifndef FCORE_TIMESTAMP_SHIFT
+#define FCORE_TIMESTAMP_SHIFT(owner) ((owner)->ts_shift)
+#endif
+
+#ifndef FCORE_STORE_TIMESTAMP
+#define FCORE_STORE_TIMESTAMP(owner, entry, now)                            \
+    do {                                                                    \
+        if ((now) != 0u)                                                    \
+            flow_timestamp_store(&(entry)->htbl_elm, (now),                 \
+                                 FCORE_TIMESTAMP_SHIFT(owner));             \
+    } while (0)
+#endif
+
+#ifndef FCORE_CLEAR_TIMESTAMP
+#define FCORE_CLEAR_TIMESTAMP(entry) flow_timestamp_clear(&(entry)->htbl_elm)
+#endif
+
 /* FCORE_ON_FINDADD_MISS: if defined, findadd_bulk is generated. */
 
 /*---------------------------------------------------------------------------
@@ -368,6 +386,7 @@ _FCORE_INT(p, free_list_init_)(_FCORE_OT(ot) *owner)                         \
         FCORE_FREE_NEXT(entry) = (i < owner->max_entries) ? i + 1u           \
                                                         : (uint32_t)RIX_NIL; \
         entry->htbl_elm.slot = 0u;                                            \
+        FCORE_CLEAR_TIMESTAMP(entry);                                         \
     }                                                                         \
     owner->free_head = 1u;                                                    \
 }                                                                             \
@@ -382,6 +401,7 @@ _FCORE_INT(p, alloc_idx_)(_FCORE_OT(ot) *owner)                              \
         owner->free_head = FCORE_FREE_NEXT(entry);                            \
         FCORE_FREE_NEXT(entry) = 0u;                                          \
         entry->htbl_elm.slot = 0u;                                            \
+        FCORE_CLEAR_TIMESTAMP(entry);                                         \
     }                                                                         \
     return idx;                                                               \
 }                                                                             \
@@ -427,14 +447,16 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
                               const _FCORE_KEY_T(p) *keys,                    \
                               unsigned nb_keys,                               \
+                              uint64_t now,                                   \
                               uint32_t *results);                             \
                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
 _FCORE_INT(p, find_key_oneshot_)(_FCORE_OT(ot) *owner,                       \
-                                 const _FCORE_KEY_T(p) *key)                  \
+                                 const _FCORE_KEY_T(p) *key,                  \
+                                 uint64_t now)                                \
 {                                                                             \
     uint32_t result = 0u;                                                     \
-    _FCORE_INT(p, find_key_bulk_)(owner, key, 1u, &result);                  \
+    _FCORE_INT(p, find_key_bulk_)(owner, key, 1u, now, &result);             \
     return result;                                                            \
 }                                                                             \
                                                                               \
@@ -444,6 +466,7 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, find_key_bulk_org_)(_FCORE_OT(ot) *owner,                      \
                                   const _FCORE_KEY_T(p) *keys,               \
                                   unsigned nb_keys,                          \
+                                  uint64_t now,                              \
                                   uint32_t *results)                         \
 {                                                                             \
     enum { _FCORE_FIND_CTX_COUNT = 64u };                                     \
@@ -493,6 +516,7 @@ _FCORE_INT(p, find_key_bulk_org_)(_FCORE_OT(ot) *owner,                      \
                     &ctx[_idx & ctx_mask], hash_base);                        \
                 if (RIX_LIKELY(entry != NULL)) {                              \
                     uint32_t _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     FCORE_ON_HIT(owner, entry, _eidx);                        \
                     results[_idx] = _eidx;                                    \
                     hit_count++;                                              \
@@ -514,6 +538,7 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
                               const _FCORE_KEY_T(p) *keys,                    \
                               unsigned nb_keys,                               \
+                              uint64_t now,                                   \
                               uint32_t *results)                              \
 {                                                                             \
     enum { _FCORE_FIND_CTX_COUNT = 32u };                                     \
@@ -557,6 +582,7 @@ _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
                     &ctx[_idx & ctx_mask], hash_base);                        \
                 if (RIX_LIKELY(entry != NULL)) {                              \
                     uint32_t _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     FCORE_ON_HIT(owner, entry, _eidx);                        \
                     results[_idx] = _eidx;                                    \
                     hit_count++;                                              \
@@ -576,7 +602,7 @@ _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
 /*   Caller provides entry indices; keys must already be written in entry.   */\
                                                                               \
 static RIX_UNUSED void                                                        \
-_FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
+_FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
                              const uint32_t *entry_idxv,                      \
                              unsigned nb_keys,                                 \
                              uint64_t now,                                     \
@@ -592,7 +618,6 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
     const unsigned ahead = 8u;                                                \
     const unsigned total = nb_keys + ahead;                                   \
     struct rix_hash_find_ctx_s ctx[_FCORE_ADD_CTX_COUNT];                     \
-    (void)now;                                                                \
     RIX_ASSERT(results != NULL);                                              \
                                                                               \
     /* Pre-prefetch entry keys */                                             \
@@ -661,6 +686,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 RIX_ASSUME_NONNULL(entry);                                    \
                 if (RIX_UNLIKELY(entry->htbl_elm.cur_hash != 0u)) {           \
                     /* entry already in table (self-duplicate) */              \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     FCORE_STATS(owner).add_existing++;                               \
                     results[_idx] = _eidx;                                    \
                     continue;                                                  \
@@ -679,6 +705,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         RIX_ASSUME_NONNULL(_node);                            \
                         if (RIX_UNLIKELY(                                     \
                                 cmp_fn(&entry->key, &_node->key) == 0)) {     \
+                            FCORE_STORE_TIMESTAMP(owner, _node, now);         \
                             FCORE_STATS(owner).add_existing++;                      \
                             results[_idx] = _nidx;                            \
                             goto _fcore_add_idx_next_;                        \
@@ -699,6 +726,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         RIX_ASSUME_NONNULL(_node);                            \
                         if (RIX_UNLIKELY(                                     \
                                 cmp_fn(&entry->key, &_node->key) == 0)) {     \
+                            FCORE_STORE_TIMESTAMP(owner, _node, now);         \
                             FCORE_STATS(owner).add_existing++;                      \
                             results[_idx] = _nidx;                            \
                             goto _fcore_add_idx_next_;                        \
@@ -713,6 +741,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                     entry->htbl_elm.cur_hash = _ctxp->hash.val32[0];          \
                     entry->htbl_elm.slot = (__typeof__(entry->htbl_elm.slot)) \
                         _slot;                                                \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     head->rhh_nb++;                                           \
                     FCORE_STATS(owner).adds++;                                \
                     FCORE_STATUS(owner).entries++;                            \
@@ -728,6 +757,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                     entry->htbl_elm.cur_hash = _ctxp->hash.val32[1];          \
                     entry->htbl_elm.slot = (__typeof__(entry->htbl_elm.slot)) \
                         _slot;                                                \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     head->rhh_nb++;                                           \
                     FCORE_STATS(owner).adds++;                                \
                     FCORE_STATUS(owner).entries++;                            \
@@ -738,6 +768,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 _ret_idx = _FCORE_HT(ht, insert_hashed_idx)(                  \
                     head, buckets, hash_base, entry, _ctxp->hash);            \
                 if (RIX_LIKELY(_ret_idx == 0u)) {                             \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     FCORE_STATS(owner).adds++;                                \
                     FCORE_STATUS(owner).entries++;                            \
                     FCORE_STATUS(owner).kickouts++;                           \
@@ -747,9 +778,14 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         FCORE_STATUS(owner).add_bk0++;                        \
                     results[_idx] = _eidx;                                    \
                 } else if (RIX_UNLIKELY(_ret_idx != _eidx)) {                 \
+                    _FCORE_ENTRY_T(p) *_node =                                \
+                        FCORE_LAYOUT_ENTRY_PTR(owner, _ret_idx);              \
+                    RIX_ASSUME_NONNULL(_node);                                \
+                    FCORE_STORE_TIMESTAMP(owner, _node, now);                 \
                     FCORE_STATS(owner).add_existing++;                              \
                     results[_idx] = _ret_idx;                                 \
                 } else {                                                      \
+                    FCORE_CLEAR_TIMESTAMP(entry);                             \
                     FCORE_STATS(owner).add_failed++;                                \
                     results[_idx] = 0u;                                       \
                 }                                                             \
@@ -759,21 +795,24 @@ _fcore_add_idx_next_: ;                                                      \
     }                                                                         \
 }                                                                             \
                                                                               \
-/*=== add_idx_bulk2 (2-stage pipeline with duplicate policy) ==============*/\
-/* results[] returns the caller-side free idx:                              */\
-/*   inserted      -> RIX_NIL                                                */\
-/*   duplicate+ignore -> request idx                                         */\
-/*   duplicate+update -> old idx                                             */\
-/*   add failed       -> request idx                                         */\
-/* return value is the number of non-NIL results.                            */\
+/*=== add_idx_bulk (2-stage pipeline with duplicate policy) ===============*/\
+/* idxv[] is input/output and returns the actually registered idx.           */\
+/* unused_idxv[] packs free-list candidates in order and return value is     */\
+/* the number of packed entries.                                             */\
+/*   inserted           -> idxv[i] = request idx, unused none                */\
+/*   duplicate+ignore   -> idxv[i] = existing idx, unused += request idx     */\
+/*   duplicate+update   -> idxv[i] = request idx, unused += old idx          */\
+/*   self-duplicate     -> idxv[i] = request idx, unused none                */\
+/*   add failed         -> idxv[i] = 0, unused += request idx                */\
+/* UPDATE requires that a batch does not contain duplicate keys.             */\
                                                                               \
 static RIX_UNUSED unsigned                                                    \
-_FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
-                              const uint32_t *entry_idxv,                     \
+_FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
+                              uint32_t *entry_idxv,                           \
                               unsigned nb_keys,                               \
                               enum ft_add_policy policy,                      \
                               uint64_t now,                                   \
-                              uint32_t *results)                              \
+                              uint32_t *unused_idxv)                          \
 {                                                                             \
     enum { _FCORE_ADD_CTX_COUNT = 8u };                                       \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
@@ -786,8 +825,7 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
     const unsigned total = nb_keys + ahead;                                   \
     struct rix_hash_find_ctx_s ctx[_FCORE_ADD_CTX_COUNT];                     \
     unsigned free_count = 0u;                                                 \
-    (void)now;                                                                \
-    RIX_ASSERT(results != NULL);                                              \
+    RIX_ASSERT(unused_idxv != NULL);                                          \
                                                                               \
     {                                                                         \
         unsigned _prefetch_n = (nb_keys < ahead) ? nb_keys : ahead;           \
@@ -850,8 +888,8 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
                 RIX_ASSERT(_eidx <= owner->max_entries);                      \
                 RIX_ASSUME_NONNULL(entry);                                    \
                 if (RIX_UNLIKELY(entry->htbl_elm.cur_hash != 0u)) {           \
-                    FCORE_STATS(owner).add_existing++;                              \
-                    results[_idx] = (uint32_t)RIX_NIL;                        \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
+                    FCORE_STATS(owner).add_existing++;                        \
                     continue;                                                  \
                 }                                                             \
                 _FCORE_HT(ht, scan_bk_empties)(_ctxp, 0u);                    \
@@ -875,13 +913,17 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
                                     _ctxp->hash.val32[0];                     \
                                 entry->htbl_elm.slot =                        \
                                     (__typeof__(entry->htbl_elm.slot))_bit;   \
+                                FCORE_STORE_TIMESTAMP(owner, entry, now);     \
                                 _node->htbl_elm.cur_hash = 0u;                \
-                                results[_idx] = _nidx;                        \
+                                FCORE_CLEAR_TIMESTAMP(_node);                 \
+                                unused_idxv[free_count++] = _nidx;            \
                             } else {                                          \
-                                results[_idx] = _eidx;                        \
+                                FCORE_STORE_TIMESTAMP(owner, _node, now);     \
+                                FCORE_CLEAR_TIMESTAMP(entry);                 \
+                                entry_idxv[_idx] = _nidx;                     \
+                                unused_idxv[free_count++] = _eidx;            \
                             }                                                 \
-                            free_count++;                                     \
-                            goto _fcore_add_idx2_next_;                       \
+                            goto _fcore_add_idx_next_;                        \
                         }                                                     \
                     }                                                         \
                 }                                                             \
@@ -906,13 +948,17 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
                                     _ctxp->hash.val32[1];                     \
                                 entry->htbl_elm.slot =                        \
                                     (__typeof__(entry->htbl_elm.slot))_bit;   \
+                                FCORE_STORE_TIMESTAMP(owner, entry, now);     \
                                 _node->htbl_elm.cur_hash = 0u;                \
-                                results[_idx] = _nidx;                        \
+                                FCORE_CLEAR_TIMESTAMP(_node);                 \
+                                unused_idxv[free_count++] = _nidx;            \
                             } else {                                          \
-                                results[_idx] = _eidx;                        \
+                                FCORE_STORE_TIMESTAMP(owner, _node, now);     \
+                                FCORE_CLEAR_TIMESTAMP(entry);                 \
+                                entry_idxv[_idx] = _nidx;                     \
+                                unused_idxv[free_count++] = _eidx;            \
                             }                                                 \
-                            free_count++;                                     \
-                            goto _fcore_add_idx2_next_;                       \
+                            goto _fcore_add_idx_next_;                        \
                         }                                                     \
                     }                                                         \
                 }                                                             \
@@ -924,11 +970,11 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
                     entry->htbl_elm.cur_hash = _ctxp->hash.val32[0];          \
                     entry->htbl_elm.slot = (__typeof__(entry->htbl_elm.slot)) \
                         _slot;                                                \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     head->rhh_nb++;                                           \
                     FCORE_STATS(owner).adds++;                                \
                     FCORE_STATUS(owner).entries++;                            \
                     FCORE_STATUS(owner).add_bk0++;                            \
-                    results[_idx] = (uint32_t)RIX_NIL;                        \
                     continue;                                                  \
                 }                                                             \
                 if (RIX_LIKELY(_ctxp->empties[1] != 0u)) {                    \
@@ -939,16 +985,17 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
                     entry->htbl_elm.cur_hash = _ctxp->hash.val32[1];          \
                     entry->htbl_elm.slot = (__typeof__(entry->htbl_elm.slot)) \
                         _slot;                                                \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     head->rhh_nb++;                                           \
                     FCORE_STATS(owner).adds++;                                \
                     FCORE_STATUS(owner).entries++;                            \
                     FCORE_STATUS(owner).add_bk1++;                            \
-                    results[_idx] = (uint32_t)RIX_NIL;                        \
                     continue;                                                  \
                 }                                                             \
                 _ret_idx = _FCORE_HT(ht, insert_hashed_idx)(                  \
                     head, buckets, hash_base, entry, _ctxp->hash);            \
                 if (RIX_LIKELY(_ret_idx == 0u)) {                             \
+                    FCORE_STORE_TIMESTAMP(owner, entry, now);                 \
                     FCORE_STATS(owner).adds++;                                \
                     FCORE_STATUS(owner).entries++;                            \
                     FCORE_STATUS(owner).kickouts++;                           \
@@ -956,9 +1003,8 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
                         FCORE_STATUS(owner).add_bk1++;                        \
                     else                                                      \
                         FCORE_STATUS(owner).add_bk0++;                        \
-                    results[_idx] = (uint32_t)RIX_NIL;                        \
                 } else if (RIX_UNLIKELY(_ret_idx != _eidx)) {                 \
-                    FCORE_STATS(owner).add_existing++;                              \
+                    FCORE_STATS(owner).add_existing++;                        \
                     if (policy == FT_ADD_UPDATE) {                            \
                         _FCORE_ENTRY_T(p) *_node =                            \
                             FCORE_LAYOUT_ENTRY_PTR(owner, _ret_idx);          \
@@ -969,21 +1015,28 @@ _FCORE_INT(p, add_idx_bulk2_)(_FCORE_OT(ot) *owner,                          \
                                        head, buckets, hash_base, _node)       \
                                    != NULL);                                  \
                         _node->htbl_elm.cur_hash = 0u;                        \
+                        FCORE_CLEAR_TIMESTAMP(_node);                         \
                         _ins_idx = _FCORE_HT(ht, insert_hashed_idx)(          \
                             head, buckets, hash_base, entry, _ctxp->hash);    \
                         RIX_ASSERT(_ins_idx == 0u);                           \
-                        results[_idx] = _ret_idx;                             \
-                        free_count++;                                         \
+                        FCORE_STORE_TIMESTAMP(owner, entry, now);             \
+                        unused_idxv[free_count++] = _ret_idx;                 \
                     } else {                                                  \
-                        results[_idx] = _eidx;                                \
-                        free_count++;                                         \
+                        _FCORE_ENTRY_T(p) *_node =                            \
+                            FCORE_LAYOUT_ENTRY_PTR(owner, _ret_idx);          \
+                        RIX_ASSUME_NONNULL(_node);                            \
+                        FCORE_STORE_TIMESTAMP(owner, _node, now);             \
+                        FCORE_CLEAR_TIMESTAMP(entry);                         \
+                        entry_idxv[_idx] = _ret_idx;                          \
+                        unused_idxv[free_count++] = _eidx;                    \
                     }                                                         \
                 } else {                                                      \
-                    FCORE_STATS(owner).add_failed++;                                \
-                    results[_idx] = _eidx;                                    \
-                    free_count++;                                             \
+                    FCORE_CLEAR_TIMESTAMP(entry);                             \
+                    FCORE_STATS(owner).add_failed++;                          \
+                    entry_idxv[_idx] = 0u;                                    \
+                    unused_idxv[free_count++] = _eidx;                        \
                 }                                                             \
-_fcore_add_idx2_next_: ;                                                     \
+_fcore_add_idx_next_: ;                                                      \
             }                                                                 \
         }                                                                     \
     }                                                                         \
@@ -994,10 +1047,11 @@ _fcore_add_idx2_next_: ;                                                     \
                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
 _FCORE_INT(p, add_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
-                                uint32_t entry_idx)                           \
+                                uint32_t entry_idx,                           \
+                                uint64_t now)                                 \
 {                                                                             \
     uint32_t result = 0u;                                                     \
-    _FCORE_INT(p, add_idx_bulk_)(owner, &entry_idx, 1u, 0u, &result);        \
+    _FCORE_INT(p, add_idx_bulk_legacy_)(owner, &entry_idx, 1u, now, &result);\
     return result;                                                            \
 }                                                                             \
                                                                               \
@@ -1042,6 +1096,7 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 if (_FCORE_HT(ht, remove)(                                     \
                         head, buckets, hash_base, entry) != NULL) {           \
                     entry->htbl_elm.cur_hash = 0u;                            \
+                    FCORE_CLEAR_TIMESTAMP(entry);                             \
                     FCORE_STATS(owner).dels++;                                \
                     RIX_ASSERT(FCORE_STATUS(owner).entries != 0u);            \
                     FCORE_STATUS(owner).entries--;                            \
@@ -1069,6 +1124,7 @@ _FCORE_INT(p, del_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
                               FCORE_LAYOUT_HASH_BASE(owner), entry) == NULL)   \
         return 0u;                                                            \
     entry->htbl_elm.cur_hash = 0u;                                            \
+    FCORE_CLEAR_TIMESTAMP(entry);                                             \
     FCORE_STATS(owner).dels++;                                                \
     RIX_ASSERT(FCORE_STATUS(owner).entries != 0u);                            \
     FCORE_STATUS(owner).entries--;                                            \

@@ -186,22 +186,22 @@ void _FTG_API(flow4, stats)(const struct ft_flow4_table *ft,
 void _FTG_API(flow4, status)(const struct ft_flow4_table *ft,
                              struct fcore_status *out);
 uint32_t _FTG_API(flow4, find)(struct ft_flow4_table *ft,
-                               const struct flow4_key *key);
+                               const struct flow4_key *key,
+                               uint64_t now);
 void _FTG_API(flow4, find_bulk)(struct ft_flow4_table *ft,
                                 const struct flow4_key *keys,
                                 unsigned nb_keys,
+                                uint64_t now,
                                 struct ft_table_result *results);
 uint32_t _FTG_API(flow4, add_idx)(struct ft_flow4_table *ft,
-                                  uint32_t entry_idx);
-void _FTG_API(flow4, add_idx_bulk)(struct ft_flow4_table *ft,
-                                   const uint32_t *entry_idxv,
-                                   unsigned nb_keys,
-                                   struct ft_table_result *results);
-unsigned _FTG_API(flow4, add_idx_bulk2)(struct ft_flow4_table *ft,
-                                        const uint32_t *entry_idxv,
-                                        unsigned nb_keys,
-                                        enum ft_add_policy policy,
-                                        struct ft_table_result *results);
+                                  uint32_t entry_idx,
+                                  uint64_t now);
+unsigned _FTG_API(flow4, add_idx_bulk)(struct ft_flow4_table *ft,
+                                       uint32_t *entry_idxv,
+                                       unsigned nb_keys,
+                                       enum ft_add_policy policy,
+                                       uint64_t now,
+                                       uint32_t *unused_idxv);
 uint32_t _FTG_API(flow4, del_key)(struct ft_flow4_table *ft,
                                   const struct flow4_key *key);
 uint32_t _FTG_API(flow4, del_entry_idx)(struct ft_flow4_table *ft,

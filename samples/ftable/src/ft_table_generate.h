@@ -160,8 +160,8 @@
 #ifdef FTG_USE_FCORE
 
 /* sizeof(ft_table_result) == sizeof(uint32_t): safe to pass &results[0].entry_idx */
-#define _FTG_FIND_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)   \
-    _FTG_FCORE(p, find_key_bulk_)((ft), (keys), (nb_keys),                    \
+#define _FTG_FIND_BULK_BODY(p, ft, keys, nb_keys, now, results, hash_fn, cmp_fn) \
+    _FTG_FCORE(p, find_key_bulk_)((ft), (keys), (nb_keys), (now),             \
                               &(results)[0].entry_idx)
 
 #define _FTG_ADD_ENTRY_BULK_BODY(p, ft, entry_idxv, nb_keys, results,         \
@@ -170,10 +170,9 @@
                                  &(results)[0].entry_idx)
 
 #define _FTG_ADD_ENTRY_BULK2_BODY(p, ft, entry_idxv, nb_keys, policy,        \
-                                  results, hash_fn, cmp_fn)                  \
-    return _FTG_FCORE(p, add_idx_bulk2_)((ft), (entry_idxv), (nb_keys),      \
-                                         (policy), 0u,                       \
-                                         &(results)[0].entry_idx)
+                                  now, unused_idxv, hash_fn, cmp_fn)         \
+    return _FTG_FCORE(p, add_idx_bulk_)((ft), (entry_idxv), (nb_keys),       \
+                                         (policy), (now), (unused_idxv))
 
 #define _FTG_DEL_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)    \
     do {                                                                      \
@@ -187,8 +186,8 @@
 #define _FTG_FLUSH_BODY(p, ft)                                                \
     _FTG_FCORE(p, flush_)(ft)
 
-#define _FTG_FIND_BODY(p, ft, key, hash_fn, cmp_fn)                           \
-    return _FTG_FCORE(p, find_key_oneshot_)((ft), (key));
+#define _FTG_FIND_BODY(p, ft, key, now, hash_fn, cmp_fn)                      \
+    return _FTG_FCORE(p, find_key_oneshot_)((ft), (key), (now));
 
 #define _FTG_DEL_BODY(p, ft, key, hash_fn, cmp_fn)                            \
     _FTG_ENTRY_T(p) *_entry;                                                  \
@@ -217,8 +216,8 @@
 #define _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys)              \
     _FTG_FCORE(p, del_idx_bulk_)((ft), (entry_idxv), (nb_keys))
 
-#define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                \
-    return _FTG_FCORE(p, add_idx_oneshot_)((ft), (entry_idx));
+#define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, now, hash_fn, cmp_fn)           \
+    return _FTG_FCORE(p, add_idx_oneshot_)((ft), (entry_idx), (now));
 
 #else /* !FTG_USE_FCORE — legacy 2-stage pipeline */
 
@@ -484,6 +483,7 @@ _FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
 {                                                                             \
     entry->htbl_elm.cur_hash = 0u;                                            \
     entry->htbl_elm.slot = 0u;                                                \
+    flow_timestamp_clear(&entry->htbl_elm);                                   \
     FTG_ENTRY_META_CLEAR_TAIL(entry);                                         \
 }                                                                             \
                                                                                \
@@ -711,6 +711,9 @@ _FTG_API(p, init_ex)(_FTG_TABLE_T(p) *ft,                                     \
     ft->grow_fill_pct = cfg->grow_fill_pct                                    \
         ? cfg->grow_fill_pct                                                  \
         : (default_grow_fill_pct);                                            \
+    ft->ts_shift = (uint8_t)((cfg->ts_shift != 0u)                            \
+        ? flow_timestamp_shift_clamp(cfg->ts_shift)                          \
+        : FLOW_TIMESTAMP_DEFAULT_SHIFT);                                      \
     ft->max_entries = max_entries;                                            \
     ft->max_nb_bk = max_nb_bk;                                                \
     ft->start_mask = start_nb_bk - 1u;                                        \
@@ -807,11 +810,12 @@ _FTG_API(p, status)(const _FTG_TABLE_T(p) *ft,                                \
                                                                                \
 uint32_t                                                                      \
 _FTG_API(p, find)(_FTG_TABLE_T(p) *ft,                                        \
-                  const _FTG_KEY_T(p) *key)                                   \
+                  const _FTG_KEY_T(p) *key,                                   \
+                  uint64_t now)                                               \
 {                                                                             \
     if (ft == NULL || key == NULL || ft->buckets == NULL)                     \
         return 0u;                                                            \
-    _FTG_FIND_BODY(p, ft, key, hash_fn, cmp_fn)                               \
+    _FTG_FIND_BODY(p, ft, key, now, hash_fn, cmp_fn)                          \
 }                                                                             \
                                                                                \
 /* --- find_bulk --------------------------------------------------------- */ \
@@ -820,6 +824,7 @@ void                                                                          \
 _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
                        const _FTG_KEY_T(p) *keys,                             \
                        unsigned nb_keys,                                      \
+                       uint64_t now,                                          \
                        _FTG_RESULT_T(p) *results)                             \
 {                                                                             \
     if (results == NULL)                                                      \
@@ -829,57 +834,38 @@ _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
             results[i].entry_idx = 0u;                                        \
         return;                                                               \
     }                                                                         \
-    _FTG_FIND_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn);      \
+    _FTG_FIND_BULK_BODY(p, ft, keys, nb_keys, now, results, hash_fn, cmp_fn);\
 }                                                                             \
                                                                                \
 /* --- add_idx (single, by index) ---------------------------------------- */ \
                                                                                \
 uint32_t                                                                      \
 _FTG_API(p, add_idx)(_FTG_TABLE_T(p) *ft,                                     \
-                     uint32_t entry_idx)                                      \
+                     uint32_t entry_idx,                                      \
+                     uint64_t now)                                            \
 {                                                                             \
     if (ft == NULL || ft->buckets == NULL ||                                  \
         entry_idx == 0u || entry_idx > ft->max_entries)                       \
         return 0u;                                                            \
-    _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                    \
+    _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, now, hash_fn, cmp_fn)               \
 }                                                                             \
                                                                                \
 /* --- add_idx_bulk ------------------------------------------------------ */ \
                                                                                \
-void                                                                          \
-_FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
-                          const uint32_t *entry_idxv,                         \
-                          unsigned nb_keys,                                   \
-                          _FTG_RESULT_T(p) *results)                          \
-{                                                                             \
-    if (results == NULL)                                                      \
-        return;                                                               \
-    if (ft == NULL || ft->buckets == NULL || entry_idxv == NULL) {            \
-        for (unsigned i = 0; i < nb_keys; i++)                                \
-            results[i].entry_idx = 0u;                                        \
-        return;                                                               \
-    }                                                                         \
-    _FTG_ADD_ENTRY_BULK_BODY(p, ft, entry_idxv, nb_keys, results,             \
-                             hash_fn, cmp_fn);                                \
-}                                                                             \
-                                                                               \
-/* --- add_idx_bulk2 ----------------------------------------------------- */ \
-                                                                               \
 unsigned                                                                      \
-_FTG_API(p, add_idx_bulk2)(_FTG_TABLE_T(p) *ft,                               \
-                           const uint32_t *entry_idxv,                        \
+_FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
+                           uint32_t *entry_idxv,                              \
                            unsigned nb_keys,                                  \
                            enum ft_add_policy policy,                         \
-                           _FTG_RESULT_T(p) *results)                         \
+                           uint64_t now,                                      \
+                           uint32_t *unused_idxv)                             \
 {                                                                             \
-    if (results == NULL)                                                      \
+    if (unused_idxv == NULL)                                                  \
         return 0u;                                                            \
     if (ft == NULL || ft->buckets == NULL || entry_idxv == NULL) {            \
-        for (unsigned i = 0; i < nb_keys; i++)                                \
-            results[i].entry_idx = (uint32_t)RIX_NIL;                         \
         return 0u;                                                            \
     }                                                                         \
-    _FTG_ADD_ENTRY_BULK2_BODY(p, ft, entry_idxv, nb_keys, policy, results,    \
+    _FTG_ADD_ENTRY_BULK2_BODY(p, ft, entry_idxv, nb_keys, policy, now, unused_idxv,\
                               hash_fn, cmp_fn);                               \
 }                                                                             \
                                                                                \
@@ -1086,7 +1072,6 @@ const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
     .add_idx         = _FT_OPS_FNAME(prefix, add_idx),                        \
     .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \
-    .add_idx_bulk2   = _FT_OPS_FNAME(prefix, add_idx_bulk2),                  \
     .del_key         = _FT_OPS_FNAME(prefix, del_key),                        \
     .del_entry_idx   = _FT_OPS_FNAME(prefix, del_entry_idx),                  \
     .del_entry_idx_bulk = _FT_OPS_FNAME(prefix, del_entry_idx_bulk),          \

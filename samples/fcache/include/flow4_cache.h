@@ -116,12 +116,11 @@ struct fc_flow4_result {
  */
 struct fc_flow4_entry {
     struct flow4_entry hdr;        /**< Shared hash-table entry. */
-    uint64_t               last_ts;      /**< Last-access TSC; 0 = free. */
     RIX_SLIST_ENTRY(struct fc_flow4_entry) free_link;
 } __attribute__((aligned(8)));
 
-RIX_STATIC_ASSERT(sizeof(struct fc_flow4_entry) == 48u,
-                  "fc_flow4_entry must be 48 bytes");
+RIX_STATIC_ASSERT(sizeof(struct fc_flow4_entry) == 40u,
+                  "fc_flow4_entry must be 40 bytes");
 RIX_STATIC_ASSERT(_Alignof(struct fc_flow4_entry) == 8u,
                   "fc_flow4_entry must be 8-byte aligned");
 
@@ -138,6 +137,8 @@ struct fc_flow4_config {
     uint64_t timeout_tsc;           /**< Entry lifetime in TSC ticks.
                                          Adaptive scaling shrinks this
                                          as the cache fills. */
+    unsigned ts_shift;              /**< Stored timestamp right-shift.
+                                         0 = FLOW_TIMESTAMP_DEFAULT_SHIFT. */
     unsigned pressure_empty_slots;  /**< Insert-pressure threshold.
                                          Relief eviction triggers when a
                                          target bucket has <= this many
@@ -211,6 +212,7 @@ struct fc_flow4_cache {
     unsigned                   nb_bk;
     unsigned                   max_entries;
     unsigned                   total_slots;
+    uint8_t                    ts_shift;
     unsigned                   pressure_empty_slots;
     /* --- CL1 --- */
     unsigned                   timeout_lo_entries;

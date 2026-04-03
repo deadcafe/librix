@@ -39,6 +39,7 @@ struct ft_flow4_table {
     unsigned                    max_entries;
     uint32_t                    free_head;
     unsigned                    grow_fill_pct;
+    uint8_t                     ts_shift;
     struct ft_table_stats       stats;
     struct fcore_status         status;
 };
@@ -73,26 +74,25 @@ void ft_flow4_table_status(const struct ft_flow4_table *ft,
  *===========================================================================*/
 
 uint32_t ft_flow4_table_find(struct ft_flow4_table *ft,
-                             const struct flow4_key *key);
+                             const struct flow4_key *key,
+                             uint64_t now);
 
 void ft_flow4_table_find_bulk(struct ft_flow4_table *ft,
                               const struct flow4_key *keys,
                               unsigned nb_keys,
+                              uint64_t now,
                               struct ft_table_result *results);
 
 uint32_t ft_flow4_table_add_idx(struct ft_flow4_table *ft,
-                                uint32_t entry_idx);
+                                uint32_t entry_idx,
+                                uint64_t now);
 
-void ft_flow4_table_add_idx_bulk(struct ft_flow4_table *ft,
-                                 const uint32_t *entry_idxv,
-                                 unsigned nb_keys,
-                                 struct ft_table_result *results);
-
-unsigned ft_flow4_table_add_idx_bulk2(struct ft_flow4_table *ft,
-                                      const uint32_t *entry_idxv,
-                                      unsigned nb_keys,
-                                      enum ft_add_policy policy,
-                                      struct ft_table_result *results);
+unsigned ft_flow4_table_add_idx_bulk(struct ft_flow4_table *ft,
+                                     uint32_t *entry_idxv,
+                                     unsigned nb_keys,
+                                     enum ft_add_policy policy,
+                                     uint64_t now,
+                                     uint32_t *unused_idxv);
 
 
 uint32_t ft_flow4_table_del_key(struct ft_flow4_table *ft,
@@ -199,13 +199,13 @@ ft_flow4_table_entry_offset(const struct ft_flow4_table *ft)
 static inline uint32_t
 ft_flow4_table_add_entry(struct ft_flow4_table *ft, uint32_t entry_idx)
 {
-    return ft_flow4_table_add_idx(ft, entry_idx);
+    return ft_flow4_table_add_idx(ft, entry_idx, 0u);
 }
 
 static inline uint32_t
 ft_flow4_table_add_entry_idx(struct ft_flow4_table *ft, uint32_t entry_idx)
 {
-    return ft_flow4_table_add_idx(ft, entry_idx);
+    return ft_flow4_table_add_idx(ft, entry_idx, 0u);
 }
 
 static inline uint32_t

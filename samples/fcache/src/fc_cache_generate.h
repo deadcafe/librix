@@ -208,6 +208,12 @@ RIX_STATIC_ASSERT(FC_CACHE_BULK_CTX_COUNT >=
 #define _FC_RELIEF_STAGE_SLOTS 4u
 #endif
 
+#define _FCG_TS_SHIFT(fc) ((fc)->ts_shift)
+#define _FCG_TS_NOW(fc, now) \
+    flow_timestamp_encode((now), _FCG_TS_SHIFT(fc))
+#define _FCG_TS_TIMEOUT(fc, timeout) \
+    flow_timestamp_timeout_encode((timeout), _FCG_TS_SHIFT(fc))
+
 /* Maximum buckets per maintain_step filter+reclaim pass. */
 /* 256 entries * 4B = 1 KB - safe for any stack. */
 #ifndef _FC_MAINT_STEP_MAX_BKS
@@ -357,19 +363,22 @@ _FCG_INT(p, free_entry)(_FCG_CACHE_T(p) *fc,                              \
     RIX_ASSUME_NONNULL(entry);                                             \
     idx = FCG_LAYOUT_ENTRY_INDEX(fc, entry);                               \
     FCG_EVENT_EMIT_FREE(fc, idx, reason);                                  \
-    entry->last_ts = 0u;                                                   \
+    flow_timestamp_clear(&entry->hdr.htbl_elm);                            \
     FCG_FREE_LIST_PUSH_ENTRY(fc, entry, idx);                              \
 }                                                                          \
                                                                            \
 static unsigned                                                            \
 _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
                                unsigned bk_idx,                            \
-                               uint64_t expire_before,                     \
+                               uint64_t now_tsc,                           \
+                               uint64_t timeout_tsc,                       \
                                unsigned *expired_slots,                    \
                                int *oldest_slot)                           \
 {                                                                          \
     struct rix_hash_bucket_s *bucket = fc->buckets + bk_idx;              \
-    uint64_t oldest_ts = UINT64_MAX;                                       \
+    uint64_t now_ts = _FCG_TS_NOW(fc, now_tsc);                            \
+    uint64_t timeout_ts = _FCG_TS_TIMEOUT(fc, timeout_tsc);                \
+    uint64_t oldest_ts = FLOW_TIMESTAMP_MASK;                              \
     _FCG_ENTRY_T(p) *entries[RIX_HASH_BUCKET_ENTRY_SZ];                    \
     unsigned slots[RIX_HASH_BUCKET_ENTRY_SZ];                              \
     unsigned cur_base = 0u;                                                \
@@ -413,12 +422,14 @@ _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
             unsigned idx = cur_base + s;                                   \
             unsigned slot = slots[idx];                                    \
             _FCG_ENTRY_T(p) *entry = entries[idx];                        \
-            if (entry->last_ts >= expire_before)                           \
+            if (!flow_timestamp_is_expired_raw(                            \
+                    flow_timestamp_get(&entry->hdr.htbl_elm),             \
+                    now_ts, timeout_ts))                                   \
                 continue;                                                  \
             expired_slots[expired_count] = slot;                           \
             expired_count++;                                               \
-            if (entry->last_ts < oldest_ts) {                              \
-                oldest_ts = entry->last_ts;                                \
+            if (flow_timestamp_get(&entry->hdr.htbl_elm) < oldest_ts) {    \
+                oldest_ts = flow_timestamp_get(&entry->hdr.htbl_elm);      \
                 *oldest_slotp = (int)slot;                                 \
             }                                                              \
         }                                                                  \
@@ -431,7 +442,8 @@ _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
 static int                                                                 \
 _FCG_INT(p, reclaim_bucket)(_FCG_CACHE_T(p) *fc,                          \
                             unsigned bk_idx,                               \
-                            uint64_t expire_before,                        \
+                            uint64_t now_tsc,                              \
+                            uint64_t timeout_tsc,                          \
                             unsigned free_reason)                          \
 {                                                                          \
     _FCG_ENTRY_T(p) *victim;                                              \
@@ -440,7 +452,7 @@ _FCG_INT(p, reclaim_bucket)(_FCG_CACHE_T(p) *fc,                          \
     unsigned expired_count;                                                \
     int victim_slot;                                                       \
     expired_count = _FCG_INT(p, scan_bucket_slots)(fc, bk_idx,             \
-        expire_before, expired_slots, &victim_slot);                       \
+        now_tsc, timeout_tsc, expired_slots, &victim_slot);                \
     if (RIX_UNLIKELY(expired_count == 0u))                                 \
         return 0;                                                          \
     removed_idx = _FCG_HT(p, remove_at)(&fc->ht_head, fc->buckets,         \
@@ -458,7 +470,8 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
                                    uint64_t now,                           \
                                    unsigned free_reason)                   \
 {                                                                          \
-    uint64_t best_ts = UINT64_MAX;                                         \
+    uint64_t now_ts = _FCG_TS_NOW(fc, now);                                \
+    uint64_t best_ts = FLOW_TIMESTAMP_MASK;                                \
     _FCG_ENTRY_T(p) *victim = NULL;                                        \
     unsigned max = fc->max_entries;                                        \
     unsigned scan_limit = max >> 3;                                        \
@@ -481,10 +494,11 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
             i -= max;                                                      \
         _FCG_ENTRY_T(p) *entry = FCG_LAYOUT_ENTRY_AT(fc, i);               \
         if (entry == NULL ||                                               \
-            entry->last_ts == 0u || entry->last_ts == now)                 \
+            flow_timestamp_is_zero(&entry->hdr.htbl_elm) ||                \
+            flow_timestamp_get(&entry->hdr.htbl_elm) == now_ts)            \
             continue;                                                      \
-        if (entry->last_ts < best_ts) {                                    \
-            best_ts = entry->last_ts;                                      \
+        if (flow_timestamp_get(&entry->hdr.htbl_elm) < best_ts) {          \
+            best_ts = flow_timestamp_get(&entry->hdr.htbl_elm);            \
             victim = entry;                                                \
         }                                                                  \
     }                                                                      \
@@ -502,13 +516,14 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
 static unsigned                                                            \
 _FCG_INT(p, reclaim_bucket_all)(_FCG_CACHE_T(p) *fc,                      \
                                 unsigned bk_idx,                           \
-                                uint64_t expire_before,                    \
+                                uint64_t now_tsc,                          \
+                                uint64_t timeout_tsc,                      \
                                 unsigned free_reason)                      \
 {                                                                          \
     unsigned expired_slots[RIX_HASH_BUCKET_ENTRY_SZ];                      \
     unsigned evicted;                                                      \
     evicted = _FCG_INT(p, scan_bucket_slots)(fc, bk_idx,                   \
-                                             expire_before,                \
+                                             now_tsc, timeout_tsc,         \
                                              expired_slots, NULL);         \
     for (unsigned i = 0; i < evicted; i++) {                               \
         _FCG_ENTRY_T(p) *victim;                                           \
@@ -534,11 +549,8 @@ _FCG_INT(p, maintain_grouped)(_FCG_CACHE_T(p) *fc,                        \
     unsigned cur_bk;                                                       \
     unsigned mask;                                                         \
     unsigned next_bk;                                                      \
-    uint64_t expire_before;                                                \
     RIX_ASSERT(fc->nb_bk != 0u);                                           \
     mask = fc->ht_head.rhh_mask;                                           \
-    expire_before = (now_tsc > fc->eff_timeout_tsc) ?                      \
-        (now_tsc - fc->eff_timeout_tsc) : 0u;                             \
     next_bk = start_bk & mask;                                             \
     rix_hash_prefetch_bucket_indices_of_idx(fc->buckets, next_bk);        \
     while (bucket_count-- != 0u) {                                         \
@@ -548,7 +560,8 @@ _FCG_INT(p, maintain_grouped)(_FCG_CACHE_T(p) *fc,                        \
         rix_hash_prefetch_bucket_indices_of_idx(fc->buckets, next_bk);    \
         fc->stats.maint_bucket_checks++;                                   \
         reclaimed = _FCG_INT(p, reclaim_bucket_all)(fc, cur_bk,           \
-                                                     expire_before,        \
+                                                     now_tsc,              \
+                                                     fc->eff_timeout_tsc,  \
                                                      FCG_EVENT_REASON_TIMEOUT); \
         fc->stats.maint_evictions += reclaimed;                            \
         evicted += reclaimed;                                              \
@@ -568,7 +581,8 @@ _FCG_INT(p, maintain_step_filter_reclaim)(                                 \
     _FCG_CACHE_T(p) *fc,                                                   \
     unsigned start_bk,                                                     \
     unsigned bucket_count,                                                 \
-    uint64_t expire_before,                                                \
+    uint64_t now_tsc,                                                      \
+    uint64_t timeout_tsc,                                                  \
     unsigned skip_threshold)                                               \
 {                                                                          \
     unsigned evicted = 0u;                                                 \
@@ -603,7 +617,7 @@ _FCG_INT(p, maintain_step_filter_reclaim)(                                 \
             rix_hash_prefetch_bucket_of(                                   \
                 &fc->buckets[work[i + _FC_MAINT_STEP_PREFETCH_AHEAD]]);   \
         reclaimed = _FCG_INT(p, reclaim_bucket_all)(fc, work[i],           \
-                                                     expire_before,        \
+                                                     now_tsc, timeout_tsc, \
                                                      FCG_EVENT_REASON_TIMEOUT); \
         fc->stats.maint_evictions += reclaimed;                            \
         evicted += reclaimed;                                              \
@@ -619,13 +633,10 @@ _FCG_INT(p, maintain_step_grouped)(_FCG_CACHE_T(p) *fc,                   \
 {                                                                          \
     unsigned evicted = 0u;                                                 \
     unsigned mask;                                                         \
-    uint64_t expire_before;                                                \
     RIX_ASSERT(fc->nb_bk != 0u);                                           \
     mask = fc->ht_head.rhh_mask;                                           \
     if (bucket_count > fc->nb_bk)                                          \
         bucket_count = fc->nb_bk;                                          \
-    expire_before = (now_tsc > fc->eff_timeout_tsc) ?                      \
-        (now_tsc - fc->eff_timeout_tsc) : 0u;                             \
     unsigned start_bk = fc->maint_cursor & mask;                           \
     unsigned cur_bk = start_bk;                                            \
     unsigned swept = bucket_count;                                         \
@@ -633,7 +644,8 @@ _FCG_INT(p, maintain_step_grouped)(_FCG_CACHE_T(p) *fc,                   \
         unsigned chunk = (bucket_count > _FC_MAINT_STEP_MAX_BKS) ?         \
             _FC_MAINT_STEP_MAX_BKS : bucket_count;                        \
         evicted += _FCG_INT(p, maintain_step_filter_reclaim)(              \
-            fc, cur_bk, chunk, expire_before, skip_threshold);             \
+            fc, cur_bk, chunk, now_tsc, fc->eff_timeout_tsc,               \
+            skip_threshold);                                               \
         cur_bk = (cur_bk + chunk) & mask;                                  \
         bucket_count -= chunk;                                             \
     }                                                                      \
@@ -652,14 +664,11 @@ _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
     uint32_t fp;                                                           \
     uint32_t hits_fp;                                                      \
     uint32_t hits_zero;                                                    \
-    uint64_t expire_before;                                                \
     unsigned pressure_empty_slots;                                         \
     if (fc->total_slots == 0u)                                             \
         return;                                                            \
     fc->stats.relief_calls++;                                              \
     _FCG_INT(p, update_eff_timeout)(fc);                                  \
-    expire_before = (now_tsc > fc->eff_timeout_tsc) ?                      \
-        (now_tsc - fc->eff_timeout_tsc) : 0u;                             \
     rix_hash_buckets(h, fc->ht_head.rhh_mask, &bk0, &bk1, &fp);            \
     pressure_empty_slots = _FCG_INT(p, relief_empty_slots)(fc);            \
     fc->stats.relief_bucket_checks++;                                      \
@@ -668,7 +677,8 @@ _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
     (void)hits_fp;                                                         \
     if ((unsigned)__builtin_popcount(hits_zero) <=                         \
             pressure_empty_slots &&                                        \
-        _FCG_INT(p, reclaim_bucket)(fc, bk0, expire_before,                \
+        _FCG_INT(p, reclaim_bucket)(fc, bk0, now_tsc,                      \
+                                    fc->eff_timeout_tsc,                   \
                                     FCG_EVENT_REASON_PRESSURE)) {          \
         fc->stats.relief_evictions++;                                      \
         fc->stats.relief_bk0_evictions++;                                  \
@@ -680,7 +690,8 @@ _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
                                      &hits_fp, &hits_zero);                \
         if ((unsigned)__builtin_popcount(hits_zero) <=                     \
                 pressure_empty_slots &&                                    \
-            _FCG_INT(p, reclaim_bucket)(fc, bk1, expire_before,            \
+            _FCG_INT(p, reclaim_bucket)(fc, bk1, now_tsc,                  \
+                                        fc->eff_timeout_tsc,               \
                                         FCG_EVENT_REASON_PRESSURE)) {      \
             fc->stats.relief_evictions++;                                  \
             fc->stats.relief_bk1_evictions++;                              \
@@ -756,7 +767,8 @@ do {                                                                        \
         /* --- HIT --- */                                                    \
         _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
         RIX_ASSUME_NONNULL(_entry);                                          \
-        _entry->last_ts = (now);                                             \
+        flow_timestamp_store(&_entry->hdr.htbl_elm, (now),                 \
+                             _FCG_TS_SHIFT(fc));                           \
         _FCG_INT(p, result_set_hit)(&(results)[(idx)],                       \
             _hit_idx);                                                       \
         (hit_counter)++;                                                     \
@@ -769,7 +781,8 @@ do {                                                                        \
         /* --- HIT in bk1 --- */                                             \
         _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
         RIX_ASSUME_NONNULL(_entry);                                          \
-        _entry->last_ts = (now);                                             \
+        flow_timestamp_store(&_entry->hdr.htbl_elm, (now),                 \
+                             _FCG_TS_SHIFT(fc));                           \
         _FCG_INT(p, result_set_hit)(&(results)[(idx)],                       \
             _hit_idx);                                                       \
         (hit_counter)++;                                                     \
@@ -785,12 +798,9 @@ do {                                                                        \
         (fc)->stats.relief_bucket_checks++;                                  \
         if ((unsigned)__builtin_popcount(                                     \
                 (ctx_ptr)->empties[0]) <= _pe) {                             \
-            uint64_t _eb;                                                    \
             _FCG_INT(p, update_eff_timeout)((fc));                           \
-            _eb = ((now) > (fc)->eff_timeout_tsc) ?                          \
-                ((now) - (fc)->eff_timeout_tsc) : 0u;                        \
             if (_FCG_INT(p, reclaim_bucket)(                                 \
-                    (fc), _bk0i, _eb,                                        \
+                    (fc), _bk0i, (now), (fc)->eff_timeout_tsc,              \
                     FCG_EVENT_REASON_PRESSURE)) {                             \
                 (fc)->stats.relief_evictions++;                               \
                 (fc)->stats.relief_bk0_evictions++;                          \
@@ -800,7 +810,7 @@ do {                                                                        \
                         (ctx_ptr)->empties[1]) <= _pe &&                     \
                     _bk1i != _bk0i &&                                        \
                     _FCG_INT(p, reclaim_bucket)(                             \
-                        (fc), _bk1i, _eb,                                    \
+                        (fc), _bk1i, (now), (fc)->eff_timeout_tsc,          \
                         FCG_EVENT_REASON_PRESSURE)) {                        \
                     (fc)->stats.relief_evictions++;                           \
                     (fc)->stats.relief_bk1_evictions++;                      \
@@ -820,7 +830,8 @@ do {                                                                        \
         break;                                                               \
     }                                                                        \
     _entry->hdr.key = (keys)[(idx)];                                         \
-    _entry->last_ts = (now);                                                 \
+    flow_timestamp_store(&_entry->hdr.htbl_elm, (now),                     \
+                         _FCG_TS_SHIFT(fc));                               \
     /* insert_hashed: buckets in L1 from cmp_key,      */                   \
     /* hash reused from ctx (no rehash), dup-safe.     */                   \
     {                                                                        \
@@ -841,13 +852,12 @@ do {                                                                        \
                 /* may still be full -- evict timed-out entries from   */    \
                 /* bk[0]/bk[1] using the same cutoff as pressure relief */  \
                 {                                                            \
-                    uint64_t _eb2 = ((now) > (fc)->eff_timeout_tsc) ?        \
-                        ((now) - (fc)->eff_timeout_tsc) : 0u;                \
                     _FCG_INT(p, reclaim_bucket)(                             \
-                        (fc), _bk0i, _eb2, FCG_EVENT_REASON_PRESSURE);      \
+                        (fc), _bk0i, (now), (fc)->eff_timeout_tsc,          \
+                        FCG_EVENT_REASON_PRESSURE);                          \
                     if (_bk1i != _bk0i)                                      \
                         _FCG_INT(p, reclaim_bucket)(                         \
-                            (fc), _bk1i, _eb2,                              \
+                            (fc), _bk1i, (now), (fc)->eff_timeout_tsc,      \
                             FCG_EVENT_REASON_PRESSURE);                      \
                 }                                                            \
                 _ret = _FCG_HT(p, insert_hashed)(                           \
@@ -865,7 +875,8 @@ do {                                                                        \
                                         FCG_EVENT_REASON_ROLLBACK);          \
                 /* duplicate found */                                        \
                 RIX_ASSUME_NONNULL(_ret);                                    \
-                _ret->last_ts = (now);                                       \
+                flow_timestamp_store(&_ret->hdr.htbl_elm, (now),           \
+                                     _FCG_TS_SHIFT(fc));                   \
                 _FCG_INT(p, result_set_filled)(                              \
                     &(results)[(idx)],                                        \
                     FCG_LAYOUT_ENTRY_INDEX((fc), _ret));                      \
@@ -916,6 +927,9 @@ do {                                                                        \
     (fc)->total_slots = (nb_bk) * RIX_HASH_BUCKET_ENTRY_SZ;                  \
     (fc)->timeout_tsc = _cfg->timeout_tsc;                                   \
     (fc)->eff_timeout_tsc = _cfg->timeout_tsc ? _cfg->timeout_tsc : 1u;      \
+    (fc)->ts_shift = (uint8_t)((_cfg->ts_shift != 0u)                        \
+        ? flow_timestamp_shift_clamp(_cfg->ts_shift)                         \
+        : FLOW_TIMESTAMP_DEFAULT_SHIFT);                                     \
     (fc)->pressure_empty_slots = _cfg->pressure_empty_slots ?                \
         _cfg->pressure_empty_slots : (default_pressure);                     \
     (fc)->maint_interval_tsc = _cfg->maint_interval_tsc;                     \
@@ -1038,7 +1052,7 @@ _FCG_API(p, flush)(_FCG_CACHE_T(p) *fc)                                    \
     for (unsigned i = fc->max_entries; i > 0u; i--) {                      \
         _FCG_ENTRY_T(p) *entry = FCG_LAYOUT_ENTRY_PTR(fc, i);              \
         RIX_ASSUME_NONNULL(entry);                                         \
-        if (entry->last_ts != 0u)                                          \
+        if (!flow_timestamp_is_zero(&entry->hdr.htbl_elm))                 \
             FCG_EVENT_EMIT_FREE(fc, i, FCG_EVENT_REASON_FLUSH);            \
         FCG_LAYOUT_ENTRY_CLEAR(fc, entry);                                 \
         FCG_FREE_LIST_PUSH_ENTRY(fc, entry, i);                            \
@@ -1115,7 +1129,8 @@ _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *fc,                                \
                     FCG_LAYOUT_HASH_BASE(fc));                              \
                 if (RIX_LIKELY(entry != NULL)) {                           \
                     if (now)                                                \
-                        entry->last_ts = now;                              \
+                        flow_timestamp_store(&entry->hdr.htbl_elm, (now),  \
+                                             _FCG_TS_SHIFT(fc));           \
                     _FCG_INT(p, result_set_hit)(&results[idx],            \
                         FCG_LAYOUT_ENTRY_INDEX(fc, entry));                \
                     hit_count++;                                           \
@@ -1301,7 +1316,7 @@ _FCG_API(p, walk)(_FCG_CACHE_T(p) *fc,                                  \
                    int (*cb)(uint32_t entry_idx, void *arg), void *arg)    \
 {                                                                          \
     for (unsigned i = 0; i < fc->max_entries; i++) {                       \
-        if (FCG_LAYOUT_ENTRY_AT(fc, i)->last_ts != 0u) {                  \
+        if (!flow_timestamp_is_zero(&FCG_LAYOUT_ENTRY_AT(fc, i)->hdr.htbl_elm)) { \
             int rc = cb(i + 1u, arg);                                      \
             if (rc < 0)                                                    \
                 return rc;                                                 \
@@ -1369,7 +1384,8 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                     continue;                                              \
                 }                                                          \
                 entry->hdr.key = keys[idx];                                \
-                entry->last_ts = now;                                      \
+                flow_timestamp_store(&entry->hdr.htbl_elm, (now),          \
+                                     _FCG_TS_SHIFT(fc));                   \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_ret;                                \
                     _ret = _FCG_HT(p, insert_hashed)(                     \
@@ -1398,7 +1414,9 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                             _FCG_INT(p, free_entry)(fc, entry,            \
                                                     FCG_EVENT_REASON_ROLLBACK); \
                             RIX_ASSUME_NONNULL(_ret);                      \
-                            _ret->last_ts = now;                           \
+                            flow_timestamp_store(&_ret->hdr.htbl_elm,      \
+                                                 (now),                    \
+                                                 _FCG_TS_SHIFT(fc));       \
                             _FCG_INT(p, result_set_filled)(               \
                                 &results[idx],                              \
                                 FCG_LAYOUT_ENTRY_INDEX(fc, _ret));         \
@@ -1526,7 +1544,7 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
                 if (eidx == 0u || eidx > fc->max_entries)                  \
                     continue;                                              \
                 entry = FCG_LAYOUT_ENTRY_PTR(fc, eidx);                    \
-                if (entry == NULL || entry->last_ts == 0u)                 \
+                if (entry == NULL || flow_timestamp_is_zero(&entry->hdr.htbl_elm)) \
                     continue;                                              \
                 _FCG_HT(p, remove)(&fc->ht_head, fc->buckets,            \
                                     FCG_LAYOUT_HASH_BASE(fc), entry);      \

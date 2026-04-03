@@ -14,6 +14,10 @@
 #define FAIL(msg) do { fprintf(stderr, "FAIL: %s\n", (msg)); return 1; } while (0)
 #define FAILF(fmt, ...) do { fprintf(stderr, "FAIL: " fmt "\n", __VA_ARGS__); return 1; } while (0)
 
+#define TEST_NOW_ADD   UINT64_C(0x101)
+#define TEST_NOW_FIND  UINT64_C(0x202)
+#define TEST_NOW_DUP   UINT64_C(0x303)
+
 static void *
 test_bucket_alloc(size_t size, size_t align, void *arg __attribute__((unused)))
 {
@@ -175,6 +179,7 @@ struct test_variant_ops {
     size_t key_size;
     size_t record_size;
     size_t entry_offset;
+    size_t meta_offset;
     size_t cookie_offset;
     unsigned default_min_nb_bk;
     int (*init)(void *ft, void *records, unsigned max_entries,
@@ -185,19 +190,18 @@ struct test_variant_ops {
     unsigned (*nb_bk)(const void *ft);
     void (*stats)(const void *ft, struct ft_table_stats *out);
     void (*status)(const void *ft, struct fcore_status *out);
-    uint32_t (*find)(void *ft, const void *key);
-    uint32_t (*add_idx)(void *ft, uint32_t entry_idx);
+    uint32_t (*find)(void *ft, const void *key, uint64_t now);
+    uint32_t (*add_idx)(void *ft, uint32_t entry_idx, uint64_t now);
     uint32_t (*del_key)(void *ft, const void *key);
     uint32_t (*del_entry_idx)(void *ft, uint32_t entry_idx);
     void (*find_bulk)(void *ft, const void *keys, unsigned nb_keys,
+                      uint64_t now,
                       struct ft_table_result *results);
-    void (*add_idx_bulk)(void *ft, const uint32_t *entry_idxv,
-                         unsigned nb_keys,
-                         struct ft_table_result *results);
-    unsigned (*add_idx_bulk2)(void *ft, const uint32_t *entry_idxv,
-                              unsigned nb_keys,
-                              enum ft_add_policy policy,
-                              struct ft_table_result *results);
+    unsigned (*add_idx_bulk)(void *ft, uint32_t *entry_idxv,
+                             unsigned nb_keys,
+                             enum ft_add_policy policy,
+                             uint64_t now,
+                             uint32_t *unused_idxv);
     void (*del_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
                                unsigned nb_keys);
     int (*walk)(void *ft, int (*cb)(uint32_t entry_idx, void *arg), void *arg);
@@ -212,7 +216,7 @@ struct test_variant_ops {
                               destroy_fn, flush_fn, nb_entries_fn, nb_bk_fn,   \
                               stats_fn, status_fn, find_fn, add_idx_fn,        \
                               del_key_fn, del_entry_idx_fn, find_bulk_fn,       \
-                              add_idx_bulk_fn, add_idx_bulk2_fn,               \
+                              add_idx_bulk_fn,                                 \
                               del_entry_idx_bulk_fn,                           \
                               walk_fn, grow_2x_fn,                              \
                               reserve_fn, record_ptr_fn, entry_ptr_fn,          \
@@ -256,15 +260,15 @@ testv_status_##tag(const void *ft, struct fcore_status *out)                \
     status_fn((const struct ft_##prefix##_table *)ft, out);                \
 }                                                                          \
 static uint32_t                                                             \
-testv_find_##tag(void *ft, const void *key)                                 \
+testv_find_##tag(void *ft, const void *key, uint64_t now)                    \
 {                                                                          \
     return find_fn((struct ft_##prefix##_table *)ft,                        \
-                   (const key_t *)key);                                     \
+                   (const key_t *)key, now);                                \
 }                                                                          \
 static uint32_t                                                             \
-testv_add_idx_##tag(void *ft, uint32_t entry_idx)                           \
+testv_add_idx_##tag(void *ft, uint32_t entry_idx, uint64_t now)              \
 {                                                                          \
-    return add_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);        \
+    return add_idx_fn((struct ft_##prefix##_table *)ft, entry_idx, now);   \
 }                                                                          \
 static uint32_t                                                             \
 testv_del_key_##tag(void *ft, const void *key)                              \
@@ -279,27 +283,21 @@ testv_del_entry_idx_##tag(void *ft, uint32_t entry_idx)                     \
 }                                                                          \
 static void                                                                 \
 testv_find_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,         \
+                      uint64_t now,                                          \
                       struct ft_table_result *results)                       \
 {                                                                          \
     find_bulk_fn((struct ft_##prefix##_table *)ft,                          \
-                 (const key_t *)keys, nb_keys, results);                    \
-}                                                                          \
-static void                                                                 \
-testv_add_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,              \
-                         unsigned nb_keys,                                   \
-                         struct ft_table_result *results)                    \
-{                                                                          \
-    add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                       \
-                    entry_idxv, nb_keys, results);                          \
+                 (const key_t *)keys, nb_keys, now, results);               \
 }                                                                          \
 static unsigned                                                             \
-testv_add_idx_bulk2_##tag(void *ft, const uint32_t *entry_idxv,            \
-                          unsigned nb_keys,                                 \
-                          enum ft_add_policy policy,                        \
-                          struct ft_table_result *results)                  \
+testv_add_idx_bulk_##tag(void *ft, uint32_t *entry_idxv,                   \
+                         unsigned nb_keys,                                  \
+                         enum ft_add_policy policy,                         \
+                         uint64_t now,                                       \
+                         uint32_t *unused_idxv)                             \
 {                                                                          \
-    return add_idx_bulk2_fn((struct ft_##prefix##_table *)ft,               \
-                            entry_idxv, nb_keys, policy, results);          \
+    return add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                \
+                           entry_idxv, nb_keys, policy, now, unused_idxv);  \
 }                                                                          \
 static void                                                                 \
 testv_del_entry_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,        \
@@ -345,6 +343,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .key_size = sizeof(key_t),                                              \
     .record_size = sizeof(record_t),                                        \
     .entry_offset = offsetof(record_t, entry),                              \
+    .meta_offset = offsetof(entry_t, htbl_elm),                             \
     .cookie_offset = offsetof(record_t, cookie),                            \
     .default_min_nb_bk = (default_min_nb_bk_v),                             \
     .init = testv_init_##tag,                                               \
@@ -360,7 +359,6 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .del_entry_idx = testv_del_entry_idx_##tag,                             \
     .find_bulk = testv_find_bulk_##tag,                                     \
     .add_idx_bulk = testv_add_idx_bulk_##tag,                               \
-    .add_idx_bulk2 = testv_add_idx_bulk2_##tag,                             \
     .del_entry_idx_bulk = testv_del_entry_idx_bulk_##tag,                   \
     .walk = testv_walk_##tag,                                               \
     .grow_2x = testv_grow_2x_##tag,                                         \
@@ -375,10 +373,9 @@ TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
                       ft_flow4_table_destroy, ft_flow4_table_flush,
                       ft_flow4_table_nb_entries, ft_flow4_table_nb_bk,
                       ft_flow4_table_stats, ft_flow4_table_status,
-                      ft_flow4_table_find, ft_flow4_table_add_entry_idx,
+                      ft_flow4_table_find, ft_flow4_table_add_idx,
                       ft_flow4_table_del_key, ft_flow4_table_del_entry_idx,
                       ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
-                      ft_flow4_table_add_idx_bulk2,
                       ft_flow4_table_del_entry_idx_bulk, ft_flow4_table_walk,
                       ft_flow4_table_grow_2x, ft_flow4_table_reserve,
                       ft_flow4_table_record_ptr, ft_flow4_table_entry_ptr,
@@ -389,10 +386,9 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       ft_flow6_table_destroy, ft_flow6_table_flush,
                       ft_flow6_table_nb_entries, ft_flow6_table_nb_bk,
                       ft_flow6_table_stats, ft_flow6_table_status,
-                      ft_flow6_table_find, ft_flow6_table_add_entry_idx,
+                      ft_flow6_table_find, ft_flow6_table_add_idx,
                       ft_flow6_table_del_key, ft_flow6_table_del_entry_idx,
                       ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
-                      ft_flow6_table_add_idx_bulk2,
                       ft_flow6_table_del_entry_idx_bulk, ft_flow6_table_walk,
                       ft_flow6_table_grow_2x, ft_flow6_table_reserve,
                       ft_flow6_table_record_ptr, ft_flow6_table_entry_ptr,
@@ -403,10 +399,9 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       ft_flowu_table_destroy, ft_flowu_table_flush,
                       ft_flowu_table_nb_entries, ft_flowu_table_nb_bk,
                       ft_flowu_table_stats, ft_flowu_table_status,
-                      ft_flowu_table_find, ft_flowu_table_add_entry_idx,
+                      ft_flowu_table_find, ft_flowu_table_add_idx,
                       ft_flowu_table_del_key, ft_flowu_table_del_entry_idx,
                       ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
-                      ft_flowu_table_add_idx_bulk2,
                       ft_flowu_table_del_entry_idx_bulk, ft_flowu_table_walk,
                       ft_flowu_table_grow_2x, ft_flowu_table_reserve,
                       ft_flowu_table_record_ptr, ft_flowu_table_entry_ptr,
@@ -414,6 +409,26 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
 
 #define TEST_KEY_AT(base, ops, i) \
     ((void *)((unsigned char *)(base) + (size_t)(i) * (ops)->key_size))
+
+#define FT4_FIND(ft, key) \
+    ft_flow4_table_find((ft), (key), TEST_NOW_FIND)
+#define FT4_FIND_BULK(ft, keys, nb_keys, results) \
+    ft_flow4_table_find_bulk((ft), (keys), (nb_keys), TEST_NOW_FIND, (results))
+#define FT4_ADD_IDX(ft, entry_idx) \
+    ft_flow4_table_add_idx((ft), (entry_idx), TEST_NOW_ADD)
+#define FT4_ADD_IDX_BULK(ft, entry_idxv, nb_keys, policy, unused_idxv) \
+    ft_flow4_table_add_idx_bulk((ft), (entry_idxv), (nb_keys), (policy), \
+                                TEST_NOW_ADD, (unused_idxv))
+
+#define TEST_OPS_FIND(ops, ft, key) \
+    ((ops)->find((ft), (key), TEST_NOW_FIND))
+#define TEST_OPS_FIND_BULK(ops, ft, keys, nb_keys, results) \
+    ((ops)->find_bulk((ft), (keys), (nb_keys), TEST_NOW_FIND, (results)))
+#define TEST_OPS_ADD_IDX(ops, ft, entry_idx) \
+    ((ops)->add_idx((ft), (entry_idx), TEST_NOW_ADD))
+#define TEST_OPS_ADD_IDX_BULK(ops, ft, entry_idxv, nb_keys, policy, unused_idxv) \
+    ((ops)->add_idx_bulk((ft), (entry_idxv), (nb_keys), (policy),            \
+                         TEST_NOW_ADD, (unused_idxv)))
 
 static uint32_t
 test_add_idx_key(struct ft_flow4_table *ft, uint32_t entry_idx,
@@ -424,7 +439,7 @@ test_add_idx_key(struct ft_flow4_table *ft, uint32_t entry_idx,
     if (entry == NULL)
         return 0u;
     entry->key = *key;
-    return ft_flow4_table_add_idx(ft, entry_idx);
+    return FT4_ADD_IDX(ft, entry_idx);
 }
 
 struct walk_ctx {
@@ -481,9 +496,9 @@ test_basic_add_find_del(void)
     idx2 = test_add_idx_key(&ft, 2u, &k2);
     if (idx1 != 1u || idx2 != 2u || idx1 == idx2)
         FAIL("basic add returned invalid indices");
-    if (ft_flow4_table_find(&ft, &k1) != idx1)
+    if (FT4_FIND(&ft, &k1) != idx1)
         FAIL("find should return idx1");
-    if (ft_flow4_table_find(&ft, &k2) != idx2)
+    if (FT4_FIND(&ft, &k2) != idx2)
         FAIL("find should return idx2");
     if (test_add_idx_key(&ft, 1u, &k1) != idx1)
         FAIL("duplicate add should return existing idx");
@@ -491,7 +506,7 @@ test_basic_add_find_del(void)
         FAIL("duplicate add should not increase count");
     if (ft_flow4_table_del_key(&ft, &k1) != idx1)
         FAIL("del should return idx1");
-    if (ft_flow4_table_find(&ft, &k1) != 0u)
+    if (FT4_FIND(&ft, &k1) != 0u)
         FAIL("deleted key should miss");
     ft_flow4_table_destroy(&ft);
     free(pool);
@@ -559,7 +574,7 @@ test_manual_grow_preserves_entries(void)
     for (unsigned i = 0; i < 256u; i++) {
         struct flow4_key key = test_key(i + 100u);
 
-        if (ft_flow4_table_find(&ft, &key) != idxs[i])
+        if (FT4_FIND(&ft, &key) != idxs[i])
             FAILF("find after grow mismatch at %u", i);
     }
     ft_flow4_table_destroy(&ft);
@@ -601,7 +616,8 @@ test_bulk_ops_and_stats(void)
     struct test_user_record *pool;
     struct flow4_key keys[8];
     uint32_t entry_idxv[8];
-    struct ft_table_result results[8];
+    struct ft_table_result find_results[8];
+    uint32_t unused_idxv[8];
     struct ft_table_stats stats;
 
     printf("[T] flow4 table bulk ops and stats\n");
@@ -616,22 +632,26 @@ test_bulk_ops_and_stats(void)
         entry_idxv[i] = i + 1u;
     }
 
-    ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 8u, results);
+    if (FT4_ADD_IDX_BULK(&ft, entry_idxv, 8u, FT_ADD_IGNORE,
+                         unused_idxv) != 0u)
+        FAIL("add_bulk inserted should not return unused idx");
     for (unsigned i = 0; i < 8u; i++) {
-        if (results[i].entry_idx != entry_idxv[i])
+        if (entry_idxv[i] != i + 1u)
             FAILF("add_bulk failed at %u", i);
     }
 
-    memset(results, 0, sizeof(results));
-    ft_flow4_table_find_bulk(&ft, keys, 8u, results);
+    memset(find_results, 0, sizeof(find_results));
+    FT4_FIND_BULK(&ft, keys, 8u, find_results);
     for (unsigned i = 0; i < 8u; i++) {
-        if (results[i].entry_idx == 0u)
+        if (find_results[i].entry_idx == 0u)
             FAILF("find_bulk miss at %u", i);
     }
 
-    ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 8u, results);
+    if (FT4_ADD_IDX_BULK(&ft, entry_idxv, 8u, FT_ADD_IGNORE,
+                         unused_idxv) != 0u)
+        FAIL("duplicate self add_bulk should not return unused idx");
     for (unsigned i = 0; i < 8u; i++) {
-        if (results[i].entry_idx != entry_idxv[i])
+        if (entry_idxv[i] != i + 1u)
             FAILF("duplicate add_bulk failed at %u", i);
     }
 
@@ -640,14 +660,14 @@ test_bulk_ops_and_stats(void)
             FAILF("del_key failed at %u", i);
     }
 
-    memset(results, 0, sizeof(results));
-    ft_flow4_table_find_bulk(&ft, keys, 8u, results);
+    memset(find_results, 0, sizeof(find_results));
+    FT4_FIND_BULK(&ft, keys, 8u, find_results);
     for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx != 0u)
+        if (find_results[i].entry_idx != 0u)
             FAILF("deleted key should miss at %u", i);
     }
     for (unsigned i = 4u; i < 8u; i++) {
-        if (results[i].entry_idx == 0u)
+        if (find_results[i].entry_idx == 0u)
             FAILF("remaining key should hit at %u", i);
     }
 
@@ -876,7 +896,7 @@ test_grow_failure_preserves_table(void)
     for (unsigned i = 0; i < 64u; i++) {
         struct flow4_key key = test_key(i + 8000u);
 
-        if (ft_flow4_table_find(&ft, &key) != idxs[i])
+        if (FT4_FIND(&ft, &key) != idxs[i])
             FAILF("find after failed grow mismatch at %u", i);
     }
 
@@ -952,7 +972,7 @@ test_high_fill(void)
     for (unsigned i = 0; i < inserted; i++) {
         struct flow4_key key = test_key(i + 10000u);
 
-        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+        if (FT4_FIND(&ft, &key) != i + 1u)
             FAILF("find failed at high fill i=%u", i);
     }
 
@@ -966,14 +986,14 @@ test_high_fill(void)
     for (unsigned i = 1u; i < inserted; i += 2u) {
         struct flow4_key key = test_key(i + 10000u);
 
-        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+        if (FT4_FIND(&ft, &key) != i + 1u)
             FAILF("find after partial del failed i=%u", i);
     }
     /* deleted keys must miss */
     for (unsigned i = 0; i < inserted; i += 2u) {
         struct flow4_key key = test_key(i + 10000u);
 
-        if (ft_flow4_table_find(&ft, &key) != 0u)
+        if (FT4_FIND(&ft, &key) != 0u)
             FAILF("deleted key still found i=%u", i);
     }
 
@@ -1023,7 +1043,7 @@ test_max_fill(void)
     for (unsigned i = 0; i < inserted; i++) {
         struct flow4_key key = test_key(i + 20000u);
 
-        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+        if (FT4_FIND(&ft, &key) != i + 1u)
             FAILF("find at max fill failed i=%u", i);
     }
 
@@ -1095,7 +1115,7 @@ test_kickout_safety(void)
     for (unsigned i = 0; i < phase1_count; i++) {
         struct flow4_key key = test_key(i + 30000u);
 
-        if (ft_flow4_table_find(&ft, &key) != i + 1u)
+        if (FT4_FIND(&ft, &key) != i + 1u)
             lost++;
     }
     printf("  phase1=%u lost=%u\n", phase1_count, lost);
@@ -1141,7 +1161,7 @@ test_del_idx(void)
     }
     /* deleted entries miss, remaining entries hit */
     for (unsigned i = 0; i < 8u; i++) {
-        uint32_t found = ft_flow4_table_find(&ft, &keys[i]);
+        uint32_t found = FT4_FIND(&ft, &keys[i]);
 
         if ((i & 1u) == 0u) {
             if (found != 0u)
@@ -1203,7 +1223,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
             break;
         case 1: /* find */
         {
-            uint32_t ret = ft_flow4_table_find(&ft, &key);
+            uint32_t ret = FT4_FIND(&ft, &key);
 
             if (in_table[idx0] && ret != entry_idx)
                 FAILF("fuzz find miss: op=%u idx0=%u", op, idx0);
@@ -1224,7 +1244,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
             break;
         default: /* find (bias toward reads) */
         {
-            uint32_t ret = ft_flow4_table_find(&ft, &key);
+            uint32_t ret = FT4_FIND(&ft, &key);
 
             if (in_table[idx0] && ret != entry_idx)
                 FAILF("fuzz find2 miss: op=%u idx0=%u", op, idx0);
@@ -1248,7 +1268,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
         if (in_table[i]) {
             struct flow4_key key = test_key(i + 50000u);
 
-            if (ft_flow4_table_find(&ft, &key) != i + 1u)
+            if (FT4_FIND(&ft, &key) != i + 1u)
                 FAILF("fuzz final find miss i=%u", i);
         }
     }
@@ -1273,12 +1293,22 @@ testv_bind_key(const struct test_variant_ops *ops, void *ft,
     memcpy(entry, key, ops->key_size);
 }
 
+static struct flow_hashtbl_elm *
+testv_meta_ptr(const struct test_variant_ops *ops, void *ft, uint32_t entry_idx)
+{
+    unsigned char *entry = (unsigned char *)ops->entry_ptr(ft, entry_idx);
+
+    if (entry == NULL)
+        return NULL;
+    return (struct flow_hashtbl_elm *)(void *)(entry + ops->meta_offset);
+}
+
 static uint32_t
 testv_add_idx_key(const struct test_variant_ops *ops, void *ft,
                   uint32_t entry_idx, const void *key)
 {
     testv_bind_key(ops, ft, entry_idx, key);
-    return ops->add_idx(ft, entry_idx);
+    return TEST_OPS_ADD_IDX(ops, ft, entry_idx);
 }
 
 static int
@@ -1302,9 +1332,9 @@ testv_basic_add_find_del(const struct test_variant_ops *ops)
     idx2 = testv_add_idx_key(ops, &ft, 2u, &k2);
     if (idx1 != 1u || idx2 != 2u || idx1 == idx2)
         FAIL("basic add returned invalid indices");
-    if (ops->find(&ft, &k1) != idx1)
+    if (TEST_OPS_FIND(ops, &ft, &k1) != idx1)
         FAIL("find should return idx1");
-    if (ops->find(&ft, &k2) != idx2)
+    if (TEST_OPS_FIND(ops, &ft, &k2) != idx2)
         FAIL("find should return idx2");
     if (testv_add_idx_key(ops, &ft, 1u, &k1) != idx1)
         FAIL("duplicate add should return existing idx");
@@ -1312,7 +1342,7 @@ testv_basic_add_find_del(const struct test_variant_ops *ops)
         FAIL("duplicate add should not increase count");
     if (ops->del_key(&ft, &k1) != idx1)
         FAIL("del should return idx1");
-    if (ops->find(&ft, &k1) != 0u)
+    if (TEST_OPS_FIND(ops, &ft, &k1) != 0u)
         FAIL("deleted key should miss");
     ops->destroy(&ft);
     free(pool);
@@ -1371,7 +1401,8 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(8u, ops->key_size);
     uint32_t entry_idxv[8];
-    struct ft_table_result results[8];
+    struct ft_table_result find_results[8];
+    uint32_t unused_idxv[8];
     struct ft_table_stats stats;
 
     printf("[T] %s table bulk ops and stats\n", ops->name);
@@ -1385,22 +1416,26 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
         entry_idxv[i] = i + 1u;
     }
 
-    ops->add_idx_bulk(&ft, entry_idxv, 8u, results);
+    if (TEST_OPS_ADD_IDX_BULK(ops, &ft, entry_idxv, 8u, FT_ADD_IGNORE,
+                              unused_idxv) != 0u)
+        FAIL("add_bulk inserted should not return unused idx");
     for (unsigned i = 0; i < 8u; i++) {
-        if (results[i].entry_idx != entry_idxv[i])
+        if (entry_idxv[i] != i + 1u)
             FAILF("add_bulk failed at %u", i);
     }
 
-    memset(results, 0, sizeof(results));
-    ops->find_bulk(&ft, keys, 8u, results);
+    memset(find_results, 0, sizeof(find_results));
+    TEST_OPS_FIND_BULK(ops, &ft, keys, 8u, find_results);
     for (unsigned i = 0; i < 8u; i++) {
-        if (results[i].entry_idx == 0u)
+        if (find_results[i].entry_idx == 0u)
             FAILF("find_bulk miss at %u", i);
     }
 
-    ops->add_idx_bulk(&ft, entry_idxv, 8u, results);
+    if (TEST_OPS_ADD_IDX_BULK(ops, &ft, entry_idxv, 8u, FT_ADD_IGNORE,
+                              unused_idxv) != 0u)
+        FAIL("duplicate self add_bulk should not return unused idx");
     for (unsigned i = 0; i < 8u; i++) {
-        if (results[i].entry_idx != entry_idxv[i])
+        if (entry_idxv[i] != i + 1u)
             FAILF("duplicate add_bulk failed at %u", i);
     }
 
@@ -1409,14 +1444,14 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
             FAILF("del_key failed at %u", i);
     }
 
-    memset(results, 0, sizeof(results));
-    ops->find_bulk(&ft, keys, 8u, results);
+    memset(find_results, 0, sizeof(find_results));
+    TEST_OPS_FIND_BULK(ops, &ft, keys, 8u, find_results);
     for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx != 0u)
+        if (find_results[i].entry_idx != 0u)
             FAILF("deleted key should miss at %u", i);
     }
     for (unsigned i = 4u; i < 8u; i++) {
-        if (results[i].entry_idx == 0u)
+        if (find_results[i].entry_idx == 0u)
             FAILF("remaining key should hit at %u", i);
     }
 
@@ -1443,8 +1478,9 @@ testv_add_idx_bulk_duplicate_ignore(const struct test_variant_ops *ops)
     void *keys = calloc(4u, ops->key_size);
     uint32_t base_idxv[2] = { 1u, 2u };
     uint32_t dup_idxv[2] = { 3u, 4u };
-    struct ft_table_result results[2];
+    uint32_t unused_idxv[2];
     struct ft_table_stats stats;
+    unsigned unused_n;
 
     printf("[T] %s table add_idx_bulk duplicate ignore\n", ops->name);
     if (pool == NULL || keys == NULL)
@@ -1456,20 +1492,28 @@ testv_add_idx_bulk_duplicate_ignore(const struct test_variant_ops *ops)
         ops->make_key(TEST_KEY_AT(keys, ops, i), i + 6000u);
         testv_bind_key(ops, &ft, base_idxv[i], TEST_KEY_AT(keys, ops, i));
     }
-    ops->add_idx_bulk(&ft, base_idxv, 2u, results);
+    unused_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, base_idxv, 2u, FT_ADD_IGNORE,
+                                     unused_idxv);
+    if (unused_n != 0u)
+        FAIL("base insert should not return unused idx");
 
     for (unsigned i = 0; i < 2u; i++)
         testv_bind_key(ops, &ft, dup_idxv[i], TEST_KEY_AT(keys, ops, i));
 
-    memset(results, 0, sizeof(results));
-    ops->add_idx_bulk(&ft, dup_idxv, 2u, results);
-    if (results[0].entry_idx != base_idxv[0])
+    memset(unused_idxv, 0, sizeof(unused_idxv));
+    unused_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, dup_idxv, 2u, FT_ADD_IGNORE,
+                                     unused_idxv);
+    if (unused_n != 2u)
+        FAIL("duplicate ignore unused count mismatch");
+    if (dup_idxv[0] != base_idxv[0])
         FAIL("duplicate ignore result mismatch at 0");
-    if (results[1].entry_idx != base_idxv[1])
+    if (dup_idxv[1] != base_idxv[1])
         FAIL("duplicate ignore result mismatch at 1");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 0)) != base_idxv[0])
+    if (unused_idxv[0] != 3u || unused_idxv[1] != 4u)
+        FAIL("duplicate ignore unused idx mismatch");
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != base_idxv[0])
         FAIL("duplicate ignore retained idx mismatch at 0");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != base_idxv[1])
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 1)) != base_idxv[1])
         FAIL("duplicate ignore retained idx mismatch at 1");
     if (ops->nb_entries(&ft) != 2u)
         FAIL("duplicate ignore should not increase entry count");
@@ -1494,8 +1538,9 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
     void *keys = calloc(4u, ops->key_size);
     uint32_t base_idxv[2] = { 1u, 2u };
     uint32_t mix_idxv[5] = { 1u, 3u, 4u, 5u, 6u };
-    struct ft_table_result results[5];
+    uint32_t unused_idxv[5];
     struct ft_table_stats stats;
+    unsigned unused_n;
 
     printf("[T] %s table add_idx_bulk mixed batch\n", ops->name);
     if (pool == NULL || keys == NULL)
@@ -1507,7 +1552,10 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
         ops->make_key(TEST_KEY_AT(keys, ops, i), i + 6100u);
         testv_bind_key(ops, &ft, base_idxv[i], TEST_KEY_AT(keys, ops, i));
     }
-    ops->add_idx_bulk(&ft, base_idxv, 2u, results);
+    unused_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, base_idxv, 2u, FT_ADD_IGNORE,
+                                     unused_idxv);
+    if (unused_n != 0u)
+        FAIL("base insert should not return unused idx");
 
     ops->make_key(TEST_KEY_AT(keys, ops, 2u), 6200u);
     ops->make_key(TEST_KEY_AT(keys, ops, 3u), 6201u);
@@ -1517,25 +1565,30 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
     testv_bind_key(ops, &ft, 5u, TEST_KEY_AT(keys, ops, 2u));
     testv_bind_key(ops, &ft, 6u, TEST_KEY_AT(keys, ops, 3u));
 
-    memset(results, 0, sizeof(results));
-    ops->add_idx_bulk(&ft, mix_idxv, 5u, results);
-    if (results[0].entry_idx != 1u)
+    memset(unused_idxv, 0, sizeof(unused_idxv));
+    unused_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, mix_idxv, 5u, FT_ADD_IGNORE,
+                                     unused_idxv);
+    if (unused_n != 2u)
+        FAIL("mixed batch unused count mismatch");
+    if (mix_idxv[0] != 1u)
         FAIL("mixed self-duplicate result mismatch");
-    if (results[1].entry_idx != 2u)
+    if (mix_idxv[1] != 2u)
         FAIL("mixed existing-duplicate result mismatch");
-    if (results[2].entry_idx != 4u)
+    if (mix_idxv[2] != 4u)
         FAIL("mixed insert result mismatch at 2");
-    if (results[3].entry_idx != 4u)
+    if (mix_idxv[3] != 4u)
         FAIL("mixed batch-duplicate result mismatch");
-    if (results[4].entry_idx != 6u)
+    if (mix_idxv[4] != 6u)
         FAIL("mixed insert result mismatch at 4");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 0)) != 1u)
+    if (unused_idxv[0] != 3u || unused_idxv[1] != 5u)
+        FAIL("mixed batch unused idx mismatch");
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != 1u)
         FAIL("mixed self-duplicate retained idx mismatch");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != 2u)
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 1)) != 2u)
         FAIL("mixed existing-duplicate retained idx mismatch");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 2u)) != 4u)
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 2u)) != 4u)
         FAIL("mixed inserted/duplicated key mismatch");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 3u)) != 6u)
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 3u)) != 6u)
         FAIL("mixed inserted key mismatch");
     if (ops->nb_entries(&ft) != 4u)
         FAIL("mixed batch should add exactly two entries");
@@ -1551,7 +1604,7 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
 }
 
 static int
-testv_add_idx_bulk2_policy(const struct test_variant_ops *ops)
+testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
     union test_any_table ft;
@@ -1562,10 +1615,10 @@ testv_add_idx_bulk2_policy(const struct test_variant_ops *ops)
     uint32_t dup_idxv[4] = { 5u, 6u, 7u, 8u };
     uint32_t ins_idxv[4] = { 9u, 10u, 11u, 12u };
     uint32_t mix_idxv[4] = { 5u, 13u, 14u, 15u };
-    struct ft_table_result results[4];
+    uint32_t unused_idxv[4];
     unsigned free_n;
 
-    printf("[T] %s table add_idx_bulk2 policy\n", ops->name);
+    printf("[T] %s table add_idx_bulk policy\n", ops->name);
     if (pool == NULL || keys == NULL)
         FAIL("alloc failed");
     if (ops->init(&ft, pool, 64u, &cfg) != 0)
@@ -1575,28 +1628,43 @@ testv_add_idx_bulk2_policy(const struct test_variant_ops *ops)
         ops->make_key(TEST_KEY_AT(keys, ops, i), i + 7000u);
         testv_bind_key(ops, &ft, base_idxv[i], TEST_KEY_AT(keys, ops, i));
     }
-    ops->add_idx_bulk(&ft, base_idxv, 4u, results);
+    free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, base_idxv, 4u, FT_ADD_IGNORE,
+                                   unused_idxv);
+    if (free_n != 0u)
+        FAIL("base insert should not return unused idx");
 
     for (unsigned i = 0; i < 4u; i++)
         testv_bind_key(ops, &ft, dup_idxv[i], TEST_KEY_AT(keys, ops, i));
 
-    free_n = ops->add_idx_bulk2(&ft, dup_idxv, 4u, FT_ADD_IGNORE, results);
+    memset(unused_idxv, 0xff, sizeof(unused_idxv));
+    free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, dup_idxv, 4u, FT_ADD_IGNORE,
+                                   unused_idxv);
     if (free_n != 4u)
         FAILF("ignore free_n=%u", free_n);
     for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx != dup_idxv[i])
+        if (dup_idxv[i] != base_idxv[i])
             FAILF("ignore result mismatch at %u", i);
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i)) != base_idxv[i])
+        if (unused_idxv[i] != i + 5u)
+            FAILF("ignore unused mismatch at %u", i);
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, i)) != base_idxv[i])
             FAILF("ignore find mismatch at %u", i);
     }
 
-    free_n = ops->add_idx_bulk2(&ft, dup_idxv, 4u, FT_ADD_UPDATE, results);
+    dup_idxv[0] = 5u;
+    dup_idxv[1] = 6u;
+    dup_idxv[2] = 7u;
+    dup_idxv[3] = 8u;
+    memset(unused_idxv, 0xff, sizeof(unused_idxv));
+    free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, dup_idxv, 4u, FT_ADD_UPDATE,
+                                   unused_idxv);
     if (free_n != 4u)
         FAILF("update free_n=%u", free_n);
     for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx != base_idxv[i])
+        if (dup_idxv[i] != i + 5u)
             FAILF("update result mismatch at %u", i);
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i)) != dup_idxv[i])
+        if (unused_idxv[i] != base_idxv[i])
+            FAILF("update unused mismatch at %u", i);
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, i)) != dup_idxv[i])
             FAILF("update find mismatch at %u", i);
     }
 
@@ -1604,14 +1672,15 @@ testv_add_idx_bulk2_policy(const struct test_variant_ops *ops)
         ops->make_key(TEST_KEY_AT(keys, ops, i + 4u), i + 8000u);
         testv_bind_key(ops, &ft, ins_idxv[i], TEST_KEY_AT(keys, ops, i + 4u));
     }
-    memset(results, 0xff, sizeof(results));
-    free_n = ops->add_idx_bulk2(&ft, ins_idxv, 4u, FT_ADD_IGNORE, results);
+    memset(unused_idxv, 0xff, sizeof(unused_idxv));
+    free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, ins_idxv, 4u, FT_ADD_IGNORE,
+                                   unused_idxv);
     if (free_n != 0u)
         FAILF("insert free_n=%u", free_n);
     for (unsigned i = 0; i < 4u; i++) {
-        if (results[i].entry_idx != (uint32_t)RIX_NIL)
+        if (ins_idxv[i] != i + 9u)
             FAILF("insert result mismatch at %u", i);
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, i + 4u)) != ins_idxv[i])
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, i + 4u)) != ins_idxv[i])
             FAILF("insert find mismatch at %u", i);
     }
 
@@ -1622,21 +1691,23 @@ testv_add_idx_bulk2_policy(const struct test_variant_ops *ops)
     ops->make_key(TEST_KEY_AT(keys, ops, 9u), 9001u);
     testv_bind_key(ops, &ft, mix_idxv[3], TEST_KEY_AT(keys, ops, 9u));
 
-    memset(results, 0xff, sizeof(results));
-    free_n = ops->add_idx_bulk2(&ft, mix_idxv, 4u, FT_ADD_IGNORE, results);
+    memset(unused_idxv, 0xff, sizeof(unused_idxv));
+    free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, mix_idxv, 4u, FT_ADD_IGNORE,
+                                   unused_idxv);
     if (free_n != 1u)
         FAILF("mixed ignore free_n=%u", free_n);
-    if (results[0].entry_idx != (uint32_t)RIX_NIL)
+    if (mix_idxv[0] != 5u)
         FAIL("mixed ignore self result mismatch");
-    if (results[1].entry_idx != mix_idxv[1])
+    if (mix_idxv[1] != dup_idxv[1])
         FAIL("mixed ignore dup result mismatch");
-    if (results[2].entry_idx != (uint32_t)RIX_NIL ||
-        results[3].entry_idx != (uint32_t)RIX_NIL)
+    if (mix_idxv[2] != 14u || mix_idxv[3] != 15u)
         FAIL("mixed ignore insert result mismatch");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != dup_idxv[1])
+    if (unused_idxv[0] != 13u)
+        FAIL("mixed ignore unused mismatch");
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 1)) != dup_idxv[1])
         FAIL("mixed ignore retained idx mismatch");
-    if (ops->find(&ft, TEST_KEY_AT(keys, ops, 8u)) != mix_idxv[2] ||
-        ops->find(&ft, TEST_KEY_AT(keys, ops, 9u)) != mix_idxv[3])
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 8u)) != mix_idxv[2] ||
+        TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 9u)) != mix_idxv[3])
         FAIL("mixed ignore inserted find mismatch");
 
     ops->make_key(TEST_KEY_AT(keys, ops, 10u), 9002u);
@@ -1648,26 +1719,96 @@ testv_add_idx_bulk2_policy(const struct test_variant_ops *ops)
     {
         uint32_t upd_mix_idxv[4] = { 5u, 17u, 18u, 19u };
 
-        memset(results, 0xff, sizeof(results));
-        free_n = ops->add_idx_bulk2(&ft, upd_mix_idxv, 4u,
-                                    FT_ADD_UPDATE, results);
+        memset(unused_idxv, 0xff, sizeof(unused_idxv));
+        free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, upd_mix_idxv, 4u,
+                                       FT_ADD_UPDATE, unused_idxv);
         if (free_n != 1u)
             FAILF("mixed update free_n=%u", free_n);
-        if (results[0].entry_idx != (uint32_t)RIX_NIL)
+        if (upd_mix_idxv[0] != 5u)
             FAIL("mixed update self result mismatch");
-        if (results[1].entry_idx != dup_idxv[1])
+        if (upd_mix_idxv[1] != 17u)
             FAIL("mixed update replace result mismatch");
-        if (results[2].entry_idx != (uint32_t)RIX_NIL ||
-            results[3].entry_idx != (uint32_t)RIX_NIL)
+        if (upd_mix_idxv[2] != 18u || upd_mix_idxv[3] != 19u)
             FAIL("mixed update insert result mismatch");
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, 0)) != 5u)
+        if (unused_idxv[0] != dup_idxv[1])
+            FAIL("mixed update unused mismatch");
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != 5u)
             FAIL("mixed update self find mismatch");
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, 1)) != 17u)
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 1)) != 17u)
             FAIL("mixed update replaced idx mismatch");
-        if (ops->find(&ft, TEST_KEY_AT(keys, ops, 10u)) != 18u ||
-            ops->find(&ft, TEST_KEY_AT(keys, ops, 11u)) != 19u)
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 10u)) != 18u ||
+            TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 11u)) != 19u)
             FAIL("mixed update inserted find mismatch");
     }
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_timestamp_update(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(32u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(4u, ops->key_size);
+    uint32_t idxv[1] = { 2u };
+    uint32_t unused_idxv[1];
+    unsigned unused_n;
+    struct flow_hashtbl_elm *meta1;
+    struct flow_hashtbl_elm *meta2;
+
+    printf("[T] %s table timestamp update\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init(&ft, pool, 32u, &cfg) != 0)
+        FAIL("init failed");
+
+    ops->make_key(TEST_KEY_AT(keys, ops, 0), 9100u);
+    testv_bind_key(ops, &ft, 1u, TEST_KEY_AT(keys, ops, 0));
+    if (TEST_OPS_ADD_IDX(ops, &ft, 1u) != 1u)
+        FAIL("insert failed");
+    meta1 = testv_meta_ptr(ops, &ft, 1u);
+    if (meta1 == NULL || flow_timestamp_get(meta1) !=
+        flow_timestamp_encode(TEST_NOW_ADD, FLOW_TIMESTAMP_DEFAULT_SHIFT))
+        FAIL("insert timestamp mismatch");
+
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != 1u)
+        FAIL("find hit failed");
+    if (flow_timestamp_get(meta1) !=
+        flow_timestamp_encode(TEST_NOW_FIND, FLOW_TIMESTAMP_DEFAULT_SHIFT))
+        FAIL("find timestamp mismatch");
+
+    testv_bind_key(ops, &ft, 2u, TEST_KEY_AT(keys, ops, 0));
+    unused_n = ops->add_idx_bulk(&ft, idxv, 1u, FT_ADD_IGNORE,
+                                 TEST_NOW_DUP, unused_idxv);
+    if (unused_n != 1u || idxv[0] != 1u || unused_idxv[0] != 2u)
+        FAIL("ignore duplicate result mismatch");
+    if (flow_timestamp_get(meta1) !=
+        flow_timestamp_encode(TEST_NOW_DUP, FLOW_TIMESTAMP_DEFAULT_SHIFT))
+        FAIL("ignore duplicate timestamp mismatch");
+    meta2 = testv_meta_ptr(ops, &ft, 2u);
+    if (meta2 == NULL || !flow_timestamp_is_zero(meta2))
+        FAIL("ignore duplicate request timestamp mismatch");
+
+    idxv[0] = 2u;
+    unused_idxv[0] = 0u;
+    unused_n = ops->add_idx_bulk(&ft, idxv, 1u, FT_ADD_UPDATE,
+                                 TEST_NOW_ADD + 1u, unused_idxv);
+    if (unused_n != 1u || idxv[0] != 2u || unused_idxv[0] != 1u)
+        FAIL("update duplicate result mismatch");
+    meta1 = testv_meta_ptr(ops, &ft, 1u);
+    meta2 = testv_meta_ptr(ops, &ft, 2u);
+    if (meta1 == NULL || meta2 == NULL)
+        FAIL("meta ptr failed");
+    if (!flow_timestamp_is_zero(meta1))
+        FAIL("updated-out entry timestamp should clear");
+    if (flow_timestamp_get(meta2) !=
+        flow_timestamp_encode(TEST_NOW_ADD + 1u, FLOW_TIMESTAMP_DEFAULT_SHIFT))
+        FAIL("updated-in entry timestamp mismatch");
 
     ops->destroy(&ft);
     free(keys);
@@ -1700,7 +1841,7 @@ testv_manual_grow_preserves_entries(const struct test_variant_ops *ops)
         FAIL("grow_2x failed");
     for (unsigned i = 0; i < 256u; i++) {
         ops->make_key(&key, i + 100u);
-        if (ops->find(&ft, &key) != idxs[i])
+        if (TEST_OPS_FIND(ops, &ft, &key) != idxs[i])
             FAILF("find after grow mismatch at %u", i);
     }
     ops->destroy(&ft);
@@ -1768,7 +1909,7 @@ testv_walk_flush_and_del_idx(const struct test_variant_ops *ops)
     if (status.entries != 15u)
         FAIL("status.entries mismatch after del");
     ops->make_key(&key, 5001u);
-    if (ops->find(&ft, &key) != 0u)
+    if (TEST_OPS_FIND(ops, &ft, &key) != 0u)
         FAIL("del_idx entry still found");
     ops->flush(&ft);
     if (ops->nb_entries(&ft) != 0u)
@@ -1821,7 +1962,7 @@ testv_fuzz(const struct test_variant_ops *ops,
             break;
         case 1:
         case 3:
-            ret = ops->find(&ft, &key);
+            ret = TEST_OPS_FIND(ops, &ft, &key);
             if (in_table[idx0] && ret != entry_idx)
                 FAIL("fuzz find miss");
             if (!in_table[idx0] && action == 1u && ret != 0u)
@@ -1848,7 +1989,7 @@ testv_fuzz(const struct test_variant_ops *ops,
     for (unsigned i = 0; i < n; i++) {
         if (in_table[i]) {
             ops->make_key(&key, i + 50000u);
-            if (ops->find(&ft, &key) != i + 1u)
+            if (TEST_OPS_FIND(ops, &ft, &key) != i + 1u)
                 FAIL("fuzz final find miss");
         }
     }
@@ -1871,7 +2012,9 @@ test_variant_suite(const struct test_variant_ops *ops)
         return 1;
     if (testv_add_idx_bulk_mixed_batch(ops) != 0)
         return 1;
-    if (testv_add_idx_bulk2_policy(ops) != 0)
+    if (testv_add_idx_bulk_policy(ops) != 0)
+        return 1;
+    if (testv_timestamp_update(ops) != 0)
         return 1;
     if (testv_walk_flush_and_del_idx(ops) != 0)
         return 1;

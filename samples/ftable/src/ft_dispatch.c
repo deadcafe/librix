@@ -181,44 +181,40 @@ FT_DISPATCH_COLD(flowu)
                                                                                \
 uint32_t                                                                       \
 ft_##prefix##_table_find(struct ft_##prefix##_table *ft,                       \
-                         const struct prefix##_key *key)                       \
+                         const struct prefix##_key *key,                       \
+                         uint64_t now)                                         \
 {                                                                              \
-    return active_ptr->find(ft, key);                                          \
+    return active_ptr->find(ft, key, now);                                     \
 }                                                                              \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_find_bulk(struct ft_##prefix##_table *ft,                  \
                               const struct prefix##_key *keys,                 \
                               unsigned nb_keys,                                \
+                              uint64_t now,                                    \
                               struct ft_table_result *results)            \
 {                                                                              \
-    active_ptr->find_bulk(ft, keys, nb_keys, results);                         \
+    active_ptr->find_bulk(ft, keys, nb_keys, now, results);                    \
 }                                                                              \
                                                                                \
 uint32_t                                                                       \
 ft_##prefix##_table_add_idx(struct ft_##prefix##_table *ft,                    \
-                            uint32_t entry_idx)                                \
+                            uint32_t entry_idx,                                \
+                            uint64_t now)                                      \
 {                                                                              \
-    return active_ptr->add_idx(ft, entry_idx);                                 \
-}                                                                              \
-                                                                               \
-void                                                                           \
-ft_##prefix##_table_add_idx_bulk(struct ft_##prefix##_table *ft,               \
-                                 const uint32_t *entry_idxv,                   \
-                                 unsigned nb_keys,                             \
-                                 struct ft_table_result *results)              \
-{                                                                              \
-    active_ptr->add_idx_bulk(ft, entry_idxv, nb_keys, results);                \
+    return active_ptr->add_idx(ft, entry_idx, now);                            \
 }                                                                              \
                                                                                \
 unsigned                                                                       \
-ft_##prefix##_table_add_idx_bulk2(struct ft_##prefix##_table *ft,              \
-                                  const uint32_t *entry_idxv,                  \
-                                  unsigned nb_keys,                            \
-                                  enum ft_add_policy policy,                   \
-                                  struct ft_table_result *results)             \
+ft_##prefix##_table_add_idx_bulk(struct ft_##prefix##_table *ft,               \
+                                 uint32_t *entry_idxv,                         \
+                                 unsigned nb_keys,                             \
+                                 enum ft_add_policy policy,                    \
+                                 uint64_t now,                                 \
+                                 uint32_t *unused_idxv)                        \
 {                                                                              \
-    return active_ptr->add_idx_bulk2(ft, entry_idxv, nb_keys, policy, results);\
+    return active_ptr->add_idx_bulk(ft, entry_idxv, nb_keys, policy,          \
+                                    now, unused_idxv);                        \
 }                                                                              \
                                                                                \
 uint32_t                                                                       \

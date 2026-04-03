@@ -16,22 +16,22 @@
 #define FT_OPS_DEFINE(prefix)                                                  \
 struct ft_##prefix##_ops {                                                     \
     uint32_t (*find)(struct ft_##prefix##_table *ft,                           \
-                     const struct prefix##_key *key);                          \
+                     const struct prefix##_key *key,                           \
+                     uint64_t now);                                            \
     void (*find_bulk)(struct ft_##prefix##_table *ft,                          \
                       const struct prefix##_key *keys,                         \
                       unsigned nb_keys,                                        \
+                      uint64_t now,                                            \
                       struct ft_table_result *results);                   \
     uint32_t (*add_idx)(struct ft_##prefix##_table *ft,                        \
-                        uint32_t entry_idx);                                   \
-    void (*add_idx_bulk)(struct ft_##prefix##_table *ft,                       \
-                         const uint32_t *entry_idxv,                           \
-                         unsigned nb_keys,                                     \
-                         struct ft_table_result *results);                \
-    unsigned (*add_idx_bulk2)(struct ft_##prefix##_table *ft,                  \
-                              const uint32_t *entry_idxv,                      \
-                              unsigned nb_keys,                                \
-                              enum ft_add_policy policy,                       \
-                              struct ft_table_result *results);           \
+                        uint32_t entry_idx,                                    \
+                        uint64_t now);                                         \
+    unsigned (*add_idx_bulk)(struct ft_##prefix##_table *ft,                   \
+                             uint32_t *entry_idxv,                             \
+                             unsigned nb_keys,                                 \
+                             enum ft_add_policy policy,                        \
+                             uint64_t now,                                     \
+                             uint32_t *unused_idxv);                           \
     uint32_t (*del_key)(struct ft_##prefix##_table *ft,                        \
                         const struct prefix##_key *key);                       \
     uint32_t (*del_entry_idx)(struct ft_##prefix##_table *ft,                  \
