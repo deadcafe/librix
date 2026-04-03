@@ -771,7 +771,7 @@ ftb_measure_add_idx(const struct ftb_variant_ops *ops, void *ft,
         }
         ftb_cold_touch();
         t0 = ftb_rdtsc();
-        ops->add_idx_bulk(ft, idxv, ftb_query_n, results);
+        (void)ops->add_idx_bulk2(ft, idxv, ftb_query_n, FT_ADD_IGNORE, results);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -790,52 +790,6 @@ ftb_sample_add_idx(const struct ftb_variant_ops *ops, void *ft,
     for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
         samples[r] = ftb_measure_add_idx(ops, ft, live,
                                           key_base + r * (live + ftb_query_n * 2u + 1024u));
-    }
-    return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
-                                ftb_sample_keep_n);
-}
-
-static double
-ftb_measure_add_idx2(const struct ftb_variant_ops *ops, void *ft,
-                     unsigned live, unsigned key_base)
-{
-    void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
-    uint32_t *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
-    struct ft_table_result *results = ftb_xcalloc(ftb_query_n, sizeof(*results));
-    uint64_t samples[FTB_UPDATE_REPEAT];
-
-    for (unsigned r = 0; r < FTB_UPDATE_REPEAT; r++) {
-        unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
-        uint64_t t0, t1;
-
-        ops->flush(ft);
-        ftb_prefill(ops, ft, live, prefill_base);
-        for (unsigned i = 0; i < ftb_query_n; i++) {
-            ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + live + i);
-            idxv[i] = live + i + 1u;
-            ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
-        }
-        ftb_cold_touch();
-        t0 = ftb_rdtsc();
-        (void)ops->add_idx_bulk2(ft, idxv, ftb_query_n, FT_ADD_IGNORE, results);
-        t1 = ftb_rdtsc();
-        samples[r] = t1 - t0;
-    }
-    free(results);
-    free(idxv);
-    free(keys);
-    return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;
-}
-
-static double
-ftb_sample_add_idx2(const struct ftb_variant_ops *ops, void *ft,
-                    unsigned live, unsigned key_base)
-{
-    double samples[FTB_SAMPLE_MAX];
-
-    for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
-        samples[r] = ftb_measure_add_idx2(
-            ops, ft, live, key_base + r * (live + ftb_query_n * 2u + 1024u));
     }
     return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
                                 ftb_sample_keep_n);
@@ -1020,7 +974,7 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     union ftb_any_table ft;
     void *pool;
     double find_hit, find_miss, find_mix_50_50;
-    double add_idx, add_idx2, add_ignore, add_update, del_idx;
+    double add_idx, add_ignore, add_update, del_idx;
 
     ftb_parse_entries_fill(argc, argv, base_arg, &desired, &fill_pct);
     max_entries = ftb_pool_count(desired);
@@ -1046,14 +1000,13 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     find_mix_50_50 = ftb_sample_find_lookup(ops, max_entries, fill_pct,
                                             FTB_FIND_MIX_50_50);
     add_idx = ftb_sample_add_idx(ops, &ft, live, max_entries + 200000u);
-    add_idx2 = ftb_sample_add_idx2(ops, &ft, live, max_entries + 300000u);
     add_ignore = ftb_sample_add_dup_policy(ops, &ft, live,
-                                           max_entries + 400000u,
+                                           max_entries + 300000u,
                                            FT_ADD_IGNORE);
     add_update = ftb_sample_add_dup_policy(ops, &ft, live,
-                                           max_entries + 500000u,
+                                           max_entries + 400000u,
                                            FT_ADD_UPDATE);
-    del_idx = ftb_sample_del_idx(ops, &ft, live, max_entries + 600000u);
+    del_idx = ftb_sample_del_idx(ops, &ft, live, max_entries + 500000u);
 
     printf("[desired=%u entries=%u nb_bk=%u live=%u fill=%u%%]\n",
            desired, max_entries, ops->nb_bk(&ft), live, fill_pct);
@@ -1061,7 +1014,6 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     printf("  find_miss  %8.2f cy/key\n", find_miss);
     printf("  find_mix_50_50 %7.2f cy/key\n", find_mix_50_50);
     printf("  add_idx    %8.2f cy/key\n", add_idx);
-    printf("  add_idx2   %8.2f cy/key\n", add_idx2);
     printf("  add_ignore %8.2f cy/key\n", add_ignore);
     printf("  add_update %8.2f cy/key\n", add_update);
     printf("  del_idx    %8.2f cy/key\n", del_idx);

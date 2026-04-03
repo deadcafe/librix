@@ -20,8 +20,8 @@
 .PHONY: ftable ftable-test ftable-bench ftable-clean
 
 BENCH_EXTRA_CFLAGS ?= -DNDEBUG
-BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
-BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
+BENCH_FC_OPTS ?= --pin-core 2 --raw-repeat 2 --keep-n 1
+BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 2 --keep-n 1
 BENCH_FT_FULL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 
 build: static shared
