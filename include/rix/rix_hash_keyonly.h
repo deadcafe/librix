@@ -125,7 +125,7 @@ name##_hash_key_masked(struct rix_hash_find_ctx_s *ctx,                       \
         hash_fn(key, hash_mask);                                              \
     unsigned _bk0, _bk1;                                                      \
     u32 _fp;                                                                  \
-    rix_hash_buckets(_h, bk_mask, &_bk0, &_bk1, &_fp);                       \
+    _fp = rix_hash_fp(_h, bk_mask, &_bk0, &_bk1);                       \
     ctx->hash  = _h;                                                          \
     ctx->fp    = _fp;                                                         \
     ctx->key   = (const void *)key;                                           \
@@ -396,7 +396,7 @@ name##_insert(struct name *head,                                              \
     u32 _fp;                                                                  \
     u32 _hits_fp[2];                                                          \
     u32 _hits_zero[2];                                                        \
-    rix_hash_buckets(_h, mask, &_bk0, &_bk1, &_fp);                          \
+    _fp = rix_hash_fp(_h, mask, &_bk0, &_bk1);                          \
     for (int _i = 0; _i < 2; _i++) {                                          \
         struct rix_hash_bucket_s *_bk =                                       \
             buckets + (_i == 0 ? _bk0 : _bk1);                                \
@@ -466,7 +466,7 @@ name##_remove(struct name *head,                                              \
                 mask);                                                        \
     unsigned _bk0, _bk1;                                                      \
     u32 _fp;                                                                  \
-    rix_hash_buckets(_h, mask, &_bk0, &_bk1, &_fp);                          \
+    _fp = rix_hash_fp(_h, mask, &_bk0, &_bk1);                          \
     for (int _i = 0; _i < 2; _i++) {                                          \
         unsigned _bki = (_i == 0) ? _bk0 : _bk1;                              \
         struct rix_hash_bucket_s *_b = buckets + _bki;                        \

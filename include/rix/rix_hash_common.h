@@ -188,13 +188,13 @@ rix_hash_prefetch_bucket_of(const struct rix_hash_bucket_s *bucket)
  * Alternate bucket: alt_bk = (fp ^ hash_field) & mask  (same XOR trick).
  * Remove: bk = hash_field & mask -> direct O(1) slot lookup, no hash call.
  */
-static RIX_FORCE_INLINE void
-rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
-                 unsigned *bk0_out, unsigned *bk1_out, u32 *fp_out)
+static RIX_FORCE_INLINE u32
+rix_hash_fp(const union rix_hash_hash_u h, unsigned mask,
+            unsigned *bk0_out, unsigned *bk1_out)
 {
     *bk0_out = h.val32[0] & mask;
     *bk1_out = h.val32[1] & mask;
-    *fp_out  = h.val32[0] ^ h.val32[1];
+    return h.val32[0] ^ h.val32[1];
 }
 
 /*===========================================================================
@@ -358,7 +358,7 @@ rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
  * nb_bk must be a power of 2 (used as a bitmask inside the hash table).
  * Minimum returned value is 2.
  *===========================================================================*/
-static inline unsigned
+static RIX_FORCE_INLINE unsigned
 rix_hash_nb_bk_hint(unsigned max_entries)
 {
     unsigned n = (max_entries + 7u) / 8u;   /* ceil(max_entries / 8) */

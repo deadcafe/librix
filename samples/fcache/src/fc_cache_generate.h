@@ -253,7 +253,7 @@ _FCG_INT(p, prefetch_insert_hash)(const _FCG_CACHE_T(p) *fc,              \
     unsigned bk0, bk1;                                                     \
     u32 fp;                                                           \
     unsigned mask = fc->ht_head.rhh_mask;                                  \
-    rix_hash_buckets(h, mask, &bk0, &bk1, &fp);                          \
+    fp = rix_hash_fp(h, mask, &bk0, &bk1);                          \
     (void)fp;                                                              \
     rix_hash_prefetch_bucket_of(fc->buckets + bk0);                       \
     rix_hash_prefetch_bucket_of(fc->buckets + bk1);                       \
@@ -669,7 +669,7 @@ _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
         return;                                                            \
     fc->stats.relief_calls++;                                              \
     _FCG_INT(p, update_eff_timeout)(fc);                                  \
-    rix_hash_buckets(h, fc->ht_head.rhh_mask, &bk0, &bk1, &fp);            \
+    fp = rix_hash_fp(h, fc->ht_head.rhh_mask, &bk0, &bk1);            \
     pressure_empty_slots = _FCG_INT(p, relief_empty_slots)(fc);            \
     fc->stats.relief_bucket_checks++;                                      \
     rix_hash_arch->find_u32x16_2(fc->buckets[bk0].hash, fp, 0u,            \
@@ -1355,12 +1355,11 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                 unsigned idx = i + j;                                      \
                 unsigned _bk0;                                             \
                 unsigned _bk1;                                             \
-                u32 _fp_unused;                                            \
                 hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)] =             \
                     hash_fn(&keys[idx], fc->ht_head.rhh_mask);             \
-                rix_hash_buckets(                                          \
+                (void)rix_hash_fp(                                         \
                     hashes[idx & (FC_CACHE_BULK_CTX_COUNT - 1u)],          \
-                    fc->ht_head.rhh_mask, &_bk0, &_bk1, &_fp_unused);      \
+                    fc->ht_head.rhh_mask, &_bk0, &_bk1);                   \
                 rix_hash_prefetch_bucket_of(&fc->buckets[_bk0]);           \
                 rix_hash_prefetch_bucket_of(&fc->buckets[_bk1]);           \
             }                                                              \

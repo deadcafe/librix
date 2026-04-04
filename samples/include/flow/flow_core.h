@@ -668,8 +668,8 @@ _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
                     rix_hash_prefetch_key(&_pentry->key);                     \
                 }                                                             \
                 _ctxp->hash = hash_fn(&entry->key, hash_mask);                \
-                rix_hash_buckets(_ctxp->hash, head->rhh_mask,                 \
-                                 &_bk0, &_bk1, &_ctxp->fp);                   \
+                _ctxp->fp = rix_hash_fp(_ctxp->hash, head->rhh_mask,        \
+                                        &_bk0, &_bk1);                        \
                 _ctxp->key = (const void *)entry;                             \
                 _ctxp->bk[0] = buckets + _bk0;                                \
                 _ctxp->bk[1] = buckets + _bk1;                                \
@@ -873,8 +873,8 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                     rix_hash_prefetch_key(&_pentry->key);                     \
                 }                                                             \
                 _ctxp->hash = hash_fn(&entry->key, hash_mask);                \
-                rix_hash_buckets(_ctxp->hash, head->rhh_mask,                 \
-                                 &_bk0, &_bk1, &_ctxp->fp);                   \
+                _ctxp->fp = rix_hash_fp(_ctxp->hash, head->rhh_mask,        \
+                                        &_bk0, &_bk1);                        \
                 _ctxp->key = (const void *)entry;                             \
                 _ctxp->bk[0] = buckets + _bk0;                                \
                 _ctxp->bk[1] = buckets + _bk1;                                \

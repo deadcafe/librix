@@ -235,10 +235,10 @@
                 unsigned _idx = _i + _j;                                      \
                 union rix_hash_hash_u _h =                                    \
                     hash_fn(&(keys)[_idx], (ft)->start_mask);                 \
-                unsigned _bk0, _bk1; u32 _fp_unused;                          \
+                unsigned _bk0, _bk1;                                          \
                 _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)] = _h;           \
-                rix_hash_buckets(_h, (ft)->ht_head.rhh_mask,                 \
-                                  &_bk0, &_bk1, &_fp_unused);                 \
+                (void)rix_hash_fp(_h, (ft)->ht_head.rhh_mask,                \
+                                  &_bk0, &_bk1);                              \
                 rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk0]);            \
                 if (_bk1 != _bk0)                                             \
                     rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk1]);        \
@@ -292,14 +292,14 @@
                 unsigned _idx = _i + _j;                                      \
                 u32 _eidx = (entry_idxv)[_idx];                          \
                 _FTG_ENTRY_T(p) *_entry; unsigned _bk0, _bk1;                 \
-                u32 _fp_unused; union rix_hash_hash_u _h;                     \
+                union rix_hash_hash_u _h;                                     \
                 if (_eidx == 0u || _eidx > (ft)->max_entries) continue;       \
                 _entry = FTG_LAYOUT_ENTRY_PTR((ft), _eidx);                   \
                 RIX_ASSUME_NONNULL(_entry);                                   \
                 _h = hash_fn(&_entry->key, (ft)->start_mask);                 \
                 _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)] = _h;           \
-                rix_hash_buckets(_h, (ft)->ht_head.rhh_mask,                 \
-                                  &_bk0, &_bk1, &_fp_unused);                 \
+                (void)rix_hash_fp(_h, (ft)->ht_head.rhh_mask,                \
+                                  &_bk0, &_bk1);                              \
                 rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk0]);            \
                 if (_bk1 != _bk0)                                             \
                     rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk1]);        \
@@ -555,7 +555,7 @@ _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
     u32 fp;                                                                   \
     u32 hits;                                                                 \
                                                                                \
-    rix_hash_buckets(h, ft->ht_head.rhh_mask, &bk0, &bk1, &fp);              \
+    fp = rix_hash_fp(h, ft->ht_head.rhh_mask, &bk0, &bk1);              \
     hits = RIX_HASH_FIND_U32X16(ft->buckets[bk0].hash, fp);                  \
     while (hits != 0u) {                                                      \
         unsigned bit = (unsigned)__builtin_ctz(hits);                         \
@@ -622,7 +622,7 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
     unsigned mask = head->rhh_mask;                                           \
     unsigned bk0, bk1;                                                        \
     u32 fp;                                                                   \
-    rix_hash_buckets(h, mask, &bk0, &bk1, &fp);                              \
+    fp = rix_hash_fp(h, mask, &bk0, &bk1);                              \
     entry->meta.cur_hash = h.val32[0];                                        \
     for (unsigned pass = 0u; pass < 2u; pass++) {                             \
         unsigned bki = (pass == 0u) ? bk0 : bk1;                              \
@@ -974,7 +974,6 @@ _FTG_API(p, grow_2x)(_FTG_TABLE_T(p) *ft)                                     \
             _FTG_ENTRY_T(p) *entry;                                           \
             union rix_hash_hash_u h;                                          \
             unsigned bk0;                                                     \
-            u32 fp_unused;                                                    \
             if (idx == (unsigned)RIX_NIL)                                     \
                 continue;                                                     \
             entry = FTG_LAYOUT_ENTRY_PTR(ft, idx);                            \
@@ -984,7 +983,7 @@ _FTG_API(p, grow_2x)(_FTG_TABLE_T(p) *ft)                                     \
             ctx[produced & (FT_TABLE_GROW_CTX_RING - 1u)].hash = h;           \
             {                                                                 \
                 unsigned _bk1;                                                \
-                rix_hash_buckets(h, new_mask, &bk0, &_bk1, &fp_unused);      \
+                (void)rix_hash_fp(h, new_mask, &bk0, &_bk1);                 \
             }                                                                 \
             rix_hash_prefetch_bucket_hashes_of(&new_buckets[bk0]);            \
             produced++;                                                       \

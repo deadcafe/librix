@@ -98,7 +98,7 @@ name##_hash_key_masked(struct rix_hash_find_ctx_s *ctx,                       \
         hash_fn(key, hash_mask);                                              \
     unsigned _bk0, _bk1;                                                      \
     u32 _fp;                                                                  \
-    rix_hash_buckets(_h, bk_mask, &_bk0, &_bk1, &_fp);                       \
+    _fp = rix_hash_fp(_h, bk_mask, &_bk0, &_bk1);                       \
     ctx->hash  = _h;                                                          \
     ctx->fp    = _fp;                                                         \
     ctx->key   = (const void *)key;                                           \
@@ -182,7 +182,7 @@ name##_hash_key_2bk_masked(struct rix_hash_find_ctx_s *ctx,                   \
     union rix_hash_hash_u _h = hash_fn(key, hash_mask);                       \
     unsigned _bk0, _bk1;                                                      \
     u32 _fp;                                                                  \
-    rix_hash_buckets(_h, bk_mask, &_bk0, &_bk1, &_fp);                       \
+    _fp = rix_hash_fp(_h, bk_mask, &_bk0, &_bk1);                       \
     ctx->hash  = _h;                                                          \
     ctx->fp    = _fp;                                                         \
     ctx->key   = (const void *)key;                                           \
@@ -202,7 +202,7 @@ name##_hash_key_bk_masked(struct rix_hash_find_ctx_s *ctx,                    \
     union rix_hash_hash_u _h = hash_fn(key, hash_mask);                       \
     unsigned _bk0, _bk1;                                                      \
     u32 _fp;                                                                  \
-    rix_hash_buckets(_h, bk_mask, &_bk0, &_bk1, &_fp);                       \
+    _fp = rix_hash_fp(_h, bk_mask, &_bk0, &_bk1);                       \
     ctx->hash  = _h;                                                          \
     ctx->fp    = _fp;                                                         \
     ctx->key   = (const void *)key;                                           \
@@ -391,7 +391,7 @@ name##_insert_hashed_idx(struct name *head,                                   \
     u32 _fp;                                                                  \
     u32 _hits_fp[2];                                                          \
     u32 _hits_zero[2];                                                        \
-    rix_hash_buckets(_h, mask, &_bk0, &_bk1, &_fp);                          \
+    _fp = rix_hash_fp(_h, mask, &_bk0, &_bk1);                          \
     elm->hash_field = _h.val32[0];                                            \
     rix_hash_prefetch_bucket_of(buckets + _bk0);                              \
     rix_hash_prefetch_bucket_of(buckets + _bk1);                              \
