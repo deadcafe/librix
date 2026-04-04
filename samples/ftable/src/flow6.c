@@ -177,32 +177,32 @@ void _FTG_API(flow6, stats)(const struct ft_flow6_table *ft,
                             struct ft_table_stats *out);
 void _FTG_API(flow6, status)(const struct ft_flow6_table *ft,
                              struct fcore_status *out);
-uint32_t _FTG_API(flow6, find)(struct ft_flow6_table *ft,
+u32 _FTG_API(flow6, find)(struct ft_flow6_table *ft,
                                const struct flow6_key *key,
-                               uint64_t now);
+                               u64 now);
 void _FTG_API(flow6, find_bulk)(struct ft_flow6_table *ft,
                                 const struct flow6_key *keys,
                                 unsigned nb_keys,
-                                uint64_t now,
+                                u64 now,
                                 struct ft_table_result *results);
-uint32_t _FTG_API(flow6, add_idx)(struct ft_flow6_table *ft,
-                                  uint32_t entry_idx,
-                                  uint64_t now);
+u32 _FTG_API(flow6, add_idx)(struct ft_flow6_table *ft,
+                                  u32 entry_idx,
+                                  u64 now);
 unsigned _FTG_API(flow6, add_idx_bulk)(struct ft_flow6_table *ft,
-                                       uint32_t *entry_idxv,
+                                       u32 *entry_idxv,
                                        unsigned nb_keys,
                                        enum ft_add_policy policy,
-                                       uint64_t now,
-                                       uint32_t *unused_idxv);
-uint32_t _FTG_API(flow6, del_key)(struct ft_flow6_table *ft,
+                                       u64 now,
+                                       u32 *unused_idxv);
+u32 _FTG_API(flow6, del_key)(struct ft_flow6_table *ft,
                                   const struct flow6_key *key);
-uint32_t _FTG_API(flow6, del_entry_idx)(struct ft_flow6_table *ft,
-                                        uint32_t entry_idx);
+u32 _FTG_API(flow6, del_entry_idx)(struct ft_flow6_table *ft,
+                                        u32 entry_idx);
 void _FTG_API(flow6, del_entry_idx_bulk)(struct ft_flow6_table *ft,
-                                         const uint32_t *entry_idxv,
+                                         const u32 *entry_idxv,
                                          unsigned nb_keys);
 int _FTG_API(flow6, walk)(struct ft_flow6_table *ft,
-                          int (*cb)(uint32_t entry_idx, void *arg),
+                          int (*cb)(u32 entry_idx, void *arg),
                           void *arg);
 int _FTG_API(flow6, grow_2x)(struct ft_flow6_table *ft);
 int _FTG_API(flow6, reserve)(struct ft_flow6_table *ft,

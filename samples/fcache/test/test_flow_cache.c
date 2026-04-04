@@ -32,25 +32,25 @@ make_key4(unsigned i)
 {
     return fc_flow4_key_make(0x0a000001u + i,
                              0x0a100001u + i,
-                             (uint16_t)(1000u + i),
-                             (uint16_t)(2000u + i),
+                             (u16)(1000u + i),
+                             (u16)(2000u + i),
                              17u, 1u);
 }
 
 static struct flow6_key
 make_key6(unsigned i)
 {
-    uint8_t src[16] = {0x20, 0x01, 0x0d, 0xb8};
-    uint8_t dst[16] = {0x20, 0x01, 0x0d, 0xb9};
-    uint32_t v;
+    u8 src[16] = {0x20, 0x01, 0x0d, 0xb8};
+    u8 dst[16] = {0x20, 0x01, 0x0d, 0xb9};
+    u32 v;
 
     v = i;
     memcpy(src + 12, &v, 4);
     v = i + 0x1000u;
     memcpy(dst + 12, &v, 4);
     return fc_flow6_key_make(src, dst,
-                             (uint16_t)(1000u + i),
-                             (uint16_t)(2000u + i),
+                             (u16)(1000u + i),
+                             (u16)(2000u + i),
                              6u, 1u);
 }
 
@@ -59,23 +59,23 @@ make_keyu_v4(unsigned i)
 {
     return fc_flowu_key_v4(
         0x0a000001u + i, 0x0a100001u + i,
-        (uint16_t)(1000u + i), (uint16_t)(2000u + i),
+        (u16)(1000u + i), (u16)(2000u + i),
         17u, 1u);
 }
 
 static struct flowu_key
 make_keyu_v6(unsigned i)
 {
-    uint8_t src[16] = {0x20, 0x01, 0x0d, 0xb8};
-    uint8_t dst[16] = {0x20, 0x01, 0x0d, 0xb9};
-    uint32_t v = i;
+    u8 src[16] = {0x20, 0x01, 0x0d, 0xb8};
+    u8 dst[16] = {0x20, 0x01, 0x0d, 0xb9};
+    u32 v = i;
 
     memcpy(src + 12, &v, 4);
     v = i + 0x1000u;
     memcpy(dst + 12, &v, 4);
     return fc_flowu_key_v6(
         src, dst,
-        (uint16_t)(1000u + i), (uint16_t)(2000u + i),
+        (u16)(1000u + i), (u16)(2000u + i),
         6u, 1u);
 }
 
@@ -293,7 +293,7 @@ test_##PREFIX##_bulk_wraparound(void)                                           
     CACHE_T fc;                                                                              \
     KEY_T keys[NB_KEYS];                                                                     \
     RESULT_T results[NB_KEYS];                                                               \
-    uint32_t idxs[NB_KEYS];                                                                  \
+    u32 idxs[NB_KEYS];                                                                  \
     printf("[T] fc " #PREFIX " bulk wraparound\n");                                          \
     fc_##PREFIX##_cache_init(&fc, buckets, NB_BK, pool, MAX_ENTRIES, NULL);                  \
     for (unsigned i = 0; i < NB_KEYS; i++)                                                   \
@@ -766,7 +766,7 @@ test_##PREFIX##_find_single(void)                                               
     ENTRY_T pool[MAX_ENTRIES];                                                               \
     CACHE_T fc;                                                                              \
     KEY_T key;                                                                               \
-    uint32_t idx;                                                                            \
+    u32 idx;                                                                            \
     printf("[T] fc " #PREFIX " find (single)\n");                                            \
     fc_##PREFIX##_cache_init(&fc, buckets, NB_BK, pool, MAX_ENTRIES, NULL);                  \
     key = MAKE_KEY(21000u);                                                                  \
@@ -781,7 +781,7 @@ test_##PREFIX##_find_single(void)                                               
     if (idx == 0u)                                                                           \
         FAIL("findadd single should return non-zero");                                       \
     {                                                                                        \
-        uint32_t found = fc_##PREFIX##_cache_find(&fc, &key, 200u);                          \
+        u32 found = fc_##PREFIX##_cache_find(&fc, &key, 200u);                          \
         if (found != idx)                                                                    \
             FAILF("find single hit: idx=%u expected %u", found, idx);                        \
     }                                                                                        \
@@ -824,7 +824,7 @@ test_##PREFIX##_add_single(void)                                                
     ENTRY_T pool[MAX_ENTRIES];                                                               \
     CACHE_T fc;                                                                              \
     KEY_T key;                                                                               \
-    uint32_t idx;                                                                            \
+    u32 idx;                                                                            \
     printf("[T] fc " #PREFIX " add (single)\n");                                             \
     fc_##PREFIX##_cache_init(&fc, buckets, NB_BK, pool, MAX_ENTRIES, NULL);                  \
     key = MAKE_KEY(23000u);                                                                  \
@@ -835,7 +835,7 @@ test_##PREFIX##_add_single(void)                                                
         FAIL("add single nb_entries should be 1");                                           \
     /* findable */                                                                           \
     {                                                                                        \
-        uint32_t found = fc_##PREFIX##_cache_find(&fc, &key, 200u);                          \
+        u32 found = fc_##PREFIX##_cache_find(&fc, &key, 200u);                          \
         if (found != idx)                                                                    \
             FAILF("add single: find idx=%u expected %u", found, idx);                        \
     }                                                                                        \
@@ -931,7 +931,7 @@ test_##PREFIX##_del_idx_bulk(void)                                              
     CACHE_T fc;                                                                              \
     KEY_T keys[NB_KEYS];                                                                     \
     RESULT_T results[NB_KEYS];                                                               \
-    uint32_t idxs[NB_KEYS];                                                                  \
+    u32 idxs[NB_KEYS];                                                                  \
     printf("[T] fc " #PREFIX " del_idx_bulk\n");                                             \
     fc_##PREFIX##_cache_init(&fc, buckets, NB_BK, pool, MAX_ENTRIES, NULL);                  \
     for (unsigned i = 0; i < NB_KEYS; i++)                                                   \
@@ -952,13 +952,13 @@ test_##PREFIX##_del_idx_bulk(void)                                              
     }                                                                                        \
     /* invalid indices: no crash */                                                          \
     {                                                                                        \
-        uint32_t bad_idxs[] = { 0u, MAX_ENTRIES + 1u };                                      \
+        u32 bad_idxs[] = { 0u, MAX_ENTRIES + 1u };                                      \
         fc_##PREFIX##_cache_del_idx_bulk(&fc, bad_idxs, 2u);                                 \
     }                                                                                        \
 }                                                                                            \
 /*--- walk ---*/                                                                             \
 static int                                                                                   \
-test_##PREFIX##_walk_count_cb(uint32_t entry_idx, void *arg)                                 \
+test_##PREFIX##_walk_count_cb(u32 entry_idx, void *arg)                                 \
 {                                                                                            \
     (void)entry_idx;                                                                         \
     unsigned *count = (unsigned *)arg;                                                       \
@@ -966,7 +966,7 @@ test_##PREFIX##_walk_count_cb(uint32_t entry_idx, void *arg)                    
     return 0;                                                                                \
 }                                                                                            \
 static int                                                                                   \
-test_##PREFIX##_walk_abort_cb(uint32_t entry_idx, void *arg)                                 \
+test_##PREFIX##_walk_abort_cb(u32 entry_idx, void *arg)                                 \
 {                                                                                            \
     (void)entry_idx;                                                                         \
     unsigned *count = (unsigned *)arg;                                                       \
@@ -1022,7 +1022,7 @@ test_##PREFIX##_findadd_single(void)                                            
     ENTRY_T pool[MAX_ENTRIES];                                                               \
     CACHE_T fc;                                                                              \
     KEY_T key;                                                                               \
-    uint32_t idx1, idx2;                                                                     \
+    u32 idx1, idx2;                                                                     \
     printf("[T] fc " #PREFIX " findadd (single)\n");                                         \
     fc_##PREFIX##_cache_init(&fc, buckets, NB_BK, pool, MAX_ENTRIES, NULL);                  \
     key = MAKE_KEY(28000u);                                                                  \
@@ -1060,9 +1060,9 @@ DEFINE_TESTS(flowu, struct flowu_key, struct fc_flowu_result,
 struct test_flow4_user {
     struct fc_flow4_entry entry;
     struct {
-        uint64_t touch;
-        uint32_t cookie;
-        uint32_t last_event;
+        u64 touch;
+        u32 cookie;
+        u32 last_event;
     } __attribute__((aligned(8))) body;
 } __attribute__((aligned(FC_CACHE_LINE_SIZE)));
 
@@ -1079,7 +1079,7 @@ struct test_flow4_event_log {
 };
 
 static void
-test_flow4_event_cb(enum fc_flow4_event event, uint32_t entry_idx, void *arg)
+test_flow4_event_cb(enum fc_flow4_event event, u32 entry_idx, void *arg)
 {
     struct test_flow4_event_log *log = (struct test_flow4_event_log *)arg;
     struct test_flow4_user *user = &log->users[entry_idx - 1u];
@@ -1089,10 +1089,10 @@ test_flow4_event_cb(enum fc_flow4_event event, uint32_t entry_idx, void *arg)
         log->alloc_count++;
     else
         log->free_count++;
-    user->body.last_event = (uint32_t)event;
+    user->body.last_event = (u32)event;
     user->body.touch = user->body.touch * UINT64_C(1315423911)
-                       + (uint64_t)entry_idx
-                       + ((uint64_t)event << 32);
+                       + (u64)entry_idx
+                       + ((u64)event << 32);
 }
 
 static void
@@ -1174,11 +1174,11 @@ enum {
 };
 
 struct test_flow4_var_hdr {
-    uint32_t cookie;
-    uint32_t allocs;
-    uint32_t frees;
-    uint32_t last_event;
-    uint64_t touch;
+    u32 cookie;
+    u32 allocs;
+    u32 frees;
+    u32 last_event;
+    u64 touch;
 };
 
 struct test_flow4_var_ctx {
@@ -1199,13 +1199,13 @@ test_flow4_var_hdr_ptr(unsigned char *rec)
 }
 
 static void
-test_flow4_var_event_cb(enum fc_flow4_event event, uint32_t entry_idx, void *arg)
+test_flow4_var_event_cb(enum fc_flow4_event event, u32 entry_idx, void *arg)
 {
     struct test_flow4_var_ctx *ctx = (struct test_flow4_var_ctx *)arg;
     unsigned char *rec =
         FC_FLOW4_CACHE_RECORD_PTR_AS(ctx->fc, unsigned char, entry_idx);
     struct test_flow4_var_hdr *hdr;
-    uint8_t *body;
+    u8 *body;
     if (rec == NULL)
         return;
     hdr = test_flow4_var_hdr_ptr(rec);
@@ -1219,11 +1219,11 @@ test_flow4_var_event_cb(enum fc_flow4_event event, uint32_t entry_idx, void *arg
         ctx->free_count++;
         hdr->frees++;
     }
-    hdr->last_event = (uint32_t)event;
+    hdr->last_event = (u32)event;
     hdr->touch = hdr->touch * UINT64_C(11400714819323198485)
-                 + (uint64_t)entry_idx
-                 + ((uint64_t)event << 32);
-    body[TEST_FLOW4_VAR_BODY_SZ - 1u] ^= (uint8_t)entry_idx;
+                 + (u64)entry_idx
+                 + ((u64)event << 32);
+    body[TEST_FLOW4_VAR_BODY_SZ - 1u] ^= (u8)entry_idx;
 }
 
 static void
@@ -1279,7 +1279,7 @@ test_flow4_init_ex_varbody_mapping(void)
             || hdr->touch == 0u)
             FAIL("varbody alloc callback should update mapped body");
         if (rec[TEST_FLOW4_VAR_BODY_OFF + TEST_FLOW4_VAR_BODY_SZ - 1u]
-            != (uint8_t)result.entry_idx)
+            != (u8)result.entry_idx)
             FAIL("varbody callback should be able to write arbitrary payload");
     }
     fc_flow4_cache_flush(&fc);
@@ -1290,11 +1290,11 @@ test_flow4_init_ex_varbody_mapping(void)
 struct test_flow6_user {
     struct fc_flow6_entry entry;
     struct {
-        uint32_t cookie;
-        uint32_t allocs;
-        uint32_t frees;
-        uint32_t last_event;
-        uint64_t touch;
+        u32 cookie;
+        u32 allocs;
+        u32 frees;
+        u32 last_event;
+        u64 touch;
     } body;
 } __attribute__((aligned(FC_CACHE_LINE_SIZE)));
 
@@ -1310,7 +1310,7 @@ struct test_flow6_event_log {
 };
 
 static void
-test_flow6_event_cb(enum fc_flow6_event event, uint32_t entry_idx, void *arg)
+test_flow6_event_cb(enum fc_flow6_event event, u32 entry_idx, void *arg)
 {
     struct test_flow6_event_log *log = (struct test_flow6_event_log *)arg;
     struct test_flow6_user *user = &log->users[entry_idx - 1u];
@@ -1323,10 +1323,10 @@ test_flow6_event_cb(enum fc_flow6_event event, uint32_t entry_idx, void *arg)
         log->free_count++;
         user->body.frees++;
     }
-    user->body.last_event = (uint32_t)event;
+    user->body.last_event = (u32)event;
     user->body.touch = user->body.touch * UINT64_C(1315423911)
-                       + (uint64_t)entry_idx
-                       + ((uint64_t)event << 32);
+                       + (u64)entry_idx
+                       + ((u64)event << 32);
 }
 
 static void
@@ -1405,11 +1405,11 @@ test_flow6_init_ex_and_event_cb(void)
 struct test_flowu_user {
     struct fc_flowu_entry entry;
     struct {
-        uint32_t cookie;
-        uint32_t allocs;
-        uint32_t frees;
-        uint32_t last_event;
-        uint64_t touch;
+        u32 cookie;
+        u32 allocs;
+        u32 frees;
+        u32 last_event;
+        u64 touch;
     } body;
 } __attribute__((aligned(FC_CACHE_LINE_SIZE)));
 
@@ -1425,7 +1425,7 @@ struct test_flowu_event_log {
 };
 
 static void
-test_flowu_event_cb(enum fc_flowu_event event, uint32_t entry_idx, void *arg)
+test_flowu_event_cb(enum fc_flowu_event event, u32 entry_idx, void *arg)
 {
     struct test_flowu_event_log *log = (struct test_flowu_event_log *)arg;
     struct test_flowu_user *user = &log->users[entry_idx - 1u];
@@ -1438,10 +1438,10 @@ test_flowu_event_cb(enum fc_flowu_event event, uint32_t entry_idx, void *arg)
         log->free_count++;
         user->body.frees++;
     }
-    user->body.last_event = (uint32_t)event;
+    user->body.last_event = (u32)event;
     user->body.touch = user->body.touch * UINT64_C(1315423911)
-                       + (uint64_t)entry_idx
-                       + ((uint64_t)event << 32);
+                       + (u64)entry_idx
+                       + ((u64)event << 32);
 }
 
 static void

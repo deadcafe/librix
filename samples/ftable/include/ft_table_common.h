@@ -157,7 +157,7 @@ struct ft_bucket_allocator {
  *===========================================================================*/
 
 struct ft_table_result {
-    uint32_t entry_idx;
+    u32 entry_idx;
 };
 
 enum ft_add_policy {
@@ -175,12 +175,12 @@ struct ft_table_config {
 
 struct ft_table_stats {
     struct fcore_stats core;
-    uint64_t grow_execs;
-    uint64_t grow_failures;
-    uint64_t reserve_calls;
-    uint64_t maint_calls;
-    uint64_t maint_bucket_checks;
-    uint64_t maint_evictions;
+    u64 grow_execs;
+    u64 grow_failures;
+    u64 reserve_calls;
+    u64 maint_calls;
+    u64 maint_bucket_checks;
+    u64 maint_evictions;
 };
 
 /*===========================================================================
@@ -193,7 +193,7 @@ struct ft_maint_ctx {
     const unsigned char      *pool_base;
     size_t                    pool_stride;
     size_t                    meta_off;
-    uint8_t                   ts_shift;
+    u8                   ts_shift;
     struct ft_table_stats    *stats;
 };
 
@@ -221,9 +221,9 @@ struct ft_maint_ctx {
  */
 unsigned ft_table_maintain(const struct ft_maint_ctx *ctx,
                            unsigned start_bk,
-                           uint64_t now,
-                           uint64_t expire_tsc,
-                           uint32_t *expired_idxv,
+                           u64 now,
+                           u64 expire_tsc,
+                           u32 *expired_idxv,
                            unsigned max_expired,
                            unsigned min_bk_entries,
                            unsigned *next_bk);
@@ -253,11 +253,11 @@ unsigned ft_table_maintain(const struct ft_maint_ctx *ctx,
  * @return Number of evicted entries written to @p expired_idxv.
  */
 unsigned ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
-                                    const uint32_t *entry_idxv,
+                                    const u32 *entry_idxv,
                                     unsigned nb_idx,
-                                    uint64_t now,
-                                    uint64_t expire_tsc,
-                                    uint32_t *expired_idxv,
+                                    u64 now,
+                                    u64 expire_tsc,
+                                    u32 *expired_idxv,
                                     unsigned max_expired,
                                     unsigned min_bk_entries,
                                     int enable_filter);

@@ -29,12 +29,12 @@
 /* Node definition and hash function                                   */
 /* ================================================================== */
 struct mykey {
-    uint64_t hi;
+    u64 hi;
 };
 
 struct mynode {
-    uint32_t     cur_hash; /* hash_field: hash of the current bucket (updated on kickout) */
-    uint32_t     _pad;     /* alignment padding */
+    u32     cur_hash; /* hash_field: hash of the current bucket (updated on kickout) */
+    u32     _pad;     /* alignment padding */
     struct mykey key;      /* key_field: 8-byte key */
 };
 
@@ -62,9 +62,9 @@ RIX_HASH_GENERATE_KEYONLY(myht_keyonly, mynode_keyonly, key, mykey_cmp)
 /* slot variant: hash_field + slot_field in node                       */
 /* ================================================================== */
 struct mynode_slot {
-    uint32_t     cur_hash; /* hash_field */
-    uint16_t     slot;     /* slot_field: slot in current bucket */
-    uint16_t     _pad;
+    u32     cur_hash; /* hash_field */
+    u16     slot;     /* slot_field: slot in current bucket */
+    u16     _pad;
     struct mykey key;
 };
 
@@ -74,20 +74,20 @@ RIX_HASH_GENERATE_SLOT(myht_slot, mynode_slot, key, cur_hash, slot, mykey_cmp)
 /* ================================================================== */
 /* TSC measurement helper                                              */
 /* ================================================================== */
-static inline uint64_t
+static inline u64
 tsc_start(void)
 {
-    uint32_t lo, hi;
+    u32 lo, hi;
     __asm__ volatile ("lfence\n\trdtsc\n\t" : "=a"(lo), "=d"(hi));
-    return ((uint64_t)hi << 32) | lo;
+    return ((u64)hi << 32) | lo;
 }
 
-static inline uint64_t
+static inline u64
 tsc_end(void)
 {
-    uint32_t lo, hi;
+    u32 lo, hi;
     __asm__ volatile ("rdtscp\n\tlfence\n\t" : "=a"(lo), "=d"(hi) :: "rcx");
-    return ((uint64_t)hi << 32) | lo;
+    return ((u64)hi << 32) | lo;
 }
 
 static double
@@ -118,9 +118,9 @@ static struct mynode_slot        *g_res_slot[BENCH_N];
 /* ================================================================== */
 /* xorshift64 PRNG (for key pool generation)                          */
 /* ================================================================== */
-static uint64_t xr64 = 0xDEADBEEF1234ABCDULL;
+static u64 xr64 = 0xDEADBEEF1234ABCDULL;
 
-static inline uint64_t
+static inline u64
 xorshift64(void)
 {
     xr64 ^= xr64 >> 12;
@@ -131,9 +131,9 @@ xorshift64(void)
 
 struct bench_result_s {
     const char *label;
-    uint64_t min_cy;
-    uint64_t sum_cy;
-    uint64_t *samples;
+    u64 min_cy;
+    u64 sum_cy;
+    u64 *samples;
     unsigned sample_count;
     int      ops;
 };
@@ -141,8 +141,8 @@ struct bench_result_s {
 static int
 cmp_u64(const void *a, const void *b)
 {
-    uint64_t av = *(const uint64_t *)a;
-    uint64_t bv = *(const uint64_t *)b;
+    u64 av = *(const u64 *)a;
+    u64 bv = *(const u64 *)b;
     return (av > bv) - (av < bv);
 }
 
@@ -169,7 +169,7 @@ result_median_op(struct bench_result_s *result)
 }
 
 static void
-record_result(struct bench_result_s *result, unsigned run, uint64_t cy)
+record_result(struct bench_result_s *result, unsigned run, u64 cy)
 {
     if (cy < result->min_cy)
         result->min_cy = cy;
@@ -193,9 +193,9 @@ free_results(struct bench_result_s *result, unsigned n)
 static void
 bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 {
-    uint64_t fp_bk0 = 0, fp_bk1 = 0;
-    uint64_t keyonly_bk0 = 0, keyonly_bk1 = 0;
-    uint64_t slot_bk0 = 0, slot_bk1 = 0;
+    u64 fp_bk0 = 0, fp_bk1 = 0;
+    u64 keyonly_bk0 = 0, keyonly_bk1 = 0;
+    u64 slot_bk0 = 0, slot_bk1 = 0;
     /* ---- Memory estimate --------------------------------------------- */
     size_t node_mem      = (size_t)table_n * sizeof(struct mynode);
     size_t node_keyonly_mem = (size_t)table_n * sizeof(struct mynode_keyonly);
@@ -235,7 +235,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
     } else {
         /* Sequential keys: reference to demonstrate CRC32C uniform distribution */
         for (unsigned i = 0; i < table_n; i++) {
-            nodes[i].key.hi = (uint64_t)(i + 1);
+            nodes[i].key.hi = (u64)(i + 1);
         }
     }
 
@@ -263,7 +263,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             nodes_keyonly[i].key.hi = xorshift64();
     } else {
         for (unsigned i = 0; i < table_n; i++)
-            nodes_keyonly[i].key.hi = (uint64_t)(i + 1);
+            nodes_keyonly[i].key.hi = (u64)(i + 1);
     }
 
     struct rix_hash_bucket_s *bk_keyonly =
@@ -289,7 +289,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             nodes_slot[i].key.hi = xorshift64();
     } else {
         for (unsigned i = 0; i < table_n; i++)
-            nodes_slot[i].key.hi = (uint64_t)(i + 1);
+            nodes_slot[i].key.hi = (u64)(i + 1);
     }
 
     struct rix_hash_bucket_s *bk_slot =
@@ -342,7 +342,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
      *   kickout  : both full -> cuckoo kickout (new entry always goes to bk_0)
      * Note: duplicate check occurs first, but this bench has no duplicates
      */
-    uint64_t ins_bk0_fast = 0, ins_bk1_fast = 0, ins_kickout = 0;
+    u64 ins_bk0_fast = 0, ins_bk1_fast = 0, ins_kickout = 0;
 
     double t_ins_start = now_sec();
     for (unsigned i = 0; i < table_n; i++) {
@@ -352,10 +352,10 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
                                       head.rhh_mask);
         unsigned _b0 = _h.val32[0] & head.rhh_mask;
         unsigned _b1 = _h.val32[1] & head.rhh_mask;
-        uint32_t _nilm0 = rix_hash_arch->find_u32x16(bk[_b0].idx,
-                                                      (uint32_t)RIX_NIL);
-        uint32_t _nilm1 = rix_hash_arch->find_u32x16(bk[_b1].idx,
-                                                      (uint32_t)RIX_NIL);
+        u32 _nilm0 = rix_hash_arch->find_u32x16(bk[_b0].idx,
+                                                      (u32)RIX_NIL);
+        u32 _nilm1 = rix_hash_arch->find_u32x16(bk[_b1].idx,
+                                                      (u32)RIX_NIL);
         if      (_nilm0) ins_bk0_fast++;
         else if (_nilm1) ins_bk1_fast++;
         else             ins_kickout++;
@@ -391,8 +391,8 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
         for (unsigned b = 0; b < nb_bk; b++) {
             for (unsigned s = 0; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {
-                uint32_t nidx = bk[b].idx[s];
-                if (nidx == (uint32_t)RIX_NIL)
+                u32 nidx = bk[b].idx[s];
+                if (nidx == (u32)RIX_NIL)
                     continue;
                 struct mynode *node = &nodes[nidx - 1u]; /* 1-origin */
                 /* Verify invariant: node->cur_hash & mask == b */
@@ -411,7 +411,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             }
         }
 
-        uint64_t total = fp_bk0 + fp_bk1;
+        u64 total = fp_bk0 + fp_bk1;
         printf("  bk_0 hit rate : %" PRIu64 "/%" PRIu64 " = %.2f%%"
                "  (no bk_1 access needed during find)\n",
                fp_bk0, total, 100.0 * fp_bk0 / total);
@@ -425,8 +425,8 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
         for (unsigned b = 0; b < nb_bk; b++) {
             for (unsigned s = 0; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {
-                uint32_t nidx = bk_keyonly[b].idx[s];
-                if (nidx == (uint32_t)RIX_NIL)
+                u32 nidx = bk_keyonly[b].idx[s];
+                if (nidx == (u32)RIX_NIL)
                     continue;
                 struct mynode_keyonly *node = &nodes_keyonly[nidx - 1u];
                 union rix_hash_hash_u h =
@@ -445,8 +445,8 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
         for (unsigned b = 0; b < nb_bk; b++) {
             for (unsigned s = 0; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {
-                uint32_t nidx = bk_slot[b].idx[s];
-                if (nidx == (uint32_t)RIX_NIL)
+                u32 nidx = bk_slot[b].idx[s];
+                if (nidx == (u32)RIX_NIL)
                     continue;
                 struct mynode_slot *node = &nodes_slot[nidx - 1u];
                 union rix_hash_hash_u h =
@@ -595,7 +595,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
     };
     const int NR = (int)(sizeof(result) / sizeof(result[0]));
     for (int p = 0; p < NR; p++) {
-        result[p].samples = (uint64_t *)calloc(repeat, sizeof(result[p].samples[0]));
+        result[p].samples = (u64 *)calloc(repeat, sizeof(result[p].samples[0]));
         if (!result[p].samples) { perror("calloc samples"); exit(1); }
         result[p].sample_count = repeat;
     }
@@ -603,31 +603,31 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
     /* ---- [0] Sequential find ----------------------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             g_res[i] = myht_find(&head, bk, nodes, ik[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[0], r, cy);
     }
 
     /* ---- [1] x1: hash_key -> scan_bk -> cmp_key (node not prefetched) -- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_hash_key(&g_ctx[i], &head, bk, ik[i]);
         for (int i = 0; i < BENCH_N; i++)
             myht_scan_bk(&g_ctx[i], &head, bk);
         for (int i = 0; i < BENCH_N; i++)
             g_res[i] = myht_cmp_key(&g_ctx[i], nodes);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[1], r, cy);
     }
 
     /* ---- [2] x1: hash_key -> scan_bk -> prefetch_node -> cmp_key --- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_hash_key(&g_ctx[i], &head, bk, ik[i]);
         for (int i = 0; i < BENCH_N; i++)
@@ -636,28 +636,28 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             myht_prefetch_node(&g_ctx[i], nodes);
         for (int i = 0; i < BENCH_N; i++)
             g_res[i] = myht_cmp_key(&g_ctx[i], nodes);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[2], r, cy);
     }
 
     /* ---- [3] x4: hash_key4 -> scan_bk4 -> cmp_key4 (node not prefetched) */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_HASH_KEY4(myht, &g_ctx[b * 4], &head, bk, ik + b * 4);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_SCAN_BK4(myht, &g_ctx[b * 4], &head, bk);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_CMP_KEY4(myht, &g_ctx[b * 4], nodes, &g_res[b * 4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[3], r, cy);
     }
 
     /* ---- [4] x4: hash_key4 -> scan_bk4 -> prefetch_node4 -> cmp_key4 */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_HASH_KEY4(myht, &g_ctx[b * 4], &head, bk, ik + b * 4);
         for (int b = 0; b < BENCH_N / 4; b++)
@@ -666,14 +666,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE4(myht, &g_ctx[b * 4], nodes);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_CMP_KEY4(myht, &g_ctx[b * 4], nodes, &g_res[b * 4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[4], r, cy);
     }
 
     /* ---- [5] x2: hash_key2 -> scan_bk2 -> prefetch_node2 -> cmp_key2 */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 2; b++)
             RIX_HASH_HASH_KEY2(myht, &g_ctx[b * 2], &head, bk, ik + b * 2);
         for (int b = 0; b < BENCH_N / 2; b++)
@@ -682,7 +682,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE2(myht, &g_ctx[b * 2], nodes);
         for (int b = 0; b < BENCH_N / 2; b++)
             RIX_HASH_CMP_KEY2(myht, &g_ctx[b * 2], nodes, &g_res[b * 2]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[5], r, cy);
     }
 
@@ -695,7 +695,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
      */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             rix_hash_prefetch_key(ik[i]);
         for (int b = 0; b < BENCH_N / 4; b++)
@@ -704,7 +704,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK4(myht, &g_ctx[b * 4], &head, bk);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_CMP_KEY4(myht, &g_ctx[b * 4], nodes, &g_res[b * 4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[6], r, cy);
     }
 
@@ -715,7 +715,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
      */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD4 && b < BENCH_N / 4; b++)
             for (int j = 0; j < 4; j++)
                 rix_hash_prefetch_key(ik[b * 4 + j]);
@@ -730,14 +730,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK4(myht, &g_ctx[b * 4], &head, bk);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_CMP_KEY4(myht, &g_ctx[b * 4], nodes, &g_res[b * 4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[7], r, cy);
     }
 
     /* ---- [8] x6: hash_key_n(6) -> scan_bk_n(6) -> prefetch_node_n(6) -> cmp_key_n(6) */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_HASH_KEY_N(myht, &g_ctx[b * 6], 6, &head, bk, ik + b * 6);
         for (int b = 0; b < BENCH_N6 / 6; b++)
@@ -746,7 +746,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE_N(myht, &g_ctx[b * 6], 6, nodes);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_CMP_KEY_N(myht, &g_ctx[b * 6], 6, nodes, &g_res[b * 6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[8], r, cy);
     }
 
@@ -754,7 +754,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
     /* KPD6 = 11 batches (66 keys) ~ 1 DRAM latency */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD6 && b < BENCH_N6 / 6; b++)
             for (int j = 0; j < 6; j++)
                 rix_hash_prefetch_key(ik[b * 6 + j]);
@@ -769,14 +769,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK_N(myht, &g_ctx[b * 6], 6, &head, bk);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_CMP_KEY_N(myht, &g_ctx[b * 6], 6, nodes, &g_res[b * 6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[9], r, cy);
     }
 
     /* ---- [10] x8: hash_key_n(8) -> scan_bk_n(8) -> prefetch_node_n(8) -> cmp_key_n(8) */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_HASH_KEY_N(myht, &g_ctx[b * 8], 8, &head, bk, ik + b * 8);
         for (int b = 0; b < BENCH_N8 / 8; b++)
@@ -785,7 +785,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE_N(myht, &g_ctx[b * 8], 8, nodes);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_CMP_KEY_N(myht, &g_ctx[b * 8], 8, nodes, &g_res[b * 8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[10], r, cy);
     }
 
@@ -793,7 +793,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
     /* KPD8 = 8 batches (64 keys) ~ 1 DRAM latency */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD8 && b < BENCH_N8 / 8; b++)
             for (int j = 0; j < 8; j++)
                 rix_hash_prefetch_key(ik[b * 8 + j]);
@@ -808,7 +808,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK_N(myht, &g_ctx[b * 8], 8, &head, bk);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_CMP_KEY_N(myht, &g_ctx[b * 8], 8, nodes, &g_res[b * 8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[11], r, cy);
     }
 
@@ -819,17 +819,17 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
     /* ---- [12] keyonly find (single) ------------------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_keyonly + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             g_res_keyonly[i] = myht_keyonly_find(&head_keyonly, bk_keyonly, nodes_keyonly, ik[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[12], r, cy);
     }
 
     /* ---- [13] keyonly x1: hash_key -> scan_bk -> prefetch_node -> cmp_key */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_keyonly + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_keyonly_hash_key(&g_ctx[i], &head_keyonly, bk_keyonly, ik[i]);
         for (int i = 0; i < BENCH_N; i++)
@@ -838,14 +838,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             myht_keyonly_prefetch_node(&g_ctx[i], nodes_keyonly);
         for (int i = 0; i < BENCH_N; i++)
             g_res_keyonly[i] = myht_keyonly_cmp_key(&g_ctx[i], nodes_keyonly);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[13], r, cy);
     }
 
     /* ---- [14] keyonly x4: hash_key4 -> scan_bk4 -> prefetch_node4 -> cmp_key4 */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_keyonly + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_HASH_KEY4(myht_keyonly, &g_ctx[b * 4], &head_keyonly, bk_keyonly, ik + b * 4);
         for (int b = 0; b < BENCH_N / 4; b++)
@@ -854,14 +854,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE4(myht_keyonly, &g_ctx[b * 4], nodes_keyonly);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_CMP_KEY4(myht_keyonly, &g_ctx[b * 4], nodes_keyonly, (struct mynode_keyonly **)&g_res_keyonly[b * 4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[14], r, cy);
     }
 
     /* ---- [15] keyonly x6: staged ---------------------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_keyonly + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_HASH_KEY_N(myht_keyonly, &g_ctx[b * 6], 6, &head_keyonly, bk_keyonly, ik + b * 6);
         for (int b = 0; b < BENCH_N6 / 6; b++)
@@ -870,14 +870,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE_N(myht_keyonly, &g_ctx[b * 6], 6, nodes_keyonly);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_CMP_KEY_N(myht_keyonly, &g_ctx[b * 6], 6, nodes_keyonly, (struct mynode_keyonly **)&g_res_keyonly[b * 6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[15], r, cy);
     }
 
     /* ---- [16] keyonly x6: N-ahead key prefetch -------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_keyonly + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD6 && b < BENCH_N6 / 6; b++)
             for (int j = 0; j < 6; j++)
                 rix_hash_prefetch_key(ik[b * 6 + j]);
@@ -892,14 +892,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK_N(myht_keyonly, &g_ctx[b * 6], 6, &head_keyonly, bk_keyonly);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_CMP_KEY_N(myht_keyonly, &g_ctx[b * 6], 6, nodes_keyonly, (struct mynode_keyonly **)&g_res_keyonly[b * 6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[16], r, cy);
     }
 
     /* ---- [17] keyonly x8: staged ---------------------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_keyonly + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_HASH_KEY_N(myht_keyonly, &g_ctx[b * 8], 8, &head_keyonly, bk_keyonly, ik + b * 8);
         for (int b = 0; b < BENCH_N8 / 8; b++)
@@ -908,14 +908,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE_N(myht_keyonly, &g_ctx[b * 8], 8, nodes_keyonly);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_CMP_KEY_N(myht_keyonly, &g_ctx[b * 8], 8, nodes_keyonly, (struct mynode_keyonly **)&g_res_keyonly[b * 8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[17], r, cy);
     }
 
     /* ---- [18] keyonly x8: N-ahead key prefetch -------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_keyonly + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD8 && b < BENCH_N8 / 8; b++)
             for (int j = 0; j < 8; j++)
                 rix_hash_prefetch_key(ik[b * 8 + j]);
@@ -930,7 +930,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK_N(myht_keyonly, &g_ctx[b * 8], 8, &head_keyonly, bk_keyonly);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_CMP_KEY_N(myht_keyonly, &g_ctx[b * 8], 8, nodes_keyonly, (struct mynode_keyonly **)&g_res_keyonly[b * 8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[18], r, cy);
     }
 
@@ -941,17 +941,17 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
     /* ---- [19] slot find (single) ------------------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_slot + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             g_res_slot[i] = myht_slot_find(&head_slot, bk_slot, nodes_slot, ik[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[19], r, cy);
     }
 
     /* ---- [20] slot x1: hash_key -> scan_bk -> prefetch_node -> cmp_key */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_slot + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_slot_hash_key(&g_ctx[i], &head_slot, bk_slot, ik[i]);
         for (int i = 0; i < BENCH_N; i++)
@@ -960,14 +960,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             myht_slot_prefetch_node(&g_ctx[i], nodes_slot);
         for (int i = 0; i < BENCH_N; i++)
             g_res_slot[i] = myht_slot_cmp_key(&g_ctx[i], nodes_slot);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[20], r, cy);
     }
 
     /* ---- [21] slot x4: hash_key4 -> scan_bk4 -> prefetch_node4 -> cmp_key4 */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_slot + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_HASH_KEY4(myht_slot, &g_ctx[b * 4], &head_slot, bk_slot, ik + b * 4);
         for (int b = 0; b < BENCH_N / 4; b++)
@@ -976,14 +976,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE4(myht_slot, &g_ctx[b * 4], nodes_slot);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH_CMP_KEY4(myht_slot, &g_ctx[b * 4], nodes_slot, (struct mynode_slot **)&g_res_slot[b * 4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[21], r, cy);
     }
 
     /* ---- [22] slot x6: staged ---------------------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_slot + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_HASH_KEY_N(myht_slot, &g_ctx[b * 6], 6, &head_slot, bk_slot, ik + b * 6);
         for (int b = 0; b < BENCH_N6 / 6; b++)
@@ -992,14 +992,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE_N(myht_slot, &g_ctx[b * 6], 6, nodes_slot);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_CMP_KEY_N(myht_slot, &g_ctx[b * 6], 6, nodes_slot, (struct mynode_slot **)&g_res_slot[b * 6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[22], r, cy);
     }
 
     /* ---- [23] slot x6: N-ahead key prefetch -------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_slot + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD6 && b < BENCH_N6 / 6; b++)
             for (int j = 0; j < 6; j++)
                 rix_hash_prefetch_key(ik[b * 6 + j]);
@@ -1014,14 +1014,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK_N(myht_slot, &g_ctx[b * 6], 6, &head_slot, bk_slot);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH_CMP_KEY_N(myht_slot, &g_ctx[b * 6], 6, nodes_slot, (struct mynode_slot **)&g_res_slot[b * 6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[23], r, cy);
     }
 
     /* ---- [24] slot x8: staged ---------------------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_slot + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_HASH_KEY_N(myht_slot, &g_ctx[b * 8], 8, &head_slot, bk_slot, ik + b * 8);
         for (int b = 0; b < BENCH_N8 / 8; b++)
@@ -1030,14 +1030,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_PREFETCH_NODE_N(myht_slot, &g_ctx[b * 8], 8, nodes_slot);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_CMP_KEY_N(myht_slot, &g_ctx[b * 8], 8, nodes_slot, (struct mynode_slot **)&g_res_slot[b * 8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[24], r, cy);
     }
 
     /* ---- [25] slot x8: N-ahead key prefetch -------------------------- */
     for (unsigned r = 0; r < repeat; r++) {
         const struct mykey **ik = key_pool_slot + (size_t)r * BENCH_N;
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD8 && b < BENCH_N8 / 8; b++)
             for (int j = 0; j < 8; j++)
                 rix_hash_prefetch_key(ik[b * 8 + j]);
@@ -1052,7 +1052,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
             RIX_HASH_SCAN_BK_N(myht_slot, &g_ctx[b * 8], 8, &head_slot, bk_slot);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH_CMP_KEY_N(myht_slot, &g_ctx[b * 8], 8, nodes_slot, (struct mynode_slot **)&g_res_slot[b * 8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[25], r, cy);
     }
 
@@ -1062,10 +1062,10 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
     /* ---- [26] remove fp: hash_field & mask -> O(1) bucket lookup ----- */
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_remove(&head, bk, nodes, &nodes[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[26], r, cy);
         for (int i = 0; i < BENCH_N; i++)
             myht_insert(&head, bk, nodes, &nodes[i]);
@@ -1073,10 +1073,10 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
     /* ---- [27] remove keyonly: re-hash key -> scan bk_0/bk_1 ------------ */
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_keyonly_remove(&head_keyonly, bk_keyonly, nodes_keyonly, &nodes_keyonly[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[27], r, cy);
         for (int i = 0; i < BENCH_N; i++)
             myht_keyonly_insert(&head_keyonly, bk_keyonly, nodes_keyonly, &nodes_keyonly[i]);
@@ -1084,10 +1084,10 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
     /* ---- [28] remove slot: slot_field -> O(1) bucket+slot lookup ----- */
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_slot_remove(&head_slot, bk_slot, nodes_slot, &nodes_slot[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[28], r, cy);
         for (int i = 0; i < BENCH_N; i++)
             myht_slot_insert(&head_slot, bk_slot, nodes_slot, &nodes_slot[i]);
@@ -1103,10 +1103,10 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
     /* ---- [29] insert fp */
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_insert(&head, bk, nodes, &nodes[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[29], r, cy);
         for (int i = 0; i < BENCH_N; i++)
             myht_remove(&head, bk, nodes, &nodes[i]);
@@ -1114,10 +1114,10 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
     /* ---- [30] insert keyonly */
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_keyonly_insert(&head_keyonly, bk_keyonly, nodes_keyonly, &nodes_keyonly[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[30], r, cy);
         for (int i = 0; i < BENCH_N; i++)
             myht_keyonly_remove(&head_keyonly, bk_keyonly, nodes_keyonly, &nodes_keyonly[i]);
@@ -1125,10 +1125,10 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 
     /* ---- [31] insert slot */
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             myht_slot_insert(&head_slot, bk_slot, nodes_slot, &nodes_slot[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         record_result(&result[31], r, cy);
         for (int i = 0; i < BENCH_N; i++)
             myht_slot_remove(&head_slot, bk_slot, nodes_slot, &nodes_slot[i]);
@@ -1250,7 +1250,7 @@ main(int argc, char **argv)
     if (nb_bk == 0) {
         /* Default: target ~80% fill (slots = table_n / 0.8) */
         nb_bk = 1;
-        while ((uint64_t)nb_bk * RIX_HASH_BUCKET_ENTRY_SZ * 4 < (uint64_t)table_n * 5)
+        while ((u64)nb_bk * RIX_HASH_BUCKET_ENTRY_SZ * 4 < (u64)table_n * 5)
             nb_bk <<= 1;
     }
 

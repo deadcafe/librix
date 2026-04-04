@@ -124,14 +124,14 @@ _FCG_API(flow6, init_ex)(struct fc_flow6_cache *fc,
 void _FCG_API(flow6, findadd_burst32)(struct fc_flow6_cache *fc,
                                       const struct flow6_key *keys,
                                       unsigned nb_keys,
-                                      uint64_t now,
+                                      u64 now,
                                       struct fc_flow6_result *results);
 
 void
 _FCG_API(flow6, findadd_burst32)(struct fc_flow6_cache *fc,
                                  const struct flow6_key *keys,
                                  unsigned nb_keys,
-                                 uint64_t now,
+                                 u64 now,
                                  struct fc_flow6_result *results)
 {
     _FCG_FINDADD_BURST32_BODY(flow6, fc, keys, nb_keys, now, results);

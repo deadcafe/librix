@@ -124,14 +124,14 @@ _FCG_API(flowu, init_ex)(struct fc_flowu_cache *fc,
 void _FCG_API(flowu, findadd_burst32)(struct fc_flowu_cache *fc,
                                       const struct flowu_key *keys,
                                       unsigned nb_keys,
-                                      uint64_t now,
+                                      u64 now,
                                       struct fc_flowu_result *results);
 
 void
 _FCG_API(flowu, findadd_burst32)(struct fc_flowu_cache *fc,
                                  const struct flowu_key *keys,
                                  unsigned nb_keys,
-                                 uint64_t now,
+                                 u64 now,
                                  struct fc_flowu_result *results)
 {
     _FCG_FINDADD_BURST32_BODY(flowu, fc, keys, nb_keys, now, results);

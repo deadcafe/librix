@@ -19,8 +19,8 @@
  * Test node definition
  *---------------------------------------------------------------------------*/
 typedef struct mynode_s {
-    uint32_t key;
-    uint32_t val;
+    u32 key;
+    u32 val;
 } mynode_t;
 
 /*---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ test_init_invalid_key(void)
     for (unsigned b = 0; b < NB_BUCKETS; b++) {
         for (unsigned s = 0; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {
             if (buckets[b].key[s] != INVALID_KEY) bad_key++;
-            if (buckets[b].idx[s] != (uint32_t)RIX_NIL) bad_idx++;
+            if (buckets[b].idx[s] != (u32)RIX_NIL) bad_idx++;
         }
     }
     if (bad_key)
@@ -212,7 +212,7 @@ test_remove_restores_invalid_key(void)
     unsigned bad = 0;
     for (unsigned b = 0; b < NB_BUCKETS; b++)
         for (unsigned s = 0; s < RIX_HASH_BUCKET_ENTRY_SZ; s++)
-            if (buckets[b].idx[s] == (uint32_t)RIX_NIL &&
+            if (buckets[b].idx[s] == (u32)RIX_NIL &&
                 buckets[b].key[s] != INVALID_KEY)
                 bad++;
     if (bad)
@@ -272,7 +272,7 @@ test_walk(void)
 
     /* Insert 8 nodes with distinct keys */
     for (int i = 0; i < 8; i++) {
-        nodes[i].key = (uint32_t)(100 + i);
+        nodes[i].key = (u32)(100 + i);
         mynode_t *r  = RIX_HASH32_INSERT(myht32, &head, buckets, nodes, &nodes[i]);
         if (r != NULL)
             FAIL("insert[%d] returned non-NULL", i);
@@ -342,8 +342,8 @@ test_staged_x4(void)
 
     /* Insert 4 nodes */
     for (int i = 0; i < 4; i++) {
-        nodes[i].key = (uint32_t)(200 + i);
-        nodes[i].val = (uint32_t)(i + 1);
+        nodes[i].key = (u32)(200 + i);
+        nodes[i].val = (u32)(i + 1);
         mynode_t *r  = RIX_HASH32_INSERT(myht32, &head, buckets, nodes, &nodes[i]);
         if (r != NULL)
             FAIL("insert[%d] failed", i);
@@ -351,7 +351,7 @@ test_staged_x4(void)
 
     /* Staged x4 find */
     struct rix_hash32_find_ctx_s ctx[4];
-    uint32_t keys[4] = { 200, 201, 202, 203 };
+    u32 keys[4] = { 200, 201, 202, 203 };
     mynode_t *results[4];
 
     RIX_HASH32_HASH_KEY4(myht32, ctx, &head, buckets, keys);
@@ -379,7 +379,7 @@ test_remove_all(void)
 
     int n = 32;
     for (int i = 0; i < n; i++) {
-        nodes[i].key = (uint32_t)(500 + i);
+        nodes[i].key = (u32)(500 + i);
         mynode_t *r  = RIX_HASH32_INSERT(myht32, &head, buckets, nodes, &nodes[i]);
         if (r != NULL)
             FAIL("insert[%d] failed", i);
@@ -603,12 +603,12 @@ test_kickout_safety(void)
 /*---------------------------------------------------------------------------
  * Test: fuzz - random insert/find/remove with model checking
  *---------------------------------------------------------------------------*/
-static uint32_t xr_fuzz;
+static u32 xr_fuzz;
 
-static uint32_t
+static u32
 xorshift32(void)
 {
-    uint32_t x = xr_fuzz;
+    u32 x = xr_fuzz;
     x ^= x << 13; x ^= x >> 17; x ^= x << 5;
     return (xr_fuzz = x);
 }

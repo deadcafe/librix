@@ -9,13 +9,13 @@
 #include "rix_hash.h"
 
 struct mykey {
-    uint64_t hi;
+    u64 hi;
 };
 
 struct mynode_slot {
-    uint32_t cur_hash;
-    uint16_t slot;
-    uint16_t _pad;
+    u32 cur_hash;
+    u16 slot;
+    u16 _pad;
     struct mykey key;
 };
 
@@ -34,25 +34,25 @@ RIX_HASH_GENERATE_SLOT(myht_slot, mynode_slot, key, cur_hash, slot, mykey_cmp)
 static struct rix_hash_find_ctx_s g_ctx[MAX_QUERY];
 static struct mynode_slot *g_res[MAX_QUERY];
 static volatile uintptr_t g_sink;
-static uint64_t xr64 = 0x123456789abcdef0ULL;
+static u64 xr64 = 0x123456789abcdef0ULL;
 
-static inline uint64_t
+static inline u64
 tsc_start(void)
 {
-    uint32_t lo, hi;
+    u32 lo, hi;
     __asm__ volatile ("lfence\n\trdtsc\n\t" : "=a"(lo), "=d"(hi));
-    return ((uint64_t)hi << 32) | lo;
+    return ((u64)hi << 32) | lo;
 }
 
-static inline uint64_t
+static inline u64
 tsc_end(void)
 {
-    uint32_t lo, hi;
+    u32 lo, hi;
     __asm__ volatile ("rdtscp\n\tlfence\n\t" : "=a"(lo), "=d"(hi) :: "rcx");
-    return ((uint64_t)hi << 32) | lo;
+    return ((u64)hi << 32) | lo;
 }
 
-static inline uint64_t
+static inline u64
 xorshift64(void)
 {
     xr64 ^= xr64 >> 12;
@@ -64,13 +64,13 @@ xorshift64(void)
 static int
 cmp_u64(const void *a, const void *b)
 {
-    uint64_t av = *(const uint64_t *)a;
-    uint64_t bv = *(const uint64_t *)b;
+    u64 av = *(const u64 *)a;
+    u64 bv = *(const u64 *)b;
     return (av > bv) - (av < bv);
 }
 
 static double
-median_u64(uint64_t *v, unsigned n)
+median_u64(u64 *v, unsigned n)
 {
     qsort(v, n, sizeof(v[0]), cmp_u64);
     if ((n & 1u) != 0u)
@@ -85,12 +85,12 @@ consume_results(unsigned n)
         g_sink ^= (uintptr_t)g_res[i];
 }
 
-static uint64_t
+static u64
 bench_single(struct myht_slot *head, struct rix_hash_bucket_s *bk_slot,
              struct mynode_slot *nodes_slot, const struct mykey *const *key_seq,
              unsigned query, unsigned rounds, unsigned total_keys)
 {
-    uint64_t t0 = tsc_start();
+    u64 t0 = tsc_start();
 
     for (unsigned r = 0; r < rounds; r++) {
         unsigned base = (r * query) % total_keys;
@@ -103,12 +103,12 @@ bench_single(struct myht_slot *head, struct rix_hash_bucket_s *bk_slot,
     return tsc_end() - t0;
 }
 
-static uint64_t
+static u64
 bench_x1(struct myht_slot *head, struct rix_hash_bucket_s *bk_slot,
          struct mynode_slot *nodes_slot, const struct mykey *const *key_seq,
          unsigned query, unsigned rounds, unsigned total_keys)
 {
-    uint64_t t0 = tsc_start();
+    u64 t0 = tsc_start();
 
     for (unsigned r = 0; r < rounds; r++) {
         unsigned base = (r * query) % total_keys;
@@ -127,13 +127,13 @@ bench_x1(struct myht_slot *head, struct rix_hash_bucket_s *bk_slot,
     return tsc_end() - t0;
 }
 
-static uint64_t
+static u64
 bench_x8pipe(struct myht_slot *head, struct rix_hash_bucket_s *bk_slot,
              struct mynode_slot *nodes_slot, const struct mykey *const *key_seq,
              unsigned query, unsigned rounds, unsigned total_keys)
 {
     const struct mykey *keys[MAX_QUERY];
-    uint64_t t0 = tsc_start();
+    u64 t0 = tsc_start();
 
     for (unsigned r = 0; r < rounds; r++) {
         unsigned base = (r * query) % total_keys;
@@ -191,9 +191,9 @@ main(int argc, char **argv)
     struct rix_hash_bucket_s *bk_slot;
     struct myht_slot head_slot;
     const struct mykey **key_seq;
-    uint64_t *samples_single;
-    uint64_t *samples_x1;
-    uint64_t *samples_x8pipe;
+    u64 *samples_single;
+    u64 *samples_x1;
+    u64 *samples_x8pipe;
 
     if (argc > 1)
         total_keys = (unsigned)strtoul(argv[1], NULL, 10);
@@ -226,7 +226,7 @@ main(int argc, char **argv)
     }
     madvise(nodes_slot, node_slot_mem, MADV_HUGEPAGE);
     for (unsigned i = 0; i < table_n; i++)
-        nodes_slot[i].key.hi = (uint64_t)(i + 1u);
+        nodes_slot[i].key.hi = (u64)(i + 1u);
 
     bk_slot = (struct rix_hash_bucket_s *)mmap(NULL, bk_mem,
                                                PROT_READ | PROT_WRITE,
@@ -243,9 +243,9 @@ main(int argc, char **argv)
         myht_slot_insert(&head_slot, bk_slot, nodes_slot, &nodes_slot[i]);
 
     key_seq = (const struct mykey **)malloc((size_t)total_keys * sizeof(*key_seq));
-    samples_single = (uint64_t *)malloc((size_t)repeat * sizeof(*samples_single));
-    samples_x1 = (uint64_t *)malloc((size_t)repeat * sizeof(*samples_x1));
-    samples_x8pipe = (uint64_t *)malloc((size_t)repeat * sizeof(*samples_x8pipe));
+    samples_single = (u64 *)malloc((size_t)repeat * sizeof(*samples_single));
+    samples_x1 = (u64 *)malloc((size_t)repeat * sizeof(*samples_x1));
+    samples_x8pipe = (u64 *)malloc((size_t)repeat * sizeof(*samples_x8pipe));
     if (key_seq == NULL || samples_single == NULL ||
         samples_x1 == NULL || samples_x8pipe == NULL) {
         fprintf(stderr, "malloc failed\n");

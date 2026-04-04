@@ -43,17 +43,17 @@ ft_maint_bucket_of_meta_(const struct ft_maint_ctx *ctx,
 static unsigned
 ft_maint_scan_bucket_(const struct ft_maint_ctx *ctx,
                       unsigned bk_idx,
-                      uint64_t now_ts,
-                      uint64_t timeout_ts,
-                      uint32_t *expired_idxv,
+                      u64 now_ts,
+                      u64 timeout_ts,
+                      u32 *expired_idxv,
                       unsigned out_pos,
                       unsigned max_expired,
                       unsigned min_bk_entries,
                       unsigned *out_used_count)
 {
     struct rix_hash_bucket_s *bk = ctx->buckets + bk_idx;
-    uint32_t used_bits = 0u;
-    uint32_t expired_bits = 0u;
+    u32 used_bits = 0u;
+    u32 expired_bits = 0u;
     const struct flow_entry_meta *metas[RIX_HASH_BUCKET_ENTRY_SZ];
     unsigned slots[RIX_HASH_BUCKET_ENTRY_SZ];
     unsigned count = out_pos;
@@ -71,7 +71,7 @@ ft_maint_scan_bucket_(const struct ft_maint_ctx *ctx,
         if (idx == (unsigned)RIX_NIL)
             continue;
 
-        used_bits |= (uint32_t)(1u << slot);
+        used_bits |= (u32)(1u << slot);
         slots[used_count] = slot;
         metas[used_count] = ft_maint_meta_(ctx, idx);
         used_count++;
@@ -98,11 +98,11 @@ ft_maint_scan_bucket_(const struct ft_maint_ctx *ctx,
         }
         for (unsigned i = 0u; i < cur_count; i++) {
             unsigned pos = cur_base + i;
-            uint64_t ts = flow_timestamp_get(metas[pos]);
+            u64 ts = flow_timestamp_get(metas[pos]);
 
             if (!flow_timestamp_is_expired_raw(ts, now_ts, timeout_ts))
                 continue;
-            expired_bits |= (uint32_t)(1u << slots[pos]);
+            expired_bits |= (u32)(1u << slots[pos]);
         }
         cur_base += cur_count;
         cur_count = next_count;
@@ -117,10 +117,10 @@ ft_maint_scan_bucket_(const struct ft_maint_ctx *ctx,
 
         /* Remove from bucket */
         bk->hash[slot] = 0u;
-        bk->idx[slot] = (uint32_t)RIX_NIL;
+        bk->idx[slot] = (u32)RIX_NIL;
         (*ctx->rhh_nb)--;
 
-        expired_idxv[count++] = (uint32_t)idx;
+        expired_idxv[count++] = (u32)idx;
     }
     return count;
 }
@@ -128,9 +128,9 @@ ft_maint_scan_bucket_(const struct ft_maint_ctx *ctx,
 unsigned
 ft_table_maintain(const struct ft_maint_ctx *ctx,
                   unsigned start_bk,
-                  uint64_t now,
-                  uint64_t expire_tsc,
-                  uint32_t *expired_idxv,
+                  u64 now,
+                  u64 expire_tsc,
+                  u32 *expired_idxv,
                   unsigned max_expired,
                   unsigned min_bk_entries,
                   unsigned *next_bk)
@@ -139,8 +139,8 @@ ft_table_maintain(const struct ft_maint_ctx *ctx,
     unsigned cur_bk;
     unsigned nb_bk;
     unsigned count = 0u;
-    uint64_t now_ts;
-    uint64_t timeout_ts;
+    u64 now_ts;
+    u64 timeout_ts;
 
     if (ctx == NULL || max_expired == 0u || expired_idxv == NULL) {
         if (next_bk != NULL)
@@ -193,11 +193,11 @@ ft_table_maintain(const struct ft_maint_ctx *ctx,
  */
 static inline unsigned
 ft_maint_idx_bulk_loop_(const struct ft_maint_ctx *ctx,
-                        const uint32_t *entry_idxv,
+                        const u32 *entry_idxv,
                         unsigned nb_idx,
-                        uint64_t now_ts,
-                        uint64_t timeout_ts,
-                        uint32_t *expired_idxv,
+                        u64 now_ts,
+                        u64 timeout_ts,
+                        u32 *expired_idxv,
                         unsigned max_expired,
                         unsigned min_bk_entries,
                         int use_filter)
@@ -206,7 +206,7 @@ ft_maint_idx_bulk_loop_(const struct ft_maint_ctx *ctx,
     enum { FT_MAINT_FILTER_SZ = 64u, FT_MAINT_FILTER_MASK = 63u };
     const struct flow_entry_meta *meta_ring[16];
     unsigned bk_ring[16];
-    uint8_t valid_ring[16];
+    u8 valid_ring[16];
     unsigned scanned[FT_MAINT_FILTER_SZ];
     unsigned count = 0u;
     unsigned total;
@@ -289,17 +289,17 @@ ft_maint_idx_bulk_loop_(const struct ft_maint_ctx *ctx,
 
 unsigned
 ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
-                           const uint32_t *entry_idxv,
+                           const u32 *entry_idxv,
                            unsigned nb_idx,
-                           uint64_t now,
-                           uint64_t expire_tsc,
-                           uint32_t *expired_idxv,
+                           u64 now,
+                           u64 expire_tsc,
+                           u32 *expired_idxv,
                            unsigned max_expired,
                            unsigned min_bk_entries,
                            int enable_filter)
 {
-    uint64_t now_ts;
-    uint64_t timeout_ts;
+    u64 now_ts;
+    u64 timeout_ts;
     unsigned count;
 
     if (ctx == NULL || entry_idxv == NULL || nb_idx == 0u

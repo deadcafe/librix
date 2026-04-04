@@ -38,8 +38,8 @@
 /* Node definition                                                     */
 /* ================================================================== */
 typedef struct mynode_s {
-    uint64_t key;
-    uint64_t val;
+    u64 key;
+    u64 val;
 } mynode_t;
 
 #define BENCH_INVALID_KEY  0xFFFFFFFFFFFFFFFFULL
@@ -50,20 +50,20 @@ RIX_HASH64_GENERATE(myht64, mynode_t, key, BENCH_INVALID_KEY)
 /* ================================================================== */
 /* TSC measurement helper                                              */
 /* ================================================================== */
-static inline uint64_t
+static inline u64
 tsc_start(void)
 {
-    uint32_t lo, hi;
+    u32 lo, hi;
     __asm__ volatile ("lfence\n\trdtsc\n\t" : "=a"(lo), "=d"(hi));
-    return ((uint64_t)hi << 32) | lo;
+    return ((u64)hi << 32) | lo;
 }
 
-static inline uint64_t
+static inline u64
 tsc_end(void)
 {
-    uint32_t lo, hi;
+    u32 lo, hi;
     __asm__ volatile ("rdtscp\n\tlfence\n\t" : "=a"(lo), "=d"(hi) :: "rcx");
-    return ((uint64_t)hi << 32) | lo;
+    return ((u64)hi << 32) | lo;
 }
 
 static double
@@ -93,13 +93,13 @@ now_sec(void)
 static struct rix_hash64_find_ctx_s g_ctx[BENCH_N];
 static mynode_t                    *g_res[BENCH_N];
 static unsigned                     g_idx[BENCH_N];
-static volatile uint64_t            g_thrash_sink;
+static volatile u64            g_thrash_sink;
 
 struct bench_result_s {
     const char *label;
-    uint64_t min_cy;
-    uint64_t sum_cy;
-    uint64_t *samples;
+    u64 min_cy;
+    u64 sum_cy;
+    u64 *samples;
     unsigned sample_count;
     int      ops;
 };
@@ -107,9 +107,9 @@ struct bench_result_s {
 /* ================================================================== */
 /* xorshift64 PRNG                                                     */
 /* ================================================================== */
-static uint64_t xr64 = 0xDEADBEEF1234ABCDULL;
+static u64 xr64 = 0xDEADBEEF1234ABCDULL;
 
-static inline uint64_t
+static inline u64
 xorshift64(void)
 {
     xr64 ^= xr64 >> 12;
@@ -121,8 +121,8 @@ xorshift64(void)
 static int
 cmp_u64(const void *a, const void *b)
 {
-    uint64_t av = *(const uint64_t *)a;
-    uint64_t bv = *(const uint64_t *)b;
+    u64 av = *(const u64 *)a;
+    u64 bv = *(const u64 *)b;
     return (av > bv) - (av < bv);
 }
 
@@ -181,9 +181,9 @@ find_idx_single(struct myht64 *head, struct rix_hash64_bucket_s *bk, u64 key)
 }
 
 static void
-thrash_cache(uint8_t *buf, size_t len)
+thrash_cache(u8 *buf, size_t len)
 {
-    uint64_t sum = 0;
+    u64 sum = 0;
 
     for (size_t i = 0; i < len; i += 64)
         sum += buf[i];
@@ -221,7 +221,7 @@ init_find_results(struct bench_result_s result[17], unsigned repeat)
         result[i].label = spec[i].label;
         result[i].min_cy = UINT64_MAX;
         result[i].sum_cy = 0;
-        result[i].samples = (uint64_t *)calloc(repeat, sizeof(uint64_t));
+        result[i].samples = (u64 *)calloc(repeat, sizeof(u64));
         if (!result[i].samples) { perror("calloc samples"); exit(1); }
         result[i].sample_count = repeat;
         result[i].ops = spec[i].ops;
@@ -234,7 +234,7 @@ init_update_results(struct bench_result_s result[2], unsigned repeat)
     result[0].label = "remove             ";
     result[0].min_cy = UINT64_MAX;
     result[0].sum_cy = 0;
-    result[0].samples = (uint64_t *)calloc(repeat, sizeof(uint64_t));
+    result[0].samples = (u64 *)calloc(repeat, sizeof(u64));
     if (!result[0].samples) { perror("calloc samples"); exit(1); }
     result[0].sample_count = repeat;
     result[0].ops = BENCH_N;
@@ -242,7 +242,7 @@ init_update_results(struct bench_result_s result[2], unsigned repeat)
     result[1].label = "insert             ";
     result[1].min_cy = UINT64_MAX;
     result[1].sum_cy = 0;
-    result[1].samples = (uint64_t *)calloc(repeat, sizeof(uint64_t));
+    result[1].samples = (u64 *)calloc(repeat, sizeof(u64));
     if (!result[1].samples) { perror("calloc samples"); exit(1); }
     result[1].sample_count = repeat;
     result[1].ops = BENCH_N;
@@ -262,9 +262,9 @@ static void
 measure_find_patterns(struct myht64 *head,
                       struct rix_hash64_bucket_s *bk,
                       mynode_t *nodes,
-                      const uint64_t keys[BENCH_N],
+                      const u64 keys[BENCH_N],
                       unsigned repeat,
-                      uint8_t *thrash,
+                      u8 *thrash,
                       size_t thrash_len,
                       struct bench_result_s result[17])
 {
@@ -273,10 +273,10 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             g_idx[i] = find_idx_single(head, bk, keys[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[0].min_cy) result[0].min_cy = cy;
         result[0].sum_cy += cy;
         result[0].samples[r] = cy;
@@ -285,14 +285,14 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             RIX_HASH64_HASH_KEY(myht64, &g_ctx[i], head, bk, keys[i]);
         for (int i = 0; i < BENCH_N; i++)
             RIX_HASH64_SCAN_BK(myht64, &g_ctx[i], head, bk);
         for (int i = 0; i < BENCH_N; i++)
             g_idx[i] = find_idx_from_ctx(&g_ctx[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[1].min_cy) result[1].min_cy = cy;
         result[1].sum_cy += cy;
         result[1].samples[r] = cy;
@@ -301,14 +301,14 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH64_HASH_KEY4(myht64, &g_ctx[b*4], head, bk, keys + b*4);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH64_SCAN_BK4(myht64, &g_ctx[b*4], head, bk);
         for (int b = 0; b < BENCH_N / 4; b++)
             find_idx_from_ctx_n(&g_ctx[b*4], 4, &g_idx[b*4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[2].min_cy) result[2].min_cy = cy;
         result[2].sum_cy += cy;
         result[2].samples[r] = cy;
@@ -317,14 +317,14 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*6], 6, head, bk, keys + b*6);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH64_SCAN_BK_N(myht64, &g_ctx[b*6], 6, head, bk);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             find_idx_from_ctx_n(&g_ctx[b*6], 6, &g_idx[b*6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[3].min_cy) result[3].min_cy = cy;
         result[3].sum_cy += cy;
         result[3].samples[r] = cy;
@@ -333,14 +333,14 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*8], 8, head, bk, keys + b*8);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH64_SCAN_BK_N(myht64, &g_ctx[b*8], 8, head, bk);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             find_idx_from_ctx_n(&g_ctx[b*8], 8, &g_idx[b*8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[4].min_cy) result[4].min_cy = cy;
         result[4].sum_cy += cy;
         result[4].samples[r] = cy;
@@ -349,7 +349,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD6 && b < BENCH_N6/6; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*6], 6, head, bk, keys + b*6);
         for (int b = 0; b < BENCH_N6/6; b++) {
@@ -360,7 +360,7 @@ measure_find_patterns(struct myht64 *head,
         }
         for (int b = 0; b < BENCH_N6/6; b++)
             find_idx_from_ctx_n(&g_ctx[b*6], 6, &g_idx[b*6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[5].min_cy) result[5].min_cy = cy;
         result[5].sum_cy += cy;
         result[5].samples[r] = cy;
@@ -369,7 +369,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD8 && b < BENCH_N8/8; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*8], 8, head, bk, keys + b*8);
         for (int b = 0; b < BENCH_N8/8; b++) {
@@ -380,7 +380,7 @@ measure_find_patterns(struct myht64 *head,
         }
         for (int b = 0; b < BENCH_N8/8; b++)
             find_idx_from_ctx_n(&g_ctx[b*8], 8, &g_idx[b*8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[6].min_cy) result[6].min_cy = cy;
         result[6].sum_cy += cy;
         result[6].samples[r] = cy;
@@ -389,10 +389,10 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             g_res[i] = RIX_HASH64_FIND(myht64, head, bk, nodes, keys[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[7].min_cy) result[7].min_cy = cy;
         result[7].sum_cy += cy;
         result[7].samples[r] = cy;
@@ -401,14 +401,14 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             RIX_HASH64_HASH_KEY(myht64, &g_ctx[i], head, bk, keys[i]);
         for (int i = 0; i < BENCH_N; i++)
             RIX_HASH64_SCAN_BK(myht64, &g_ctx[i], head, bk);
         for (int i = 0; i < BENCH_N; i++)
             g_res[i] = RIX_HASH64_CMP_KEY(myht64, &g_ctx[i], nodes);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[8].min_cy) result[8].min_cy = cy;
         result[8].sum_cy += cy;
         result[8].samples[r] = cy;
@@ -417,7 +417,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             RIX_HASH64_HASH_KEY(myht64, &g_ctx[i], head, bk, keys[i]);
         for (int i = 0; i < BENCH_N; i++)
@@ -426,7 +426,7 @@ measure_find_patterns(struct myht64 *head,
             RIX_HASH64_PREFETCH_NODE(myht64, &g_ctx[i], nodes);
         for (int i = 0; i < BENCH_N; i++)
             g_res[i] = RIX_HASH64_CMP_KEY(myht64, &g_ctx[i], nodes);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[9].min_cy) result[9].min_cy = cy;
         result[9].sum_cy += cy;
         result[9].samples[r] = cy;
@@ -435,7 +435,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 2; b++)
             RIX_HASH64_HASH_KEY2(myht64, &g_ctx[b*2], head, bk, keys + b*2);
         for (int b = 0; b < BENCH_N / 2; b++)
@@ -444,7 +444,7 @@ measure_find_patterns(struct myht64 *head,
             RIX_HASH64_PREFETCH_NODE2(myht64, &g_ctx[b*2], nodes);
         for (int b = 0; b < BENCH_N / 2; b++)
             RIX_HASH64_CMP_KEY2(myht64, &g_ctx[b*2], nodes, &g_res[b*2]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[10].min_cy) result[10].min_cy = cy;
         result[10].sum_cy += cy;
         result[10].samples[r] = cy;
@@ -453,14 +453,14 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH64_HASH_KEY4(myht64, &g_ctx[b*4], head, bk, keys + b*4);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH64_SCAN_BK4(myht64, &g_ctx[b*4], head, bk);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH64_CMP_KEY4(myht64, &g_ctx[b*4], nodes, &g_res[b*4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[11].min_cy) result[11].min_cy = cy;
         result[11].sum_cy += cy;
         result[11].samples[r] = cy;
@@ -469,7 +469,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH64_HASH_KEY4(myht64, &g_ctx[b*4], head, bk, keys + b*4);
         for (int b = 0; b < BENCH_N / 4; b++)
@@ -478,7 +478,7 @@ measure_find_patterns(struct myht64 *head,
             RIX_HASH64_PREFETCH_NODE4(myht64, &g_ctx[b*4], nodes);
         for (int b = 0; b < BENCH_N / 4; b++)
             RIX_HASH64_CMP_KEY4(myht64, &g_ctx[b*4], nodes, &g_res[b*4]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[12].min_cy) result[12].min_cy = cy;
         result[12].sum_cy += cy;
         result[12].samples[r] = cy;
@@ -487,7 +487,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*6], 6, head, bk, keys + b*6);
         for (int b = 0; b < BENCH_N6 / 6; b++)
@@ -496,7 +496,7 @@ measure_find_patterns(struct myht64 *head,
             RIX_HASH64_PREFETCH_NODE_N(myht64, &g_ctx[b*6], 6, nodes);
         for (int b = 0; b < BENCH_N6 / 6; b++)
             RIX_HASH64_CMP_KEY_N(myht64, &g_ctx[b*6], 6, nodes, &g_res[b*6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[13].min_cy) result[13].min_cy = cy;
         result[13].sum_cy += cy;
         result[13].samples[r] = cy;
@@ -505,7 +505,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*8], 8, head, bk, keys + b*8);
         for (int b = 0; b < BENCH_N8 / 8; b++)
@@ -514,7 +514,7 @@ measure_find_patterns(struct myht64 *head,
             RIX_HASH64_PREFETCH_NODE_N(myht64, &g_ctx[b*8], 8, nodes);
         for (int b = 0; b < BENCH_N8 / 8; b++)
             RIX_HASH64_CMP_KEY_N(myht64, &g_ctx[b*8], 8, nodes, &g_res[b*8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[14].min_cy) result[14].min_cy = cy;
         result[14].sum_cy += cy;
         result[14].samples[r] = cy;
@@ -523,7 +523,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD6 && b < BENCH_N6/6; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*6], 6, head, bk, keys + b*6);
         for (int b = 0; b < BENCH_N6/6; b++) {
@@ -536,7 +536,7 @@ measure_find_patterns(struct myht64 *head,
             RIX_HASH64_PREFETCH_NODE_N(myht64, &g_ctx[b*6], 6, nodes);
         for (int b = 0; b < BENCH_N6/6; b++)
             RIX_HASH64_CMP_KEY_N(myht64, &g_ctx[b*6], 6, nodes, &g_res[b*6]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[15].min_cy) result[15].min_cy = cy;
         result[15].sum_cy += cy;
         result[15].samples[r] = cy;
@@ -545,7 +545,7 @@ measure_find_patterns(struct myht64 *head,
     for (unsigned r = 0; r < repeat; r++) {
         if (thrash)
             thrash_cache(thrash, thrash_len);
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int b = 0; b < KPD8 && b < BENCH_N8/8; b++)
             RIX_HASH64_HASH_KEY_N(myht64, &g_ctx[b*8], 8, head, bk, keys + b*8);
         for (int b = 0; b < BENCH_N8/8; b++) {
@@ -558,7 +558,7 @@ measure_find_patterns(struct myht64 *head,
             RIX_HASH64_PREFETCH_NODE_N(myht64, &g_ctx[b*8], 8, nodes);
         for (int b = 0; b < BENCH_N8/8; b++)
             RIX_HASH64_CMP_KEY_N(myht64, &g_ctx[b*8], 8, nodes, &g_res[b*8]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[16].min_cy) result[16].min_cy = cy;
         result[16].sum_cy += cy;
         result[16].samples[r] = cy;
@@ -575,10 +575,10 @@ measure_update_patterns(struct myht64 *head,
     init_update_results(result, repeat);
 
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             RIX_HASH64_REMOVE(myht64, head, bk, nodes, &nodes[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[0].min_cy) result[0].min_cy = cy;
         result[0].sum_cy += cy;
         result[0].samples[r] = cy;
@@ -590,10 +590,10 @@ measure_update_patterns(struct myht64 *head,
         RIX_HASH64_REMOVE(myht64, head, bk, nodes, &nodes[i]);
 
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t t0 = tsc_start();
+        u64 t0 = tsc_start();
         for (int i = 0; i < BENCH_N; i++)
             RIX_HASH64_INSERT(myht64, head, bk, nodes, &nodes[i]);
-        uint64_t cy = tsc_end() - t0;
+        u64 cy = tsc_end() - t0;
         if (cy < result[1].min_cy) result[1].min_cy = cy;
         result[1].sum_cy += cy;
         result[1].samples[r] = cy;
@@ -645,7 +645,7 @@ bench_fill_rate(void)
     const unsigned NB_BK  = 1024u;
     const unsigned SLOTS  = NB_BK * RIX_HASH64_BUCKET_ENTRY_SZ;  /* 8192 */
     /* Test node count: slots * 1.05 (try up to 105%) */
-    const unsigned TRY_N  = (unsigned)((uint64_t)SLOTS * 105 / 100) + 1;
+    const unsigned TRY_N  = (unsigned)((u64)SLOTS * 105 / 100) + 1;
 
     mynode_t *nodes =
         (mynode_t *)calloc(TRY_N, sizeof(mynode_t));
@@ -654,7 +654,7 @@ bench_fill_rate(void)
     if (!nodes || !buckets) { perror("alloc"); exit(1); }
 
     for (unsigned i = 0; i < TRY_N; i++) {
-        nodes[i].key = (uint64_t)(i + 1);   /* 1-origin unique keys */
+        nodes[i].key = (u64)(i + 1);   /* 1-origin unique keys */
         nodes[i].val = i;
     }
 
@@ -708,10 +708,10 @@ bench_fill_rate(void)
             cum_fail++;
 
         /* Output when the next checkpoint is reached */
-        while (ti < 9 && cum_ok >= (unsigned)((uint64_t)SLOTS * targets[ti] / 100)) {
+        while (ti < 9 && cum_ok >= (unsigned)((u64)SLOTS * targets[ti] / 100)) {
             printf("  %-10u  %-12u  %-12u\n",
                    targets[ti],
-                   (unsigned)((uint64_t)SLOTS * targets[ti] / 100),
+                   (unsigned)((u64)SLOTS * targets[ti] / 100),
                    cum_fail);
             ti++;
         }
@@ -720,7 +720,7 @@ bench_fill_rate(void)
     while (ti < 9) {
         printf("  %-10u  %-12u  %-12s\n",
                targets[ti],
-               (unsigned)((uint64_t)SLOTS * targets[ti] / 100),
+               (unsigned)((u64)SLOTS * targets[ti] / 100),
                "N/A (not reached)");
         ti++;
     }
@@ -745,10 +745,10 @@ bench_fill_rate(void)
 static void
 bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
 {
-    uint64_t bk0_hits = 0, bk1_hits = 0;
+    u64 bk0_hits = 0, bk1_hits = 0;
     size_t node_mem = (size_t)table_n * sizeof(mynode_t);
     size_t bk_mem   = (size_t)nb_bk   * sizeof(struct rix_hash64_bucket_s);
-    size_t lookup_mem = (size_t)BENCH_N * sizeof(uint64_t);
+    size_t lookup_mem = (size_t)BENCH_N * sizeof(u64);
     printf("[BENCH] table_n=%u  nb_bk=%u  slots=%u\n",
            table_n, nb_bk, nb_bk * RIX_HASH64_BUCKET_ENTRY_SZ);
     printf("  memory : nodes=%.1f MB  buckets=%.1f MB"
@@ -763,7 +763,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
     madvise(nodes, node_mem, MADV_HUGEPAGE);
 
     for (unsigned i = 0; i < table_n; i++) {
-        nodes[i].key = (uint64_t)(i + 1);
+        nodes[i].key = (u64)(i + 1);
         nodes[i].val = i;
     }
 
@@ -783,7 +783,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
     unsigned report_step = table_n / 10;
     if (report_step == 0) report_step = 1;
 
-    uint64_t ins_bk0_fast = 0, ins_bk1_fast = 0, ins_kickout = 0;
+    u64 ins_bk0_fast = 0, ins_bk1_fast = 0, ins_kickout = 0;
     double t_ins_start = now_sec();
 
     for (unsigned i = 0; i < table_n; i++) {
@@ -791,8 +791,8 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
         union rix_hash_hash_u _h = rix_hash_arch->hash_u64(nodes[i].key, head.rhh_mask);
         unsigned _b0 = _h.val32[0] & head.rhh_mask;
         unsigned _b1 = _h.val32[1] & head.rhh_mask;
-        uint32_t _nilm0 = rix_hash_arch->find_u64x16(bk[_b0].key, BENCH_INVALID_KEY);
-        uint32_t _nilm1 = rix_hash_arch->find_u64x16(bk[_b1].key, BENCH_INVALID_KEY);
+        u32 _nilm0 = rix_hash_arch->find_u64x16(bk[_b0].key, BENCH_INVALID_KEY);
+        u32 _nilm1 = rix_hash_arch->find_u64x16(bk[_b1].key, BENCH_INVALID_KEY);
         if      (_nilm0) ins_bk0_fast++;
         else if (_nilm1) ins_bk1_fast++;
         else             ins_kickout++;
@@ -819,15 +819,15 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
         unsigned mask = head.rhh_mask;
         for (unsigned b = 0; b < nb_bk; b++) {
             for (unsigned s = 0; s < RIX_HASH64_BUCKET_ENTRY_SZ; s++) {
-                uint32_t nidx = bk[b].idx[s];
-                if (nidx == (uint32_t)RIX_NIL) continue;
-                uint64_t key = bk[b].key[s];
+                u32 nidx = bk[b].idx[s];
+                if (nidx == (u32)RIX_NIL) continue;
+                u64 key = bk[b].key[s];
                 union rix_hash_hash_u h = rix_hash_arch->hash_u64(key, mask);
                 if (b == (h.val32[0] & mask)) bk0_hits++;
                 else                          bk1_hits++;
             }
         }
-        uint64_t total = bk0_hits + bk1_hits;
+        u64 total = bk0_hits + bk1_hits;
         printf("  bk_0 hit rate : %" PRIu64 "/%" PRIu64 " = %.2f%%\n",
                bk0_hits, total, 100.0 * bk0_hits / total);
         printf("  bk_1 hit rate : %" PRIu64 "/%" PRIu64 " = %.2f%%\n",
@@ -835,14 +835,14 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
     }
 
     /* ---- Fixed hot/cold lookup set ----------------------------------- */
-    uint64_t hot_keys[BENCH_N];
+    u64 hot_keys[BENCH_N];
     for (int i = 0; i < BENCH_N; i++) {
         unsigned idx = (unsigned)(xorshift64() % n_hit);
         hot_keys[i] = nodes[idx].key;
     }
 
     size_t thrash_len = THRASH_BYTES_MIN;
-    uint8_t *thrash = (uint8_t *)mmap(NULL, thrash_len,
+    u8 *thrash = (u8 *)mmap(NULL, thrash_len,
                                       PROT_READ | PROT_WRITE,
                                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (thrash == MAP_FAILED) { perror("mmap thrash"); exit(1); }
@@ -954,8 +954,8 @@ main(int argc, char **argv)
     if (nb_bk == 0) {
         /* Default: ~80% fill (slots = table_n / 0.8) */
         nb_bk = 1;
-        while ((uint64_t)nb_bk * RIX_HASH64_BUCKET_ENTRY_SZ * 4 <
-               (uint64_t)table_n * 5)
+        while ((u64)nb_bk * RIX_HASH64_BUCKET_ENTRY_SZ * 4 <
+               (u64)table_n * 5)
             nb_bk <<= 1;
     }
 

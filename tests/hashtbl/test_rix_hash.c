@@ -23,17 +23,17 @@
 /* Node definition (128-bit key as struct)                             */
 /* ================================================================== */
 struct mykey {
-    uint64_t hi;
-    uint64_t lo;
+    u64 hi;
+    u64 lo;
 };
 
 struct mynode {
-    uint32_t  cur_hash; /* hash_field: hash of the current bucket (updated on kickout) */
-    uint32_t  _pad;     /* alignment padding */
+    u32  cur_hash; /* hash_field: hash of the current bucket (updated on kickout) */
+    u32  _pad;     /* alignment padding */
     struct mykey key;   /* key_field: must be a struct, sizeof = 16 */
 };
 
-/* 16-byte key comparison using SSE2 (struct mykey = two uint64_t) */
+/* 16-byte key comparison using SSE2 (struct mykey = two u64) */
 static RIX_FORCE_INLINE int
 mykey_cmp(const struct mykey *a, const struct mykey *b)
 {
@@ -46,9 +46,9 @@ RIX_HASH_HEAD(myht);
 RIX_HASH_GENERATE(myht, mynode, key, cur_hash, mykey_cmp)
 
 struct mynode_slot {
-    uint32_t  cur_hash; /* hash_field: hash of the current bucket */
-    uint16_t  slot;     /* slot_field: slot in current bucket */
-    uint16_t  _pad;
+    u32  cur_hash; /* hash_field: hash of the current bucket */
+    u16  slot;     /* slot_field: slot in current bucket */
+    u16  _pad;
     struct mykey key;
 };
 
@@ -90,7 +90,7 @@ basic_init(void)
     memset(g_bk,    0, sizeof(g_bk));
     RIX_HASH_INIT(myht, &g_head, NB_BK_BASIC);
     for (unsigned i = 0; i < NB_BASIC; i++) {
-        g_basic[i].key.hi = (uint64_t)(i + 1);
+        g_basic[i].key.hi = (u64)(i + 1);
         g_basic[i].key.lo = 0xDEADC0DE00000000ULL;
     }
 }
@@ -116,7 +116,7 @@ slot_basic_init(void)
     memset(g_bk_slot, 0, sizeof(g_bk_slot));
     RIX_HASH_INIT(myht_slot, &g_head_slot, NB_BK_BASIC);
     for (unsigned i = 0; i < NB_BASIC; i++) {
-        g_slot[i].key.hi = (uint64_t)(i + 1);
+        g_slot[i].key.hi = (u64)(i + 1);
         g_slot[i].key.lo = 0xDEADC0DE00000000ULL;
     }
 }
@@ -520,7 +520,7 @@ test_fuzz(unsigned seed, unsigned N, unsigned nb_bk, unsigned ops)
 
     /* Assign unique keys: key.hi = 1-origin index, key.lo = 0 */
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0;
     }
 
@@ -637,7 +637,7 @@ test_slot_fuzz(unsigned seed, unsigned N, unsigned nb_bk, unsigned ops)
         (struct mynode_slot *)calloc((size_t)N, sizeof(struct mynode_slot));
     if (!nodes) { perror("calloc slot nodes"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0;
     }
 
@@ -739,7 +739,7 @@ keyonly_init(void)
     memset(g_bk_keyonly, 0, sizeof(g_bk_keyonly));
     RIX_HASH_INIT(myht_keyonly, &g_head_keyonly, NB_BK_BASIC);
     for (unsigned i = 0; i < NB_BASIC; i++) {
-        g_keyonly[i].key.hi = (uint64_t)(i + 1);
+        g_keyonly[i].key.hi = (u64)(i + 1);
         g_keyonly[i].key.lo = 0xDEADC0DE00000000ULL;
     }
 }
@@ -872,7 +872,7 @@ test_keyonly_fuzz(unsigned seed, unsigned N, unsigned nb_bk, unsigned ops)
         (struct mynode_keyonly *)calloc((size_t)N, sizeof(struct mynode_keyonly));
     if (!nodes) { perror("calloc keyonly nodes"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0;
     }
 
@@ -986,7 +986,7 @@ test_high_fill(void)
     struct mynode *nodes = (struct mynode *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xA1A2A3A400000000ULL;
     }
 
@@ -1074,7 +1074,7 @@ test_max_fill(void)
         (struct mynode *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xB1B2B3B400000000ULL;
     }
 
@@ -1139,7 +1139,7 @@ test_kickout_safety(void)
     struct mynode *nodes = (struct mynode *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xB1B2B3B400000000ULL;
     }
 
@@ -1210,7 +1210,7 @@ test_slot_high_fill(void)
         (struct mynode_slot *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xC1C2C3C400000000ULL;
     }
 
@@ -1290,7 +1290,7 @@ test_keyonly_high_fill(void)
         (struct mynode_keyonly *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xD1D2D3D400000000ULL;
     }
 
@@ -1473,7 +1473,7 @@ test_slot_kickout_safety(void)
         (struct mynode_slot *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xB1B2B3B400000000ULL;
     }
 
@@ -1546,7 +1546,7 @@ test_keyonly_kickout_safety(void)
         (struct mynode_keyonly *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xB1B2B3B400000000ULL;
     }
 
@@ -1620,7 +1620,7 @@ test_slot_max_fill(void)
         (struct mynode_slot *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xB1B2B3B400000000ULL;
     }
 
@@ -1682,7 +1682,7 @@ test_keyonly_max_fill(void)
         (struct mynode_keyonly *)calloc((size_t)N, sizeof(*nodes));
     if (!nodes) { perror("calloc"); exit(1); }
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key.hi = (uint64_t)(i + 1);
+        nodes[i].key.hi = (u64)(i + 1);
         nodes[i].key.lo = 0xB1B2B3B400000000ULL;
     }
 

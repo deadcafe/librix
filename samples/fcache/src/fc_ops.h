@@ -28,37 +28,37 @@ struct fc_##prefix##_ops {                                                     \
     /* cold-path */                                                            \
     void (*flush)(struct fc_##prefix##_cache *fc);                             \
     unsigned (*nb_entries)(const struct fc_##prefix##_cache *fc);               \
-    int (*remove_idx)(struct fc_##prefix##_cache *fc, uint32_t entry_idx);     \
+    int (*remove_idx)(struct fc_##prefix##_cache *fc, u32 entry_idx);     \
     void (*stats)(const struct fc_##prefix##_cache *fc,                        \
                   struct fc_##prefix##_stats *out);                            \
     int (*walk)(struct fc_##prefix##_cache *fc,                                \
-                int (*cb)(uint32_t entry_idx, void *arg), void *arg);          \
+                int (*cb)(u32 entry_idx, void *arg), void *arg);          \
     /* hot-path */                                                             \
     void (*find_bulk)(struct fc_##prefix##_cache *fc,                           \
                       const struct prefix##_key *keys,                          \
-                      unsigned nb_keys, uint64_t now,                           \
+                      unsigned nb_keys, u64 now,                           \
                       struct fc_##prefix##_result *results);                    \
     void (*findadd_bulk)(struct fc_##prefix##_cache *fc,                        \
                          const struct prefix##_key *keys,                       \
-                         unsigned nb_keys, uint64_t now,                        \
+                         unsigned nb_keys, u64 now,                        \
                          struct fc_##prefix##_result *results);                 \
     void (*add_bulk)(struct fc_##prefix##_cache *fc,                            \
                      const struct prefix##_key *keys,                           \
-                     unsigned nb_keys, uint64_t now,                            \
+                     unsigned nb_keys, u64 now,                            \
                      struct fc_##prefix##_result *results);                     \
     void (*del_bulk)(struct fc_##prefix##_cache *fc,                            \
                      const struct prefix##_key *keys,                           \
                      unsigned nb_keys);                                         \
     void (*del_idx_bulk)(struct fc_##prefix##_cache *fc,                        \
-                         const uint32_t *idxs, unsigned nb_idxs);              \
+                         const u32 *idxs, unsigned nb_idxs);              \
     unsigned (*maintain)(struct fc_##prefix##_cache *fc,                        \
                          unsigned start_bk, unsigned bucket_count,              \
-                         uint64_t now);                                         \
+                         u64 now);                                         \
     unsigned (*maintain_step_ex)(struct fc_##prefix##_cache *fc,                \
                                  unsigned start_bk, unsigned bucket_count,      \
-                                 unsigned skip_threshold, uint64_t now);        \
+                                 unsigned skip_threshold, u64 now);        \
     unsigned (*maintain_step)(struct fc_##prefix##_cache *fc,                   \
-                              uint64_t now, int idle);                          \
+                              u64 now, int idle);                          \
 }
 
 FC_OPS_DEFINE(flow4);

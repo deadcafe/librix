@@ -65,9 +65,9 @@ test_key(unsigned i)
 
     memset(&k, 0, sizeof(k));
     k.family   = 2u;
-    k.proto    = (uint8_t)(6u + (i & 1u));
-    k.src_port = (uint16_t)(1024u + (i & 0x7fffu));
-    k.dst_port = (uint16_t)(2048u + ((i >> 11) & 0x7fffu));
+    k.proto    = (u8)(6u + (i & 1u));
+    k.src_port = (u16)(1024u + (i & 0x7fffu));
+    k.dst_port = (u16)(2048u + ((i >> 11) & 0x7fffu));
     k.vrfid    = 1u + (i >> 24);
     k.src_ip   = UINT32_C(0x0a000000) | (i & 0x00ffffffu);
     k.dst_ip   = UINT32_C(0x14000000)
@@ -77,19 +77,19 @@ test_key(unsigned i)
 
 struct test_user_record {
     struct flow4_entry entry;
-    uint32_t cookie;
+    u32 cookie;
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
 struct test_user_record6 {
     struct flow6_entry entry;
-    uint32_t cookie;
+    u32 cookie;
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
 struct test_user_recordu {
     struct flowu_entry entry;
-    uint32_t cookie;
+    u32 cookie;
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
@@ -109,13 +109,13 @@ static struct flow6_key
 test_key6(unsigned i)
 {
     struct flow6_key k;
-    uint32_t w;
+    u32 w;
 
     memset(&k, 0, sizeof(k));
     k.family   = 10u;
     k.proto    = 6u;
-    k.src_port = (uint16_t)(1000u + i);
-    k.dst_port = (uint16_t)(2000u + i);
+    k.src_port = (u16)(1000u + i);
+    k.dst_port = (u16)(2000u + i);
     k.vrfid    = 1u;
     w = i;
     memcpy(&k.src_ip[0], &w, sizeof(w));
@@ -140,12 +140,12 @@ static struct flowu_key
 test_keyu(unsigned i)
 {
     struct flowu_key k;
-    uint32_t w;
+    u32 w;
 
     memset(&k, 0, sizeof(k));
     k.proto    = 6u;
-    k.src_port = (uint16_t)(1000u + i);
-    k.dst_port = (uint16_t)(2000u + i);
+    k.src_port = (u16)(1000u + i);
+    k.dst_port = (u16)(2000u + i);
     k.vrfid    = 1u;
     if ((i & 1u) == 0u) {
         k.family = 2u;
@@ -190,35 +190,35 @@ struct test_variant_ops {
     unsigned (*nb_bk)(const void *ft);
     void (*stats)(const void *ft, struct ft_table_stats *out);
     void (*status)(const void *ft, struct fcore_status *out);
-    uint32_t (*find)(void *ft, const void *key, uint64_t now);
-    uint32_t (*add_idx)(void *ft, uint32_t entry_idx, uint64_t now);
-    uint32_t (*del_key)(void *ft, const void *key);
-    uint32_t (*del_entry_idx)(void *ft, uint32_t entry_idx);
+    u32 (*find)(void *ft, const void *key, u64 now);
+    u32 (*add_idx)(void *ft, u32 entry_idx, u64 now);
+    u32 (*del_key)(void *ft, const void *key);
+    u32 (*del_entry_idx)(void *ft, u32 entry_idx);
     void (*find_bulk)(void *ft, const void *keys, unsigned nb_keys,
-                      uint64_t now,
+                      u64 now,
                       struct ft_table_result *results);
-    unsigned (*add_idx_bulk)(void *ft, uint32_t *entry_idxv,
+    unsigned (*add_idx_bulk)(void *ft, u32 *entry_idxv,
                              unsigned nb_keys,
                              enum ft_add_policy policy,
-                             uint64_t now,
-                             uint32_t *unused_idxv);
-    int (*set_permanent_idx)(void *ft, uint32_t entry_idx);
-    void (*del_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
+                             u64 now,
+                             u32 *unused_idxv);
+    int (*set_permanent_idx)(void *ft, u32 entry_idx);
+    void (*del_entry_idx_bulk)(void *ft, const u32 *entry_idxv,
                                unsigned nb_keys);
-    int (*walk)(void *ft, int (*cb)(uint32_t entry_idx, void *arg), void *arg);
+    int (*walk)(void *ft, int (*cb)(u32 entry_idx, void *arg), void *arg);
     int (*grow_2x)(void *ft);
     int (*reserve)(void *ft, unsigned min_entries);
     unsigned (*maintain_idx_bulk)(void *ft,
-                                  const uint32_t *entry_idxv,
+                                  const u32 *entry_idxv,
                                   unsigned nb_idx,
-                                  uint64_t now,
-                                  uint64_t expire_tsc,
-                                  uint32_t *expired_idxv,
+                                  u64 now,
+                                  u64 expire_tsc,
+                                  u32 *expired_idxv,
                                   unsigned max_expired,
                                   unsigned min_bk_entries,
                                   int enable_filter);
-    void *(*record_ptr)(void *ft, uint32_t entry_idx);
-    void *(*entry_ptr)(void *ft, uint32_t entry_idx);
+    void *(*record_ptr)(void *ft, u32 entry_idx);
+    void *(*entry_ptr)(void *ft, u32 entry_idx);
     void (*make_key)(void *out, unsigned i);
 };
 
@@ -270,61 +270,61 @@ testv_status_##tag(const void *ft, struct fcore_status *out)                \
 {                                                                          \
     status_fn((const struct ft_##prefix##_table *)ft, out);                \
 }                                                                          \
-static uint32_t                                                             \
-testv_find_##tag(void *ft, const void *key, uint64_t now)                    \
+static u32                                                             \
+testv_find_##tag(void *ft, const void *key, u64 now)                    \
 {                                                                          \
     return find_fn((struct ft_##prefix##_table *)ft,                        \
                    (const key_t *)key, now);                                \
 }                                                                          \
-static uint32_t                                                             \
-testv_add_idx_##tag(void *ft, uint32_t entry_idx, uint64_t now)              \
+static u32                                                             \
+testv_add_idx_##tag(void *ft, u32 entry_idx, u64 now)              \
 {                                                                          \
     return add_idx_fn((struct ft_##prefix##_table *)ft, entry_idx, now);   \
 }                                                                          \
-static uint32_t                                                             \
+static u32                                                             \
 testv_del_key_##tag(void *ft, const void *key)                              \
 {                                                                          \
     return del_key_fn((struct ft_##prefix##_table *)ft,                     \
                       (const key_t *)key);                                  \
 }                                                                          \
-static uint32_t                                                             \
-testv_del_entry_idx_##tag(void *ft, uint32_t entry_idx)                     \
+static u32                                                             \
+testv_del_entry_idx_##tag(void *ft, u32 entry_idx)                     \
 {                                                                          \
     return del_entry_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);  \
 }                                                                          \
 static void                                                                 \
 testv_find_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,         \
-                      uint64_t now,                                          \
+                      u64 now,                                          \
                       struct ft_table_result *results)                       \
 {                                                                          \
     find_bulk_fn((struct ft_##prefix##_table *)ft,                          \
                  (const key_t *)keys, nb_keys, now, results);               \
 }                                                                          \
 static unsigned                                                             \
-testv_add_idx_bulk_##tag(void *ft, uint32_t *entry_idxv,                   \
+testv_add_idx_bulk_##tag(void *ft, u32 *entry_idxv,                   \
                          unsigned nb_keys,                                  \
                          enum ft_add_policy policy,                         \
-                         uint64_t now,                                       \
-                         uint32_t *unused_idxv)                             \
+                         u64 now,                                       \
+                         u32 *unused_idxv)                             \
 {                                                                          \
     return add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                \
                            entry_idxv, nb_keys, policy, now, unused_idxv);  \
 }                                                                          \
 static int                                                                  \
-testv_set_permanent_idx_##tag(void *ft, uint32_t entry_idx)                 \
+testv_set_permanent_idx_##tag(void *ft, u32 entry_idx)                 \
 {                                                                          \
     return ft_##prefix##_table_set_permanent_idx(                           \
         (struct ft_##prefix##_table *)ft, entry_idx);                       \
 }                                                                          \
 static void                                                                 \
-testv_del_entry_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,        \
+testv_del_entry_idx_bulk_##tag(void *ft, const u32 *entry_idxv,        \
                                unsigned nb_keys)                             \
 {                                                                          \
     del_entry_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
                           entry_idxv, nb_keys);                             \
 }                                                                          \
 static int                                                                  \
-testv_walk_##tag(void *ft, int (*cb)(uint32_t entry_idx, void *arg),        \
+testv_walk_##tag(void *ft, int (*cb)(u32 entry_idx, void *arg),        \
                  void *arg)                                                  \
 {                                                                          \
     return walk_fn((struct ft_##prefix##_table *)ft, cb, arg);              \
@@ -340,10 +340,10 @@ testv_reserve_##tag(void *ft, unsigned min_entries)                         \
     return reserve_fn((struct ft_##prefix##_table *)ft, min_entries);       \
 }                                                                          \
 static unsigned                                                             \
-testv_maintain_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,         \
-                              unsigned nb_idx, uint64_t now,                \
-                              uint64_t expire_tsc,                          \
-                              uint32_t *expired_idxv,                        \
+testv_maintain_idx_bulk_##tag(void *ft, const u32 *entry_idxv,         \
+                              unsigned nb_idx, u64 now,                \
+                              u64 expire_tsc,                          \
+                              u32 *expired_idxv,                        \
                               unsigned max_expired,                          \
                               unsigned min_bk_entries,                       \
                               int enable_filter)                             \
@@ -354,12 +354,12 @@ testv_maintain_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,         \
                                 min_bk_entries, enable_filter);             \
 }                                                                          \
 static void *                                                               \
-testv_record_ptr_##tag(void *ft, uint32_t entry_idx)                        \
+testv_record_ptr_##tag(void *ft, u32 entry_idx)                        \
 {                                                                          \
     return record_ptr_fn((struct ft_##prefix##_table *)ft, entry_idx);      \
 }                                                                          \
 static void *                                                               \
-testv_entry_ptr_##tag(void *ft, uint32_t entry_idx)                         \
+testv_entry_ptr_##tag(void *ft, u32 entry_idx)                         \
 {                                                                          \
     return entry_ptr_fn((struct ft_##prefix##_table *)ft, entry_idx);       \
 }                                                                          \
@@ -466,8 +466,8 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
     ((ops)->add_idx_bulk((ft), (entry_idxv), (nb_keys), (policy),            \
                          TEST_NOW_ADD, (unused_idxv)))
 
-static uint32_t
-test_add_idx_key(struct ft_flow4_table *ft, uint32_t entry_idx,
+static u32
+test_add_idx_key(struct ft_flow4_table *ft, u32 entry_idx,
                  const struct flow4_key *key)
 {
     struct flow4_entry *entry = ft_flow4_table_entry_ptr(ft, entry_idx);
@@ -480,12 +480,12 @@ test_add_idx_key(struct ft_flow4_table *ft, uint32_t entry_idx,
 
 struct walk_ctx {
     unsigned count;
-    uint64_t sum;
+    u64 sum;
     unsigned stop_after;
 };
 
 static int
-walk_count_cb(uint32_t entry_idx, void *arg)
+walk_count_cb(u32 entry_idx, void *arg)
 {
     struct walk_ctx *ctx = (struct walk_ctx *)arg;
 
@@ -520,7 +520,7 @@ test_basic_add_find_del(void)
     struct test_user_record *pool;
     struct flow4_key k1 = test_key(1u);
     struct flow4_key k2 = test_key(2u);
-    uint32_t idx1, idx2;
+    u32 idx1, idx2;
 
     printf("[T] flow4 table basic add/find/del\n");
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
@@ -556,7 +556,7 @@ test_init_ex_and_mapping(void)
     struct ft_flow4_table ft;
     struct test_user_record *users;
     struct flow4_key key = test_key(10u);
-    uint32_t idx;
+    u32 idx;
 
     printf("[T] flow4 table init_ex mapping\n");
     users = test_aligned_calloc(64u, sizeof(*users), FT_TABLE_CACHE_LINE_SIZE);
@@ -590,7 +590,7 @@ test_manual_grow_preserves_entries(void)
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
-    uint32_t idxs[256];
+    u32 idxs[256];
 
     printf("[T] flow4 table grow_2x preserves entries\n");
     pool = test_aligned_calloc(4096u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
@@ -651,9 +651,9 @@ test_bulk_ops_and_stats(void)
     struct ft_flow4_table ft;
     struct test_user_record *pool;
     struct flow4_key keys[8];
-    uint32_t entry_idxv[8];
+    u32 entry_idxv[8];
     struct ft_table_result find_results[8];
-    uint32_t unused_idxv[8];
+    u32 unused_idxv[8];
     struct ft_table_stats stats;
 
     printf("[T] flow4 table bulk ops and stats\n");
@@ -826,7 +826,7 @@ test_duplicate_and_delete_miss_stats(void)
     struct ft_table_stats stats;
     struct flow4_key key = test_key(6000u);
     struct flow4_key miss = test_key(6001u);
-    uint32_t idx;
+    u32 idx;
 
     printf("[T] flow4 table duplicate add/del miss stats\n");
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
@@ -899,7 +899,7 @@ test_grow_failure_preserves_table(void)
     struct ft_table_config cfg;
     struct ft_flow4_table ft;
     struct test_user_record *pool;
-    uint32_t idxs[64];
+    u32 idxs[64];
     unsigned old_nb_bk;
 
     printf("[T] flow4 table grow failure preserves table\n");
@@ -992,7 +992,7 @@ test_high_fill(void)
 
     for (unsigned i = 0; i < target; i++) {
         struct flow4_key key = test_key(i + 10000u);
-        uint32_t idx = test_add_idx_key(&ft, i + 1u, &key);
+        u32 idx = test_add_idx_key(&ft, i + 1u, &key);
 
         if (idx == 0u)
             break;
@@ -1063,7 +1063,7 @@ test_max_fill(void)
 
     for (unsigned i = 0; i < capacity; i++) {
         struct flow4_key key = test_key(i + 20000u);
-        uint32_t idx = test_add_idx_key(&ft, i + 1u, &key);
+        u32 idx = test_add_idx_key(&ft, i + 1u, &key);
 
         if (idx == 0u)
             break;
@@ -1131,7 +1131,7 @@ test_kickout_safety(void)
     /* Phase 1: fill until first rejection */
     for (unsigned i = 0; i < capacity; i++) {
         struct flow4_key key = test_key(i + 30000u);
-        uint32_t idx = test_add_idx_key(&ft, i + 1u, &key);
+        u32 idx = test_add_idx_key(&ft, i + 1u, &key);
 
         if (idx == 0u)
             break;
@@ -1174,7 +1174,7 @@ test_del_idx(void)
     struct ft_flow4_table ft;
     struct test_user_record *pool;
     struct flow4_key keys[8];
-    uint32_t idxs[8];
+    u32 idxs[8];
 
     printf("[T] flow4 table del_idx\n");
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
@@ -1197,7 +1197,7 @@ test_del_idx(void)
     }
     /* deleted entries miss, remaining entries hit */
     for (unsigned i = 0; i < 8u; i++) {
-        uint32_t found = FT4_FIND(&ft, &keys[i]);
+        u32 found = FT4_FIND(&ft, &keys[i]);
 
         if ((i & 1u) == 0u) {
             if (found != 0u)
@@ -1220,12 +1220,12 @@ static int
 test_maintain_basic(void)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
-    const uint64_t expire_tsc = UINT64_C(100000);
+    const u64 expire_tsc = UINT64_C(100000);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
     struct flow4_key keys[16];
     struct flow4_key new_key;
-    uint32_t expired[16];
+    u32 expired[16];
     unsigned n;
     unsigned next_bk;
 
@@ -1337,12 +1337,12 @@ static int
 test_maintain_partial_and_limit(void)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
-    const uint64_t expire_tsc = UINT64_C(100000);
+    const u64 expire_tsc = UINT64_C(100000);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
     struct flow4_key keys[16];
     struct flow4_entry *entry;
-    uint32_t expired[4];
+    u32 expired[4];
     unsigned n, total_expired;
     unsigned next_bk;
 
@@ -1455,12 +1455,12 @@ static int
 test_maintain_min_bk_entries(void)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
-    const uint64_t expire_tsc = UINT64_C(100000);
+    const u64 expire_tsc = UINT64_C(100000);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
     struct flow4_key keys[16];
     struct flow4_entry *entry;
-    uint32_t expired[16];
+    u32 expired[16];
     unsigned n;
     unsigned next_bk;
 
@@ -1537,7 +1537,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
     struct ft_table_config cfg = test_cfg(nb_bk, nb_bk, 99u);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
-    uint8_t *in_table; /* 1 if entry i is in table */
+    u8 *in_table; /* 1 if entry i is in table */
     unsigned in_count = 0u;
 
     printf("[T] flow4 table fuzz seed=%u N=%u nb_bk=%u ops=%u\n",
@@ -1554,12 +1554,12 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
         unsigned idx0 = (seed >> 16) % n;
         unsigned action = (seed >> 8) & 3u;
         struct flow4_key key = test_key(idx0 + 50000u);
-        uint32_t entry_idx = idx0 + 1u;
+        u32 entry_idx = idx0 + 1u;
 
         switch (action) {
         case 0: /* insert */
             if (!in_table[idx0]) {
-                uint32_t ret = test_add_idx_key(&ft, entry_idx, &key);
+                u32 ret = test_add_idx_key(&ft, entry_idx, &key);
 
                 if (ret == entry_idx) {
                     in_table[idx0] = 1u;
@@ -1570,7 +1570,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
             break;
         case 1: /* find */
         {
-            uint32_t ret = FT4_FIND(&ft, &key);
+            u32 ret = FT4_FIND(&ft, &key);
 
             if (in_table[idx0] && ret != entry_idx)
                 FAILF("fuzz find miss: op=%u idx0=%u", op, idx0);
@@ -1580,7 +1580,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
         }
         case 2: /* delete */
             if (in_table[idx0]) {
-                uint32_t ret = ft_flow4_table_del_key(&ft, &key);
+                u32 ret = ft_flow4_table_del_key(&ft, &key);
 
                 if (ret != entry_idx)
                     FAILF("fuzz del mismatch: op=%u idx0=%u ret=%u",
@@ -1591,7 +1591,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
             break;
         default: /* find (bias toward reads) */
         {
-            uint32_t ret = FT4_FIND(&ft, &key);
+            u32 ret = FT4_FIND(&ft, &key);
 
             if (in_table[idx0] && ret != entry_idx)
                 FAILF("fuzz find2 miss: op=%u idx0=%u", op, idx0);
@@ -1628,7 +1628,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
 
 static void
 testv_bind_key(const struct test_variant_ops *ops, void *ft,
-               uint32_t entry_idx, const void *key)
+               u32 entry_idx, const void *key)
 {
     void *entry = ops->entry_ptr(ft, entry_idx);
 
@@ -1641,7 +1641,7 @@ testv_bind_key(const struct test_variant_ops *ops, void *ft,
 }
 
 static struct flow_entry_meta *
-testv_meta_ptr(const struct test_variant_ops *ops, void *ft, uint32_t entry_idx)
+testv_meta_ptr(const struct test_variant_ops *ops, void *ft, u32 entry_idx)
 {
     unsigned char *entry = (unsigned char *)ops->entry_ptr(ft, entry_idx);
 
@@ -1650,9 +1650,9 @@ testv_meta_ptr(const struct test_variant_ops *ops, void *ft, uint32_t entry_idx)
     return (struct flow_entry_meta *)(void *)(entry + ops->meta_offset);
 }
 
-static uint32_t
+static u32
 testv_add_idx_key(const struct test_variant_ops *ops, void *ft,
-                  uint32_t entry_idx, const void *key)
+                  u32 entry_idx, const void *key)
 {
     testv_bind_key(ops, ft, entry_idx, key);
     return TEST_OPS_ADD_IDX(ops, ft, entry_idx);
@@ -1666,7 +1666,7 @@ testv_basic_add_find_del(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(128u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     union test_any_key k1, k2;
-    uint32_t idx1, idx2;
+    u32 idx1, idx2;
 
     printf("[T] %s table basic add/find/del\n", ops->name);
     if (pool == NULL)
@@ -1704,13 +1704,13 @@ testv_init_ex_and_mapping(const struct test_variant_ops *ops)
     void *users = test_aligned_calloc(64u, ops->record_size,
                                       FT_TABLE_CACHE_LINE_SIZE);
     union test_any_key key;
-    uint32_t idx;
+    u32 idx;
 
     printf("[T] %s table init_ex mapping\n", ops->name);
     if (users == NULL)
         FAIL("calloc users");
     for (unsigned i = 0; i < 64u; i++) {
-        uint32_t cookie = UINT32_C(0xabc00000) + i;
+        u32 cookie = UINT32_C(0xabc00000) + i;
         memcpy((unsigned char *)users
                    + (size_t)i * ops->record_size + ops->cookie_offset,
                &cookie, sizeof(cookie));
@@ -1727,7 +1727,7 @@ testv_init_ex_and_mapping(const struct test_variant_ops *ops)
         != (void *)((unsigned char *)users + ops->entry_offset))
         FAIL("entry_ptr mismatch");
     {
-        uint32_t cookie = 0u;
+        u32 cookie = 0u;
 
         memcpy(&cookie, (unsigned char *)users + ops->cookie_offset,
                sizeof(cookie));
@@ -1747,9 +1747,9 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(256u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(8u, ops->key_size);
-    uint32_t entry_idxv[8];
+    u32 entry_idxv[8];
     struct ft_table_result find_results[8];
-    uint32_t unused_idxv[8];
+    u32 unused_idxv[8];
     struct ft_table_stats stats;
 
     printf("[T] %s table bulk ops and stats\n", ops->name);
@@ -1823,9 +1823,9 @@ testv_add_idx_bulk_duplicate_ignore(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(64u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(4u, ops->key_size);
-    uint32_t base_idxv[2] = { 1u, 2u };
-    uint32_t dup_idxv[2] = { 3u, 4u };
-    uint32_t unused_idxv[2];
+    u32 base_idxv[2] = { 1u, 2u };
+    u32 dup_idxv[2] = { 3u, 4u };
+    u32 unused_idxv[2];
     struct ft_table_stats stats;
     unsigned unused_n;
 
@@ -1883,9 +1883,9 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(64u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(4u, ops->key_size);
-    uint32_t base_idxv[2] = { 1u, 2u };
-    uint32_t mix_idxv[5] = { 1u, 3u, 4u, 5u, 6u };
-    uint32_t unused_idxv[5];
+    u32 base_idxv[2] = { 1u, 2u };
+    u32 mix_idxv[5] = { 1u, 3u, 4u, 5u, 6u };
+    u32 unused_idxv[5];
     struct ft_table_stats stats;
     unsigned unused_n;
 
@@ -1958,11 +1958,11 @@ testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(64u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(16u, ops->key_size);
-    uint32_t base_idxv[4] = { 1u, 2u, 3u, 4u };
-    uint32_t dup_idxv[4] = { 5u, 6u, 7u, 8u };
-    uint32_t ins_idxv[4] = { 9u, 10u, 11u, 12u };
-    uint32_t mix_idxv[4] = { 5u, 13u, 14u, 15u };
-    uint32_t unused_idxv[4];
+    u32 base_idxv[4] = { 1u, 2u, 3u, 4u };
+    u32 dup_idxv[4] = { 5u, 6u, 7u, 8u };
+    u32 ins_idxv[4] = { 9u, 10u, 11u, 12u };
+    u32 mix_idxv[4] = { 5u, 13u, 14u, 15u };
+    u32 unused_idxv[4];
     unsigned free_n;
 
     printf("[T] %s table add_idx_bulk policy\n", ops->name);
@@ -2064,7 +2064,7 @@ testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
     testv_bind_key(ops, &ft, 18u, TEST_KEY_AT(keys, ops, 10u));
     testv_bind_key(ops, &ft, 19u, TEST_KEY_AT(keys, ops, 11u));
     {
-        uint32_t upd_mix_idxv[4] = { 5u, 17u, 18u, 19u };
+        u32 upd_mix_idxv[4] = { 5u, 17u, 18u, 19u };
 
         memset(unused_idxv, 0xff, sizeof(unused_idxv));
         free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, upd_mix_idxv, 4u,
@@ -2103,8 +2103,8 @@ testv_timestamp_update(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(32u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(4u, ops->key_size);
-    uint32_t idxv[1] = { 2u };
-    uint32_t unused_idxv[1];
+    u32 idxv[1] = { 2u };
+    u32 unused_idxv[1];
     unsigned unused_n;
     struct flow_entry_meta *meta1;
     struct flow_entry_meta *meta2;
@@ -2193,8 +2193,8 @@ testv_permanent_timestamp(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(32u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(4u, ops->key_size);
-    uint32_t idxv[1];
-    uint32_t unused_idxv[1];
+    u32 idxv[1];
+    u32 unused_idxv[1];
     struct flow_entry_meta *meta1;
     struct flow_entry_meta *meta2;
     unsigned unused_n;
@@ -2245,7 +2245,7 @@ static int
 testv_maintain_idx_bulk(const struct test_variant_ops *ops)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
-    const uint64_t expire_tsc = UINT64_C(100000);
+    const u64 expire_tsc = UINT64_C(100000);
     union test_any_table ft;
     void *pool = test_aligned_calloc(2048u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -2253,14 +2253,14 @@ testv_maintain_idx_bulk(const struct test_variant_ops *ops)
     void *keys = calloc(2048u, ops->key_size);
     unsigned *bucket_of_idx = NULL;
     unsigned *bucket_counts = NULL;
-    uint32_t expired_idxv[16];
-    uint32_t hit_idxv[1];
+    u32 expired_idxv[16];
+    u32 hit_idxv[1];
     unsigned target_bk = UINT_MAX;
     unsigned nb_bk;
     unsigned inserted = 0u;
     unsigned old_count = 0u;
-    uint32_t old_idxv[16];
-    uint8_t seen_old[129];
+    u32 old_idxv[16];
+    u8 seen_old[129];
     unsigned evicted;
 
     printf("[T] %s table maintain_idx_bulk\n", ops->name);
@@ -2329,7 +2329,7 @@ testv_maintain_idx_bulk(const struct test_variant_ops *ops)
     if (evicted != old_count)
         FAIL("maintain_idx_bulk evicted count mismatch");
     for (unsigned i = 0u; i < evicted; i++) {
-        uint32_t idx = expired_idxv[i];
+        u32 idx = expired_idxv[i];
 
         if (idx == 0u || idx > inserted)
             FAIL("maintain_idx_bulk expired idx invalid");
@@ -2414,7 +2414,7 @@ testv_maintain_idx_bulk(const struct test_variant_ops *ops)
     if (evicted != old_count)
         FAIL("maintain_idx_bulk (filtered) evicted count mismatch");
     for (unsigned i = 0u; i < evicted; i++) {
-        uint32_t idx = expired_idxv[i];
+        u32 idx = expired_idxv[i];
 
         if (idx == 0u || idx > inserted)
             FAIL("maintain_idx_bulk (filtered) expired idx invalid");
@@ -2449,7 +2449,7 @@ testv_manual_grow_preserves_entries(const struct test_variant_ops *ops)
     void *pool = test_aligned_calloc(4096u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     union test_any_key key;
-    uint32_t idxs[256];
+    u32 idxs[256];
 
     printf("[T] %s table grow_2x preserves entries\n", ops->name);
     if (pool == NULL)
@@ -2556,7 +2556,7 @@ testv_fuzz(const struct test_variant_ops *ops,
     union test_any_table ft;
     void *pool = test_aligned_calloc(n + 1u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
-    uint8_t *in_table = calloc(n, 1u);
+    u8 *in_table = calloc(n, 1u);
     unsigned in_count = 0u;
     union test_any_key key;
 
@@ -2568,11 +2568,11 @@ testv_fuzz(const struct test_variant_ops *ops,
         FAIL("init failed");
 
     for (unsigned op = 0; op < ops_n; op++) {
-        uint32_t ret;
+        u32 ret;
         seed = seed * 1103515245u + 12345u;
         unsigned idx0 = (seed >> 16) % n;
         unsigned action = (seed >> 8) & 3u;
-        uint32_t entry_idx = idx0 + 1u;
+        u32 entry_idx = idx0 + 1u;
 
         ops->make_key(&key, idx0 + 50000u);
         switch (action) {

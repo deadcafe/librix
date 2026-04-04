@@ -51,21 +51,21 @@ struct FCB_FN(ctx) {
 };
 
 struct FCB_FN(stats_delta) {
-    uint64_t lookups;
-    uint64_t hits;
-    uint64_t misses;
-    uint64_t fills;
-    uint64_t fill_full;
-    uint64_t relief_calls;
-    uint64_t relief_bucket_checks;
-    uint64_t relief_evictions;
-    uint64_t relief_bk0_evictions;
-    uint64_t relief_bk1_evictions;
-    uint64_t oldest_reclaim_calls;
-    uint64_t oldest_reclaim_evictions;
-    uint64_t maint_calls;
-    uint64_t maint_bucket_checks;
-    uint64_t maint_evictions;
+    u64 lookups;
+    u64 hits;
+    u64 misses;
+    u64 fills;
+    u64 fill_full;
+    u64 relief_calls;
+    u64 relief_bucket_checks;
+    u64 relief_evictions;
+    u64 relief_bk0_evictions;
+    u64 relief_bk1_evictions;
+    u64 oldest_reclaim_calls;
+    u64 oldest_reclaim_evictions;
+    u64 maint_calls;
+    u64 maint_bucket_checks;
+    u64 maint_evictions;
 };
 
 /*===========================================================================
@@ -73,7 +73,7 @@ struct FCB_FN(stats_delta) {
  *===========================================================================*/
 static void
 FCB_FN(ctx_init)(struct FCB_FN(ctx) *ctx, unsigned nb_bk,
-                  unsigned max_entries, uint64_t timeout_tsc)
+                  unsigned max_entries, u64 timeout_tsc)
 {
     size_t bk_bytes   = (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
     size_t pool_bytes = (size_t)max_entries * sizeof(FCB_RECORD_T);
@@ -169,7 +169,7 @@ FCB_FN(stats_diff)(struct FCB_FN(stats_delta) after,
  *===========================================================================*/
 static unsigned
 FCB_FN(prefill)(struct FCB_FN(ctx) *ctx, const FCB_KEY_T *keys,
-                 unsigned n, uint64_t now)
+                 unsigned n, u64 now)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)FCB_QUERY * sizeof(*results));
     unsigned offset = 0u;
@@ -215,12 +215,12 @@ FCB_FN(bench_hit)(struct FCB_FN(ctx) *ctx,
                   const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
-    uint64_t t0, t1;
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 t0, t1;
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
-        uint64_t now = (uint64_t)r + 100u;
+        u64 now = (u64)r + 100u;
 
         FCB_FN(ctx_reset)(ctx);
         (void)FCB_FN(prefill)(ctx, prefill_keys, prefill_n, now);
@@ -250,12 +250,12 @@ FCB_FN(bench_find_hit)(struct FCB_FN(ctx) *ctx,
                        const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
-    uint64_t t0, t1;
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 t0, t1;
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
-        uint64_t now = (uint64_t)r + 100u;
+        u64 now = (u64)r + 100u;
 
         FCB_FN(ctx_reset)(ctx);
         (void)FCB_FN(prefill)(ctx, prefill_keys, prefill_n, now);
@@ -283,12 +283,12 @@ FCB_FN(bench_add_only)(struct FCB_FN(ctx) *ctx,
                        const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
-        uint64_t now = (uint64_t)r + 1000u;
-        uint64_t t0, t1;
+        u64 now = (u64)r + 1000u;
+        u64 t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
         if (bg_n != 0u)
@@ -317,12 +317,12 @@ FCB_FN(bench_add_del)(struct FCB_FN(ctx) *ctx,
                       const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
-        uint64_t now = (uint64_t)r + 1000u;
-        uint64_t t0, t1;
+        u64 now = (u64)r + 1000u;
+        u64 t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
         if (bg_n != 0u)
@@ -351,13 +351,13 @@ FCB_FN(bench_del_bulk)(struct FCB_FN(ctx) *ctx,
                        const FCB_KEY_T *bg_keys, unsigned bg_n,
                        const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
-        uint64_t now = (uint64_t)r + 1000u;
-        uint64_t t0, t1;
+        u64 now = (u64)r + 1000u;
+        u64 t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
         if (bg_n != 0u)
@@ -387,12 +387,12 @@ FCB_FN(bench_miss_fill)(struct FCB_FN(ctx) *ctx,
                         const FCB_KEY_T *keys, unsigned n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)n * sizeof(*results));
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_keys = keys + ((size_t)r * n);
-        uint64_t now = (uint64_t)r + 1000u;
-        uint64_t t0, t1;
+        u64 now = (u64)r + 1000u;
+        u64 t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
         if (bg_n != 0u)
@@ -430,7 +430,7 @@ FCB_FN(bench_mixed)(struct FCB_FN(ctx) *ctx,
                     unsigned hit_n, unsigned repeat)
 {
     FCB_RESULT_T *results = fcb_alloc((size_t)query_n * sizeof(*results));
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     assert(hit_n <= query_n);   /* checked at -O0; suppresses unused-param */
     assert(hit_n <= prefill_n);
@@ -438,8 +438,8 @@ FCB_FN(bench_mixed)(struct FCB_FN(ctx) *ctx,
 
     for (unsigned r = 0; r < repeat; r++) {
         const FCB_KEY_T *round_query = query_keys + ((size_t)r * query_n);
-        uint64_t now = (uint64_t)r + 5000u;
-        uint64_t t0, t1;
+        u64 now = (u64)r + 5000u;
+        u64 t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
         (void)FCB_FN(prefill)(ctx, prefill_keys, prefill_n, now);
@@ -478,11 +478,11 @@ FCB_FN(findadd_closed_summary)(unsigned desired_entries, unsigned nb_bk,
     struct fcb_run_summary out;
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
-    unsigned fill_n = (unsigned)(((uint64_t)total_slots * fill_pct) / 100u);
+    unsigned fill_n = (unsigned)(((u64)total_slots * fill_pct) / 100u);
     unsigned miss_n_max = FCB_QUERY - ((FCB_QUERY * hit_pct) / 100u);
     unsigned active;
-    uint64_t now = 1u;
-    uint64_t t0, t1;
+    u64 now = 1u;
+    u64 t0, t1;
     unsigned hit_accum = 0u;
 
     memset(&out, 0, sizeof(out));
@@ -491,7 +491,7 @@ FCB_FN(findadd_closed_summary)(unsigned desired_entries, unsigned nb_bk,
         rounds = 1u;
     if (fill_n > max_entries)
         fill_n = max_entries;
-    if ((uint64_t)fill_n + (uint64_t)miss_n_max > (uint64_t)max_entries) {
+    if ((u64)fill_n + (u64)miss_n_max > (u64)max_entries) {
         fprintf(stderr,
                 "findadd_closed requires headroom: fill=%u plus miss=%u exceeds pool=%u\n",
                 fill_n, miss_n_max, max_entries);
@@ -604,7 +604,7 @@ FCB_FN(findadd_closed_stream_summary)(unsigned desired_entries, unsigned nb_bk,
     struct FCB_FN(ctx) ctx;
     FCB_KEY_T *prefill_keys;
     FCB_KEY_T *stream_keys;
-    uint8_t *stream_is_hit;
+    u8 *stream_is_hit;
     FCB_KEY_T *query;
     FCB_KEY_T *miss_keys;
     FCB_RESULT_T *results;
@@ -612,11 +612,11 @@ FCB_FN(findadd_closed_stream_summary)(unsigned desired_entries, unsigned nb_bk,
     struct fcb_run_summary out;
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
-    unsigned fill_n = (unsigned)(((uint64_t)total_slots * fill_pct) / 100u);
+    unsigned fill_n = (unsigned)(((u64)total_slots * fill_pct) / 100u);
     unsigned miss_n_max = FCB_QUERY;
     unsigned active;
-    uint64_t now = 1u;
-    uint64_t t0, t1;
+    u64 now = 1u;
+    u64 t0, t1;
     unsigned hit_accum = 0u;
 
     memset(&out, 0, sizeof(out));
@@ -625,7 +625,7 @@ FCB_FN(findadd_closed_stream_summary)(unsigned desired_entries, unsigned nb_bk,
         total_keys = 1u;
     if (fill_n > max_entries)
         fill_n = max_entries;
-    if ((uint64_t)fill_n + (uint64_t)miss_n_max > (uint64_t)max_entries) {
+    if ((u64)fill_n + (u64)miss_n_max > (u64)max_entries) {
         fprintf(stderr,
                 "findadd_closed_stream requires headroom: fill=%u plus miss=%u exceeds pool=%u\n",
                 fill_n, miss_n_max, max_entries);
@@ -652,7 +652,7 @@ FCB_FN(findadd_closed_stream_summary)(unsigned desired_entries, unsigned nb_bk,
             hit_accum -= 100u;
             is_hit = 1u;
         }
-        stream_is_hit[i] = (uint8_t)is_hit;
+        stream_is_hit[i] = (u8)is_hit;
         if (is_hit)
             stream_keys[i] = prefill_keys[(i * 17u + 13u) % fill_n];
         else
@@ -759,11 +759,11 @@ FCB_FN(findadd_open_summary)(unsigned desired_entries, unsigned nb_bk,
     struct fcb_run_summary out;
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
-    unsigned start_entries = (unsigned)(((uint64_t)total_slots * start_fill_pct) / 100u);
+    unsigned start_entries = (unsigned)(((u64)total_slots * start_fill_pct) / 100u);
     unsigned rounds;
     unsigned start_active, active, max_seen;
-    uint64_t tsc_hz, tsc_per_key, now;
-    uint64_t total_cycles = 0u;
+    u64 tsc_hz, tsc_per_key, now;
+    u64 total_cycles = 0u;
 
     memset(&out, 0, sizeof(out));
 
@@ -773,7 +773,7 @@ FCB_FN(findadd_open_summary)(unsigned desired_entries, unsigned nb_bk,
     if (tsc_hz == 0u) tsc_hz = UINT64_C(2500000000);
     tsc_per_key = tsc_hz / keys_per_sec;
     if (tsc_per_key == 0u) tsc_per_key = 1u;
-    rounds = (unsigned)(((uint64_t)keys_per_sec * (uint64_t)timeout_ms / 1000u
+    rounds = (unsigned)(((u64)keys_per_sec * (u64)timeout_ms / 1000u
                          + FCB_QUERY - 1u) / FCB_QUERY);
     if (rounds == 0u)
         rounds = 1u;
@@ -800,7 +800,7 @@ FCB_FN(findadd_open_summary)(unsigned desired_entries, unsigned nb_bk,
     for (unsigned round = 0; round < rounds; round++) {
         unsigned hit_n = (FCB_QUERY * hit_pct) / 100u;
         unsigned miss_base = 50000000u + round * FCB_QUERY;
-        uint64_t t0, t1;
+        u64 t0, t1;
 
         now += tsc_per_key * FCB_QUERY;
         for (unsigned i = 0; i < FCB_QUERY; i++) {
@@ -880,18 +880,18 @@ FCB_FN(findadd_window_summary)(unsigned desired_entries, unsigned nb_bk,
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
     unsigned start_fill_pct = (low_fill_pct + high_fill_pct) / 2u;
-    unsigned start_entries = (unsigned)(((uint64_t)total_slots * start_fill_pct) / 100u);
+    unsigned start_entries = (unsigned)(((u64)total_slots * start_fill_pct) / 100u);
     unsigned rounds;
     unsigned warmup_rounds;
     unsigned hit_n;
     unsigned maint_cursor = 0u;
     unsigned active, min_seen, max_seen;
     unsigned over_high_rounds = 0u;
-    uint64_t fill_sum = 0u;
-    uint64_t tsc_hz, tsc_per_key, now;
-    uint64_t total_cycles = 0u;
-    uint64_t maint_calls_sum = 0u;
-    uint64_t maint_evictions_sum = 0u;
+    u64 fill_sum = 0u;
+    u64 tsc_hz, tsc_per_key, now;
+    u64 total_cycles = 0u;
+    u64 maint_calls_sum = 0u;
+    u64 maint_evictions_sum = 0u;
 
     memset(&out, 0, sizeof(out));
 
@@ -905,11 +905,11 @@ FCB_FN(findadd_window_summary)(unsigned desired_entries, unsigned nb_bk,
     if (tsc_hz == 0u) tsc_hz = UINT64_C(2500000000);
     tsc_per_key = tsc_hz / keys_per_sec;
     if (tsc_per_key == 0u) tsc_per_key = 1u;
-    rounds = (unsigned)(((uint64_t)keys_per_sec * (uint64_t)duration_ms / 1000u
+    rounds = (unsigned)(((u64)keys_per_sec * (u64)duration_ms / 1000u
                          + FCB_QUERY - 1u) / FCB_QUERY);
     if (rounds == 0u)
         rounds = 1u;
-    warmup_rounds = (unsigned)(((uint64_t)keys_per_sec * (uint64_t)ttl_ms / 1000u
+    warmup_rounds = (unsigned)(((u64)keys_per_sec * (u64)ttl_ms / 1000u
                                 + FCB_QUERY - 1u) / FCB_QUERY);
     if (warmup_rounds == 0u)
         warmup_rounds = 1u;
@@ -979,7 +979,7 @@ FCB_FN(findadd_window_summary)(unsigned desired_entries, unsigned nb_bk,
 
     for (unsigned round = 0; round < rounds; round++) {
         unsigned miss_base = 90000000u + (warmup_rounds + round) * FCB_QUERY;
-        uint64_t t0, t1;
+        u64 t0, t1;
 
         now += tsc_per_key * FCB_QUERY;
         for (unsigned i = 0; i < FCB_QUERY; i++) {
@@ -1041,7 +1041,7 @@ FCB_FN(findadd_window_summary)(unsigned desired_entries, unsigned nb_bk,
     out.maint_calls = maint_calls_sum;
     out.maint_evictions = maint_evictions_sum;
     out.fill_avg_pct =
-        100.0 * (double)fill_sum / (double)((uint64_t)(rounds + 1u) * total_slots);
+        100.0 * (double)fill_sum / (double)((u64)(rounds + 1u) * total_slots);
     out.fill_min_pct = 100.0 * (double)min_seen / (double)total_slots;
     out.fill_max_pct = 100.0 * (double)max_seen / (double)total_slots;
     out.over_high_rounds = over_high_rounds;
@@ -1099,15 +1099,15 @@ FCB_FN(trace_open_custom)(unsigned desired_entries, unsigned nb_bk,
     struct FCB_FN(stats_delta) before;
     unsigned max_entries = fcb_pool_count(desired_entries);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
-    unsigned start_entries = (unsigned)(((uint64_t)total_slots * start_fill_pct) / 100u);
+    unsigned start_entries = (unsigned)(((u64)total_slots * start_fill_pct) / 100u);
     unsigned rounds, report_rounds;
     unsigned hit_n;
     unsigned maint_cursor = 0u;
     unsigned active, max_seen;
-    uint64_t tsc_hz, tsc_per_key, now;
-    uint64_t total_cycles = 0u;
-    uint64_t maint_calls_sum = 0u;
-    uint64_t maint_evictions_sum = 0u;
+    u64 tsc_hz, tsc_per_key, now;
+    u64 total_cycles = 0u;
+    u64 maint_calls_sum = 0u;
+    u64 maint_evictions_sum = 0u;
 
     if (start_entries > max_entries)
         start_entries = max_entries;
@@ -1115,11 +1115,11 @@ FCB_FN(trace_open_custom)(unsigned desired_entries, unsigned nb_bk,
     if (tsc_hz == 0u) tsc_hz = UINT64_C(2500000000);
     tsc_per_key = tsc_hz / keys_per_sec;
     if (tsc_per_key == 0u) tsc_per_key = 1u;
-    rounds = (unsigned)(((uint64_t)keys_per_sec * ((uint64_t)timeout_ms / 1000u)
+    rounds = (unsigned)(((u64)keys_per_sec * ((u64)timeout_ms / 1000u)
                          + FCB_QUERY - 1u) / FCB_QUERY);
     if (rounds < 1u) rounds = 1u;
     rounds *= soak_mul;
-    report_rounds = (unsigned)(((uint64_t)keys_per_sec * ((uint64_t)report_ms / 1000u)
+    report_rounds = (unsigned)(((u64)keys_per_sec * ((u64)report_ms / 1000u)
                                 + FCB_QUERY - 1u) / FCB_QUERY);
     if (report_rounds == 0u) report_rounds = 1u;
 
@@ -1156,7 +1156,7 @@ FCB_FN(trace_open_custom)(unsigned desired_entries, unsigned nb_bk,
         unsigned miss_base = 80000000u + round * FCB_QUERY;
         unsigned fill_pct;
         unsigned kicks;
-        uint64_t t0, t1;
+        u64 t0, t1;
 
         now += tsc_per_key * FCB_QUERY;
         for (unsigned i = 0; i < FCB_QUERY; i++) {
@@ -1243,12 +1243,12 @@ FCB_FN(bench_maint_step)(struct FCB_FN(ctx) *ctx,
                           const FCB_KEY_T *fill_keys, unsigned fill_n,
                           unsigned repeat)
 {
-    uint64_t *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
+    u64 *samples = fcb_alloc((size_t)repeat * sizeof(*samples));
 
     for (unsigned r = 0; r < repeat; r++) {
-        uint64_t fill_ts = (uint64_t)r * 10000u + 1u;
-        uint64_t expire_ts = fill_ts + ctx->fc.timeout_tsc + 1u;
-        uint64_t t0, t1;
+        u64 fill_ts = (u64)r * 10000u + 1u;
+        u64 expire_ts = fill_ts + ctx->fc.timeout_tsc + 1u;
+        u64 t0, t1;
 
         FCB_FN(ctx_reset)(ctx);
         (void)FCB_FN(prefill)(ctx, fill_keys, fill_n, fill_ts);
@@ -1281,7 +1281,7 @@ FCB_FN(bench_maintain_step_report)(unsigned desired, unsigned nb_bk)
         keys[i] = FCB_MAKE_KEY(i);
 
     for (unsigned p = 0; p < sizeof(fill_pcts) / sizeof(fill_pcts[0]); p++) {
-        unsigned fill_n = (unsigned)(((uint64_t)total_slots * fill_pcts[p]) / 100u);
+        unsigned fill_n = (unsigned)(((u64)total_slots * fill_pcts[p]) / 100u);
         double cy;
 
         if (fill_n > max_entries) fill_n = max_entries;
@@ -1310,7 +1310,7 @@ FCB_FN(bench_maint_step_partial)(unsigned desired, unsigned nb_bk,
 {
     unsigned max_entries = fcb_pool_count(desired);
     unsigned total_slots = nb_bk * RIX_HASH_BUCKET_ENTRY_SZ;
-    unsigned fill_n = (unsigned)(((uint64_t)total_slots * fill_pct) / 100u);
+    unsigned fill_n = (unsigned)(((u64)total_slots * fill_pct) / 100u);
     FCB_KEY_T *keys;
     enum { REPEAT = 20u };
 
@@ -1323,7 +1323,7 @@ FCB_FN(bench_maint_step_partial)(unsigned desired, unsigned nb_bk,
     for (unsigned s = 0; s < n_steps; s++) {
         unsigned step = step_bks[s];
         unsigned calls_per_sweep = (nb_bk + step - 1u) / step;
-        uint64_t *samples = fcb_alloc((size_t)REPEAT * sizeof(*samples));
+        u64 *samples = fcb_alloc((size_t)REPEAT * sizeof(*samples));
         struct FCB_FN(ctx) ctx;
         FCB_CONFIG_T cfg;
 
@@ -1335,17 +1335,17 @@ FCB_FN(bench_maint_step_partial)(unsigned desired, unsigned nb_bk,
         FCB_FN(ctx_init_cfg)(&ctx, nb_bk, max_entries, &cfg);
 
         for (unsigned r = 0; r < REPEAT; r++) {
-            uint64_t fill_ts = (uint64_t)r * 10000u + 1u;
-            uint64_t expire_ts = fill_ts + ctx.fc.timeout_tsc + 1u;
-            uint64_t sample_total = 0u;
+            u64 fill_ts = (u64)r * 10000u + 1u;
+            u64 expire_ts = fill_ts + ctx.fc.timeout_tsc + 1u;
+            u64 sample_total = 0u;
 
             FCB_FN(ctx_reset)(&ctx);
             (void)FCB_FN(prefill)(&ctx, keys, fill_n, fill_ts);
 
             for (unsigned c = 0; c < calls_per_sweep; c++) {
-                uint64_t t0 = fcb_rdtsc();
+                u64 t0 = fcb_rdtsc();
                 (void)FCB_API(maintain_step)(&ctx.fc, expire_ts, 0);
-                uint64_t t1 = fcb_rdtsc();
+                u64 t1 = fcb_rdtsc();
                 sample_total += t1 - t0;
             }
             samples[r] = sample_total;

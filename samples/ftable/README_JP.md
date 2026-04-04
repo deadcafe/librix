@@ -367,7 +367,7 @@ struct my_flow4_record {
     unsigned char body[128];
 };
 
-uint32_t idx = 17;
+u32 idx = 17;
 
 records[idx - 1].entry.key = key;
 ft_flow4_table_add_idx(&ft, idx);

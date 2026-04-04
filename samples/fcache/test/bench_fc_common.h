@@ -46,11 +46,11 @@ extern unsigned fcb_findadd_api_mode;
 struct fcb_run_summary {
     double cycles_per_key;
     double hit_pct;
-    uint64_t misses;
-    uint64_t relief_evictions;
-    uint64_t oldest_reclaim_evictions;
-    uint64_t maint_calls;
-    uint64_t maint_evictions;
+    u64 misses;
+    u64 relief_evictions;
+    u64 oldest_reclaim_evictions;
+    u64 maint_calls;
+    u64 maint_evictions;
     double fill_start_pct;
     double fill_end_pct;
     double fill_avg_pct;
@@ -63,25 +63,25 @@ struct fcb_run_summary {
 /*===========================================================================
  * TSC helpers (no v1 dependency)
  *===========================================================================*/
-static inline uint64_t
+static inline u64
 fcb_rdtsc(void)
 {
 #if defined(__x86_64__)
-    uint32_t lo, hi;
+    u32 lo, hi;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((uint64_t)hi << 32) | lo;
+    return ((u64)hi << 32) | lo;
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+    return (u64)ts.tv_sec * 1000000000u + (u64)ts.tv_nsec;
 #endif
 }
 
-static inline uint64_t
+static inline u64
 fcb_calibrate_tsc_hz(void)
 {
     struct timespec t0, t1;
-    uint64_t tsc0, tsc1, ns;
+    u64 tsc0, tsc1, ns;
     struct timespec req = { .tv_nsec = 1000000 }; /* 1 ms */
 
     clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -90,8 +90,8 @@ fcb_calibrate_tsc_hz(void)
     tsc1 = fcb_rdtsc();
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
-    ns = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000000u
-                + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
+    ns = (u64)(t1.tv_sec - t0.tv_sec) * 1000000000u
+                + (u64)(t1.tv_nsec - t0.tv_nsec);
     return ns ? (tsc1 - tsc0) * 1000000000ULL / ns : 0;
 }
 
@@ -158,8 +158,8 @@ fcb_alloc(size_t size)
 static inline void
 fcb_cold_touch(void)
 {
-    static uint8_t *trash;
-    static volatile uint64_t sink;
+    static u8 *trash;
+    static volatile u64 sink;
 
     if (trash == NULL)
         trash = fcb_alloc(FCB_COLD_TOUCH_BYTES);
@@ -184,13 +184,13 @@ fcb_emit3(const char *label, double v0, double v1, double v2)
 static inline int
 fcb_cmp_u64(const void *a, const void *b)
 {
-    uint64_t av = *(const uint64_t *)a;
-    uint64_t bv = *(const uint64_t *)b;
+    u64 av = *(const u64 *)a;
+    u64 bv = *(const u64 *)b;
     return (av > bv) - (av < bv);
 }
 
 static inline double
-fcb_median_u64(uint64_t *samples, unsigned n)
+fcb_median_u64(u64 *samples, unsigned n)
 {
     if (n == 0u)
         return 0.0;

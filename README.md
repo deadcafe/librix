@@ -46,8 +46,8 @@ giving up performance.
 - [Cuckoo hash tables](#cuckoo-hash-tables)
   - [Variant comparison](#variant-comparison)
   - [RIX_HASH (fingerprint, variable-length key)](#rix_hash-fingerprint-variable-length-key)
-  - [RIX_HASH32 (uint32_t key)](#rix_hash32-uint32_t-key)
-  - [RIX_HASH64 (uint64_t key)](#rix_hash64-uint64_t-key)
+  - [RIX_HASH32 (u32 key)](#rix_hash32-u32-key)
+  - [RIX_HASH64 (u64 key)](#rix_hash64-u64-key)
   - [Hash table test coverage matrix](#hash-table-test-coverage-matrix)
 - [Samples](#samples)
 - [Build](#build)
@@ -103,9 +103,9 @@ include/
     rix_hash_slot.h    cuckoo hash -- slot variant (hash_field + slot_field)
     rix_hash_keyonly.h cuckoo hash -- key-only variant (no auxiliary fields)
     rix_hash.h      cuckoo hash umbrella (includes fp, slot, keyonly, hash32, hash64)
-    rix_hash32.h    cuckoo hash -- uint32_t key variant
-    rix_hash64.h    cuckoo hash -- uint64_t key variant
-    rix_hash_key.h  cuckoo hash -- uint32_t and uint64_t variants combined
+    rix_hash32.h    cuckoo hash -- u32 key variant
+    rix_hash64.h    cuckoo hash -- u64 key variant
+    rix_hash_key.h  cuckoo hash -- u32 and u64 variants combined
 samples/              flow cache sample application (see samples/README.md)
 ```
 
@@ -426,8 +426,8 @@ Five header-only, index-based cuckoo hash variants.  All share:
 | fp      | `rix_hash_fp.h`      | fingerprint in bucket, full key in node | `hash_field`                | 128 B (2 CL) | Variable-length keys, general purpose |
 | slot    | `rix_hash_slot.h`    | fingerprint in bucket, full key in node | `hash_field` + `slot_field` | 128 B (2 CL) | Variable-length keys, fastest remove |
 | keyonly | `rix_hash_keyonly.h` | fingerprint in bucket, full key in node | (none)                      | 128 B (2 CL) | Variable-length keys, smallest node |
-| hash32  | `rix_hash32.h`       | `uint32_t` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
-| hash64  | `rix_hash64.h`       | `uint64_t` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
+| hash32  | `rix_hash32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
+| hash64  | `rix_hash64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
 
 All fp/slot/keyonly variants share the same bucket layout and staged-find pipeline.
 `rix_hash.h` is the umbrella header that includes all five variants.
@@ -505,9 +505,9 @@ integer `slot_field`.
 /* 1. typedef required -- macro uses the bare identifier */
 typedef struct mynode mynode;
 struct mynode {
-    uint8_t  key[16];    /* variable-length key field */
-    uint32_t cur_hash;   /* current-bucket hash (any name) */
-    uint32_t value;
+    u8  key[16];    /* variable-length key field */
+    u32 cur_hash;   /* current-bucket hash (any name) */
+    u32 value;
 };
 
 /* 2. Declare head and generate the API */
@@ -520,10 +520,10 @@ RIX_HASH_GENERATE(myht, mynode, key, cur_hash, my_cmp_fn)
 
 typedef struct mynode_slot mynode_slot;
 struct mynode_slot {
-    uint8_t  key[16];
-    uint32_t cur_hash;
-    uint16_t slot;
-    uint16_t value;
+    u8  key[16];
+    u32 cur_hash;
+    u16 slot;
+    u16 value;
 };
 
 RIX_HASH_HEAD(myht_slot);
@@ -591,7 +591,7 @@ Bulk variants: `_key1` / `_key2` / `_key4` / `_key8` (suffix = count).
 | `static` linkage + slot-aware remove + custom hash | `RIX_HASH_GENERATE_STATIC_SLOT_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn)` |
 
 `cmp_fn` signature: `int cmp_fn(const type *a, const type *b)` -- returns 0 if equal.
-`hash_fn` signature: `union rix_hash_hash_u hash_fn(const key_type *key, uint32_t mask)`.
+`hash_fn` signature: `union rix_hash_hash_u hash_fn(const key_type *key, u32 mask)`.
 `slot_field` may be any caller-defined integer type that can represent
 `[0, RIX_HASH_BUCKET_ENTRY_SZ - 1]`.
 
@@ -605,7 +605,7 @@ non-SLOT variants.
 
 ---
 
-### RIX_HASH32 (uint32_t key)
+### RIX_HASH32 (u32 key)
 
 No `hash_field` required in the node struct.  The key itself is stored in the
 bucket, so `scan_bk` performs exact 32-bit comparison.
@@ -615,8 +615,8 @@ bucket, so `scan_bk` performs exact 32-bit comparison.
 
 typedef struct entry32 entry32;
 struct entry32 {
-    uint32_t key;    /* key field -- any name */
-    uint32_t value;
+    u32 key;    /* key field -- any name */
+    u32 value;
 };
 
 RIX_HASH32_HEAD(ht32);
@@ -643,7 +643,7 @@ int      ht32_walk  (&head, buckets, pool, cb, arg);
 
 /* Pipelined find (same stage pattern as rix_hash) */
 struct rix_hash32_find_ctx_s ctx[4];
-uint32_t keys[4] = { k0, k1, k2, k3 };
+u32 keys[4] = { k0, k1, k2, k3 };
 entry32 *results[4];
 
 ht32_hash_key4(ctx, &head, buckets, keys);
@@ -653,9 +653,9 @@ ht32_cmp_key4 (ctx, pool, results);
 
 ---
 
-### RIX_HASH64 (uint64_t key)
+### RIX_HASH64 (u64 key)
 
-Same interface as RIX_HASH32 with `uint64_t` keys.  Bucket is 192 B (3 cache lines)
+Same interface as RIX_HASH32 with `u64` keys.  Bucket is 192 B (3 cache lines)
 instead of 128 B.
 
 ```c
@@ -663,8 +663,8 @@ instead of 128 B.
 
 typedef struct entry64 entry64;
 struct entry64 {
-    uint64_t key;
-    uint32_t value;
+    u64 key;
+    u32 value;
 };
 
 RIX_HASH64_HEAD(ht64);
@@ -753,7 +753,7 @@ Typical shape:
 ```c
 struct my_flow_rec {
     struct fc_flow4_entry entry;   /* or place it later with entry_offset */
-    uint8_t body[];
+    u8 body[];
 };
 ```
 

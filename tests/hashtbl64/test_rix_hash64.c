@@ -23,8 +23,8 @@
 /* Node definition                                                     */
 /* ================================================================== */
 typedef struct mynode_s {
-    uint64_t key;
-    uint64_t val;
+    u64 key;
+    u64 val;
 } mynode_t;
 
 #define INVALID_KEY  0xFFFFFFFFFFFFFFFFULL
@@ -49,7 +49,7 @@ basic_init(void)
     memset(g_bk,    0, sizeof(g_bk));
     RIX_HASH64_INIT(myht64, &g_head, g_bk, NB_BK_BASIC);
     for (unsigned i = 0; i < NB_BASIC; i++) {
-        g_basic[i].key = (uint64_t)(i + 1);
+        g_basic[i].key = (u64)(i + 1);
         g_basic[i].val = i;
     }
 }
@@ -153,7 +153,7 @@ test_staged_find(void)
     /* x2 staged */
     {
         struct rix_hash64_find_ctx_s ctx2[2];
-        uint64_t keys2[2] = { g_basic[0].key, g_basic[1].key };
+        u64 keys2[2] = { g_basic[0].key, g_basic[1].key };
         mynode_t *res2[2];
         RIX_HASH64_HASH_KEY_N(myht64, ctx2, 2, &g_head, g_bk, keys2);
         RIX_HASH64_SCAN_BK_N (myht64, ctx2, 2, &g_head, g_bk);
@@ -166,7 +166,7 @@ test_staged_find(void)
     /* x4 staged */
     {
         struct rix_hash64_find_ctx_s ctx4[4];
-        uint64_t keys4[4] = {
+        u64 keys4[4] = {
             g_basic[4].key, g_basic[5].key, g_basic[6].key, g_basic[7].key
         };
         mynode_t *res4[4];
@@ -248,8 +248,8 @@ test_max_fill(void)
     if (!mf_nodes || !mf_bk) { perror("alloc"); abort(); }
 
     for (unsigned i = 0; i < MF_N; i++) {
-        mf_nodes[i].key = (uint64_t)(i + 1);
-        mf_nodes[i].val = (uint64_t)i;
+        mf_nodes[i].key = (u64)(i + 1);
+        mf_nodes[i].val = (u64)i;
     }
 
     struct myht64 mf_head;
@@ -296,12 +296,12 @@ test_fuzz(unsigned seed, unsigned N, unsigned nb_bk, unsigned ops)
     struct myht64 head;
     RIX_HASH64_INIT(myht64, &head, buckets, nb_bk);
     for (unsigned i = 0; i < N; i++) {
-        nodes[i].key = (uint64_t)(i + 1);
+        nodes[i].key = (u64)(i + 1);
         nodes[i].val = i;
     }
 
     /* Simple LCG */
-    uint64_t rng = seed;
+    u64 rng = seed;
     for (unsigned op = 0; op < ops; op++) {
         rng = rng * 6364136223846793005ULL + 1442695040888963407ULL;
         unsigned idx = (unsigned)((rng >> 33) % N);
@@ -352,8 +352,8 @@ test_high_fill(void)
     if (!hf_nodes || !hf_bk) { perror("alloc"); abort(); }
 
     for (unsigned i = 0; i < HF_N; i++) {
-        hf_nodes[i].key = (uint64_t)(i + 1);
-        hf_nodes[i].val = (uint64_t)(i * 3);
+        hf_nodes[i].key = (u64)(i + 1);
+        hf_nodes[i].val = (u64)(i * 3);
     }
 
     struct myht64 hf_head;
@@ -420,8 +420,8 @@ test_kickout_safety(void)
     if (!kc_nodes || !kc_bk) { perror("alloc"); abort(); }
 
     for (unsigned i = 0; i < KC_N; i++) {
-        kc_nodes[i].key = (uint64_t)(i + 1);
-        kc_nodes[i].val = (uint64_t)i;
+        kc_nodes[i].key = (u64)(i + 1);
+        kc_nodes[i].val = (u64)i;
     }
 
     struct myht64 kc_head;

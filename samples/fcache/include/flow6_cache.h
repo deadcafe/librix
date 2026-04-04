@@ -23,9 +23,9 @@
 #endif
 
 static inline struct flow6_key
-fc_flow6_key_make(const uint8_t *src_ip, const uint8_t *dst_ip,
-                  uint16_t src_port, uint16_t dst_port,
-                  uint8_t proto, uint32_t vrfid)
+fc_flow6_key_make(const u8 *src_ip, const u8 *dst_ip,
+                  u16 src_port, u16 dst_port,
+                  u8 proto, u32 vrfid)
 {
     struct flow6_key k;
 
@@ -41,7 +41,7 @@ fc_flow6_key_make(const uint8_t *src_ip, const uint8_t *dst_ip,
 }
 
 struct fc_flow6_result {
-    uint32_t entry_idx; /* 1-origin; 0 = miss / full */
+    u32 entry_idx; /* 1-origin; 0 = miss / full */
 };
 
 struct fc_flow6_entry {
@@ -56,32 +56,32 @@ RIX_HASH_HEAD(fc_flow6_ht);
 RIX_SLIST_HEAD(fc_flow6_free_head, fc_flow6_entry);
 
 struct fc_flow6_config {
-    uint64_t timeout_tsc;
+    u64 timeout_tsc;
     unsigned ts_shift;
     unsigned pressure_empty_slots;
-    uint64_t maint_interval_tsc;
+    u64 maint_interval_tsc;
     unsigned maint_base_bk;
     unsigned maint_fill_threshold;
 };
 
 struct fc_flow6_stats {
-    uint64_t lookups;
-    uint64_t hits;
-    uint64_t misses;
-    uint64_t fills;
-    uint64_t fill_full;
-    uint64_t relief_calls;
-    uint64_t relief_bucket_checks;
-    uint64_t relief_evictions;
-    uint64_t relief_bk0_evictions;
-    uint64_t relief_bk1_evictions;
-    uint64_t oldest_reclaim_calls;
-    uint64_t oldest_reclaim_evictions;
-    uint64_t maint_calls;
-    uint64_t maint_bucket_checks;
-    uint64_t maint_evictions;
-    uint64_t maint_step_calls;
-    uint64_t maint_step_skipped_bks;
+    u64 lookups;
+    u64 hits;
+    u64 misses;
+    u64 fills;
+    u64 fill_full;
+    u64 relief_calls;
+    u64 relief_bucket_checks;
+    u64 relief_evictions;
+    u64 relief_bk0_evictions;
+    u64 relief_bk1_evictions;
+    u64 oldest_reclaim_calls;
+    u64 oldest_reclaim_evictions;
+    u64 maint_calls;
+    u64 maint_bucket_checks;
+    u64 maint_evictions;
+    u64 maint_step_calls;
+    u64 maint_step_skipped_bks;
 };
 
 enum fc_flow6_event {
@@ -95,7 +95,7 @@ enum fc_flow6_event {
 };
 
 typedef void (*fc_flow6_event_cb)(enum fc_flow6_event event,
-                                  uint32_t entry_idx,
+                                  u32 entry_idx,
                                   void *arg);
 
 struct fc_flow6_cache {
@@ -106,13 +106,13 @@ struct fc_flow6_cache {
     size_t                    pool_stride;
     size_t                    pool_entry_offset;
     struct fc_flow6_ht        ht_head;
-    uint64_t                   timeout_tsc;
-    uint64_t                   eff_timeout_tsc;
-    uint64_t                   timeout_min_tsc;
+    u64                   timeout_tsc;
+    u64                   eff_timeout_tsc;
+    u64                   timeout_min_tsc;
     unsigned                   nb_bk;
     unsigned                   max_entries;
     unsigned                   total_slots;
-    uint8_t                    ts_shift;
+    u8                    ts_shift;
     unsigned                   pressure_empty_slots;
     /* --- CL1 --- */
     unsigned                   timeout_lo_entries;
@@ -120,9 +120,9 @@ struct fc_flow6_cache {
     unsigned                   relief_mid_entries;
     unsigned                   relief_hi_entries;
     unsigned                   maint_cursor;
-    uint64_t                   last_maint_tsc;
-    uint64_t                   last_maint_fills;
-    uint64_t                   maint_interval_tsc;
+    u64                   last_maint_tsc;
+    u64                   last_maint_fills;
+    u64                   maint_interval_tsc;
     unsigned                   maint_base_bk;
     unsigned                   maint_fill_threshold;
     unsigned                   last_maint_start_bk;
@@ -169,7 +169,7 @@ void fc_flow6_cache_set_event_cb(struct fc_flow6_cache *fc,
                            sizeof(type), offsetof(type, member), (cfg))
 
 static inline void *
-fc_flow6_cache_record_ptr(struct fc_flow6_cache *fc, uint32_t entry_idx)
+fc_flow6_cache_record_ptr(struct fc_flow6_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -177,7 +177,7 @@ fc_flow6_cache_record_ptr(struct fc_flow6_cache *fc, uint32_t entry_idx)
 }
 
 static inline const void *
-fc_flow6_cache_record_cptr(const struct fc_flow6_cache *fc, uint32_t entry_idx)
+fc_flow6_cache_record_cptr(const struct fc_flow6_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -185,7 +185,7 @@ fc_flow6_cache_record_cptr(const struct fc_flow6_cache *fc, uint32_t entry_idx)
 }
 
 static inline struct fc_flow6_entry *
-fc_flow6_cache_entry_ptr(struct fc_flow6_cache *fc, uint32_t entry_idx)
+fc_flow6_cache_entry_ptr(struct fc_flow6_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -194,7 +194,7 @@ fc_flow6_cache_entry_ptr(struct fc_flow6_cache *fc, uint32_t entry_idx)
 }
 
 static inline const struct fc_flow6_entry *
-fc_flow6_cache_entry_cptr(const struct fc_flow6_cache *fc, uint32_t entry_idx)
+fc_flow6_cache_entry_cptr(const struct fc_flow6_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -253,55 +253,55 @@ unsigned fc_flow6_cache_nb_entries(const struct fc_flow6_cache *fc);
 /* bulk operations */
 void fc_flow6_cache_find_bulk(struct fc_flow6_cache *fc,
                                const struct flow6_key *keys,
-                               unsigned nb_keys, uint64_t now,
+                               unsigned nb_keys, u64 now,
                                struct fc_flow6_result *results);
 void fc_flow6_cache_findadd_bulk(struct fc_flow6_cache *fc,
                                   const struct flow6_key *keys,
-                                  unsigned nb_keys, uint64_t now,
+                                  unsigned nb_keys, u64 now,
                                   struct fc_flow6_result *results);
 void fc_flow6_cache_findadd_burst32(struct fc_flow6_cache *fc,
                                      const struct flow6_key *keys,
-                                     unsigned nb_keys, uint64_t now,
+                                     unsigned nb_keys, u64 now,
                                      struct fc_flow6_result *results);
 void fc_flow6_cache_add_bulk(struct fc_flow6_cache *fc,
                               const struct flow6_key *keys,
-                              unsigned nb_keys, uint64_t now,
+                              unsigned nb_keys, u64 now,
                               struct fc_flow6_result *results);
 void fc_flow6_cache_del_bulk(struct fc_flow6_cache *fc,
                               const struct flow6_key *keys,
                               unsigned nb_keys);
 void fc_flow6_cache_del_idx_bulk(struct fc_flow6_cache *fc,
-                                  const uint32_t *idxs, unsigned nb_idxs);
+                                  const u32 *idxs, unsigned nb_idxs);
 
 /* single-key convenience */
-uint32_t fc_flow6_cache_find(struct fc_flow6_cache *fc,
-                              const struct flow6_key *key, uint64_t now);
-uint32_t fc_flow6_cache_findadd(struct fc_flow6_cache *fc,
-                                 const struct flow6_key *key, uint64_t now);
-uint32_t fc_flow6_cache_add(struct fc_flow6_cache *fc,
-                             const struct flow6_key *key, uint64_t now);
+u32 fc_flow6_cache_find(struct fc_flow6_cache *fc,
+                              const struct flow6_key *key, u64 now);
+u32 fc_flow6_cache_findadd(struct fc_flow6_cache *fc,
+                                 const struct flow6_key *key, u64 now);
+u32 fc_flow6_cache_add(struct fc_flow6_cache *fc,
+                             const struct flow6_key *key, u64 now);
 void fc_flow6_cache_del(struct fc_flow6_cache *fc,
                          const struct flow6_key *key);
-int fc_flow6_cache_del_idx(struct fc_flow6_cache *fc, uint32_t entry_idx);
+int fc_flow6_cache_del_idx(struct fc_flow6_cache *fc, u32 entry_idx);
 
 /* maintenance */
 unsigned fc_flow6_cache_maintain(struct fc_flow6_cache *fc,
                                   unsigned start_bk, unsigned bucket_count,
-                                  uint64_t now);
+                                  u64 now);
 unsigned fc_flow6_cache_maintain_step_ex(struct fc_flow6_cache *fc,
                                           unsigned start_bk,
                                           unsigned bucket_count,
                                           unsigned skip_threshold,
-                                          uint64_t now);
+                                          u64 now);
 unsigned fc_flow6_cache_maintain_step(struct fc_flow6_cache *fc,
-                                       uint64_t now, int idle);
+                                       u64 now, int idle);
 
 /* query */
 void fc_flow6_cache_stats(const struct fc_flow6_cache *fc,
                            struct fc_flow6_stats *out);
 
 int fc_flow6_cache_walk(struct fc_flow6_cache *fc,
-                         int (*cb)(uint32_t entry_idx, void *arg),
+                         int (*cb)(u32 entry_idx, void *arg),
                          void *arg);
 
 #endif /* _FLOW6_CACHE_H_ */

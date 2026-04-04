@@ -21,7 +21,7 @@
 
 extern void fc_flow4_cache_findadd_burst32_gen(struct fc_flow4_cache *fc,
                                                const struct flow4_key *keys,
-                                               unsigned nb_keys, uint64_t now,
+                                               unsigned nb_keys, u64 now,
                                                struct fc_flow4_result *results);
 extern void fc_flow4_cache_init_ex_gen(struct fc_flow4_cache *fc,
                                        struct rix_hash_bucket_s *buckets,
@@ -49,49 +49,49 @@ extern void fc_flowu_cache_init_ex_gen(struct fc_flowu_cache *fc,
                                        const struct fc_flowu_config *cfg);
 extern void fc_flow4_cache_findadd_burst32_sse(struct fc_flow4_cache *fc,
                                                const struct flow4_key *keys,
-                                               unsigned nb_keys, uint64_t now,
+                                               unsigned nb_keys, u64 now,
                                                struct fc_flow4_result *results);
 extern void fc_flow4_cache_findadd_burst32_avx2(struct fc_flow4_cache *fc,
                                                 const struct flow4_key *keys,
-                                                unsigned nb_keys, uint64_t now,
+                                                unsigned nb_keys, u64 now,
                                                 struct fc_flow4_result *results);
 extern void fc_flow4_cache_findadd_burst32_avx512(struct fc_flow4_cache *fc,
                                                   const struct flow4_key *keys,
-                                                  unsigned nb_keys, uint64_t now,
+                                                  unsigned nb_keys, u64 now,
                                                   struct fc_flow4_result *results);
 
 extern void fc_flow6_cache_findadd_burst32_gen(struct fc_flow6_cache *fc,
                                                const struct flow6_key *keys,
-                                               unsigned nb_keys, uint64_t now,
+                                               unsigned nb_keys, u64 now,
                                                struct fc_flow6_result *results);
 extern void fc_flow6_cache_findadd_burst32_sse(struct fc_flow6_cache *fc,
                                                const struct flow6_key *keys,
-                                               unsigned nb_keys, uint64_t now,
+                                               unsigned nb_keys, u64 now,
                                                struct fc_flow6_result *results);
 extern void fc_flow6_cache_findadd_burst32_avx2(struct fc_flow6_cache *fc,
                                                 const struct flow6_key *keys,
-                                                unsigned nb_keys, uint64_t now,
+                                                unsigned nb_keys, u64 now,
                                                 struct fc_flow6_result *results);
 extern void fc_flow6_cache_findadd_burst32_avx512(struct fc_flow6_cache *fc,
                                                   const struct flow6_key *keys,
-                                                  unsigned nb_keys, uint64_t now,
+                                                  unsigned nb_keys, u64 now,
                                                   struct fc_flow6_result *results);
 
 extern void fc_flowu_cache_findadd_burst32_gen(struct fc_flowu_cache *fc,
                                                const struct flowu_key *keys,
-                                               unsigned nb_keys, uint64_t now,
+                                               unsigned nb_keys, u64 now,
                                                struct fc_flowu_result *results);
 extern void fc_flowu_cache_findadd_burst32_sse(struct fc_flowu_cache *fc,
                                                const struct flowu_key *keys,
-                                               unsigned nb_keys, uint64_t now,
+                                               unsigned nb_keys, u64 now,
                                                struct fc_flowu_result *results);
 extern void fc_flowu_cache_findadd_burst32_avx2(struct fc_flowu_cache *fc,
                                                 const struct flowu_key *keys,
-                                                unsigned nb_keys, uint64_t now,
+                                                unsigned nb_keys, u64 now,
                                                 struct fc_flowu_result *results);
 extern void fc_flowu_cache_findadd_burst32_avx512(struct fc_flowu_cache *fc,
                                                   const struct flowu_key *keys,
-                                                  unsigned nb_keys, uint64_t now,
+                                                  unsigned nb_keys, u64 now,
                                                   struct fc_flowu_result *results);
 
 /*===========================================================================
@@ -178,7 +178,7 @@ fc_flow4_cache_stats(const struct fc_flow4_cache *fc,
 
 int
 fc_flow4_cache_walk(struct fc_flow4_cache *fc,
-                     int (*cb)(uint32_t entry_idx, void *arg), void *arg)
+                     int (*cb)(u32 entry_idx, void *arg), void *arg)
 {
     return fc_flow4_ops_gen.walk(fc, cb, arg);
 }
@@ -244,7 +244,7 @@ fc_flow6_cache_stats(const struct fc_flow6_cache *fc,
 
 int
 fc_flow6_cache_walk(struct fc_flow6_cache *fc,
-                     int (*cb)(uint32_t entry_idx, void *arg), void *arg)
+                     int (*cb)(u32 entry_idx, void *arg), void *arg)
 {
     return fc_flow6_ops_gen.walk(fc, cb, arg);
 }
@@ -310,7 +310,7 @@ fc_flowu_cache_stats(const struct fc_flowu_cache *fc,
 
 int
 fc_flowu_cache_walk(struct fc_flowu_cache *fc,
-                     int (*cb)(uint32_t entry_idx, void *arg), void *arg)
+                     int (*cb)(u32 entry_idx, void *arg), void *arg)
 {
     return fc_flowu_ops_gen.walk(fc, cb, arg);
 }
@@ -323,7 +323,7 @@ fc_flowu_cache_walk(struct fc_flowu_cache *fc,
 void
 fc_flow4_cache_find_bulk(struct fc_flow4_cache *fc,
                           const struct flow4_key *keys,
-                          unsigned nb_keys, uint64_t now,
+                          unsigned nb_keys, u64 now,
                           struct fc_flow4_result *results)
 {
     _fc_flow4_active->find_bulk(fc, keys, nb_keys, now, results);
@@ -332,7 +332,7 @@ fc_flow4_cache_find_bulk(struct fc_flow4_cache *fc,
 void
 fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
                              const struct flow4_key *keys,
-                             unsigned nb_keys, uint64_t now,
+                             unsigned nb_keys, u64 now,
                              struct fc_flow4_result *results)
 {
     _fc_flow4_active->findadd_bulk(fc, keys, nb_keys, now, results);
@@ -341,7 +341,7 @@ fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
 void
 fc_flow4_cache_findadd_burst32(struct fc_flow4_cache *fc,
                                 const struct flow4_key *keys,
-                                unsigned nb_keys, uint64_t now,
+                                unsigned nb_keys, u64 now,
                                 struct fc_flow4_result *results)
 {
     if (nb_keys > 32u) {
@@ -363,7 +363,7 @@ fc_flow4_cache_findadd_burst32(struct fc_flow4_cache *fc,
 void
 fc_flow4_cache_add_bulk(struct fc_flow4_cache *fc,
                          const struct flow4_key *keys,
-                         unsigned nb_keys, uint64_t now,
+                         unsigned nb_keys, u64 now,
                          struct fc_flow4_result *results)
 {
     _fc_flow4_active->add_bulk(fc, keys, nb_keys, now, results);
@@ -379,7 +379,7 @@ fc_flow4_cache_del_bulk(struct fc_flow4_cache *fc,
 
 void
 fc_flow4_cache_del_idx_bulk(struct fc_flow4_cache *fc,
-                             const uint32_t *idxs, unsigned nb_idxs)
+                             const u32 *idxs, unsigned nb_idxs)
 {
     _fc_flow4_active->del_idx_bulk(fc, idxs, nb_idxs);
 }
@@ -387,7 +387,7 @@ fc_flow4_cache_del_idx_bulk(struct fc_flow4_cache *fc,
 unsigned
 fc_flow4_cache_maintain(struct fc_flow4_cache *fc,
                         unsigned start_bk, unsigned bucket_count,
-                        uint64_t now)
+                        u64 now)
 {
     return _fc_flow4_active->maintain(fc, start_bk, bucket_count, now);
 }
@@ -395,7 +395,7 @@ fc_flow4_cache_maintain(struct fc_flow4_cache *fc,
 unsigned
 fc_flow4_cache_maintain_step_ex(struct fc_flow4_cache *fc,
                                 unsigned start_bk, unsigned bucket_count,
-                                unsigned skip_threshold, uint64_t now)
+                                unsigned skip_threshold, u64 now)
 {
     return _fc_flow4_active->maintain_step_ex(fc, start_bk, bucket_count,
                                                skip_threshold, now);
@@ -403,7 +403,7 @@ fc_flow4_cache_maintain_step_ex(struct fc_flow4_cache *fc,
 
 unsigned
 fc_flow4_cache_maintain_step(struct fc_flow4_cache *fc,
-                             uint64_t now, int idle)
+                             u64 now, int idle)
 {
     return _fc_flow4_active->maintain_step(fc, now, idle);
 }
@@ -412,7 +412,7 @@ fc_flow4_cache_maintain_step(struct fc_flow4_cache *fc,
 void
 fc_flow6_cache_find_bulk(struct fc_flow6_cache *fc,
                           const struct flow6_key *keys,
-                          unsigned nb_keys, uint64_t now,
+                          unsigned nb_keys, u64 now,
                           struct fc_flow6_result *results)
 {
     _fc_flow6_active->find_bulk(fc, keys, nb_keys, now, results);
@@ -421,7 +421,7 @@ fc_flow6_cache_find_bulk(struct fc_flow6_cache *fc,
 void
 fc_flow6_cache_findadd_bulk(struct fc_flow6_cache *fc,
                              const struct flow6_key *keys,
-                             unsigned nb_keys, uint64_t now,
+                             unsigned nb_keys, u64 now,
                              struct fc_flow6_result *results)
 {
     _fc_flow6_active->findadd_bulk(fc, keys, nb_keys, now, results);
@@ -430,7 +430,7 @@ fc_flow6_cache_findadd_bulk(struct fc_flow6_cache *fc,
 void
 fc_flow6_cache_findadd_burst32(struct fc_flow6_cache *fc,
                                 const struct flow6_key *keys,
-                                unsigned nb_keys, uint64_t now,
+                                unsigned nb_keys, u64 now,
                                 struct fc_flow6_result *results)
 {
     if (nb_keys > 32u) {
@@ -452,7 +452,7 @@ fc_flow6_cache_findadd_burst32(struct fc_flow6_cache *fc,
 void
 fc_flow6_cache_add_bulk(struct fc_flow6_cache *fc,
                          const struct flow6_key *keys,
-                         unsigned nb_keys, uint64_t now,
+                         unsigned nb_keys, u64 now,
                          struct fc_flow6_result *results)
 {
     _fc_flow6_active->add_bulk(fc, keys, nb_keys, now, results);
@@ -468,7 +468,7 @@ fc_flow6_cache_del_bulk(struct fc_flow6_cache *fc,
 
 void
 fc_flow6_cache_del_idx_bulk(struct fc_flow6_cache *fc,
-                             const uint32_t *idxs, unsigned nb_idxs)
+                             const u32 *idxs, unsigned nb_idxs)
 {
     _fc_flow6_active->del_idx_bulk(fc, idxs, nb_idxs);
 }
@@ -476,7 +476,7 @@ fc_flow6_cache_del_idx_bulk(struct fc_flow6_cache *fc,
 unsigned
 fc_flow6_cache_maintain(struct fc_flow6_cache *fc,
                         unsigned start_bk, unsigned bucket_count,
-                        uint64_t now)
+                        u64 now)
 {
     return _fc_flow6_active->maintain(fc, start_bk, bucket_count, now);
 }
@@ -484,7 +484,7 @@ fc_flow6_cache_maintain(struct fc_flow6_cache *fc,
 unsigned
 fc_flow6_cache_maintain_step_ex(struct fc_flow6_cache *fc,
                                 unsigned start_bk, unsigned bucket_count,
-                                unsigned skip_threshold, uint64_t now)
+                                unsigned skip_threshold, u64 now)
 {
     return _fc_flow6_active->maintain_step_ex(fc, start_bk, bucket_count,
                                                skip_threshold, now);
@@ -492,7 +492,7 @@ fc_flow6_cache_maintain_step_ex(struct fc_flow6_cache *fc,
 
 unsigned
 fc_flow6_cache_maintain_step(struct fc_flow6_cache *fc,
-                             uint64_t now, int idle)
+                             u64 now, int idle)
 {
     return _fc_flow6_active->maintain_step(fc, now, idle);
 }
@@ -501,7 +501,7 @@ fc_flow6_cache_maintain_step(struct fc_flow6_cache *fc,
 void
 fc_flowu_cache_find_bulk(struct fc_flowu_cache *fc,
                           const struct flowu_key *keys,
-                          unsigned nb_keys, uint64_t now,
+                          unsigned nb_keys, u64 now,
                           struct fc_flowu_result *results)
 {
     _fc_flowu_active->find_bulk(fc, keys, nb_keys, now, results);
@@ -510,7 +510,7 @@ fc_flowu_cache_find_bulk(struct fc_flowu_cache *fc,
 void
 fc_flowu_cache_findadd_bulk(struct fc_flowu_cache *fc,
                              const struct flowu_key *keys,
-                             unsigned nb_keys, uint64_t now,
+                             unsigned nb_keys, u64 now,
                              struct fc_flowu_result *results)
 {
     _fc_flowu_active->findadd_bulk(fc, keys, nb_keys, now, results);
@@ -519,7 +519,7 @@ fc_flowu_cache_findadd_bulk(struct fc_flowu_cache *fc,
 void
 fc_flowu_cache_findadd_burst32(struct fc_flowu_cache *fc,
                                 const struct flowu_key *keys,
-                                unsigned nb_keys, uint64_t now,
+                                unsigned nb_keys, u64 now,
                                 struct fc_flowu_result *results)
 {
     if (nb_keys > 32u) {
@@ -541,7 +541,7 @@ fc_flowu_cache_findadd_burst32(struct fc_flowu_cache *fc,
 void
 fc_flowu_cache_add_bulk(struct fc_flowu_cache *fc,
                          const struct flowu_key *keys,
-                         unsigned nb_keys, uint64_t now,
+                         unsigned nb_keys, u64 now,
                          struct fc_flowu_result *results)
 {
     _fc_flowu_active->add_bulk(fc, keys, nb_keys, now, results);
@@ -557,7 +557,7 @@ fc_flowu_cache_del_bulk(struct fc_flowu_cache *fc,
 
 void
 fc_flowu_cache_del_idx_bulk(struct fc_flowu_cache *fc,
-                             const uint32_t *idxs, unsigned nb_idxs)
+                             const u32 *idxs, unsigned nb_idxs)
 {
     _fc_flowu_active->del_idx_bulk(fc, idxs, nb_idxs);
 }
@@ -565,7 +565,7 @@ fc_flowu_cache_del_idx_bulk(struct fc_flowu_cache *fc,
 unsigned
 fc_flowu_cache_maintain(struct fc_flowu_cache *fc,
                         unsigned start_bk, unsigned bucket_count,
-                        uint64_t now)
+                        u64 now)
 {
     return _fc_flowu_active->maintain(fc, start_bk, bucket_count, now);
 }
@@ -573,7 +573,7 @@ fc_flowu_cache_maintain(struct fc_flowu_cache *fc,
 unsigned
 fc_flowu_cache_maintain_step_ex(struct fc_flowu_cache *fc,
                                 unsigned start_bk, unsigned bucket_count,
-                                unsigned skip_threshold, uint64_t now)
+                                unsigned skip_threshold, u64 now)
 {
     return _fc_flowu_active->maintain_step_ex(fc, start_bk, bucket_count,
                                                skip_threshold, now);
@@ -581,7 +581,7 @@ fc_flowu_cache_maintain_step_ex(struct fc_flowu_cache *fc,
 
 unsigned
 fc_flowu_cache_maintain_step(struct fc_flowu_cache *fc,
-                             uint64_t now, int idle)
+                             u64 now, int idle)
 {
     return _fc_flowu_active->maintain_step(fc, now, idle);
 }
@@ -591,27 +591,27 @@ fc_flowu_cache_maintain_step(struct fc_flowu_cache *fc,
  *===========================================================================*/
 
 /*--- flow4 single ---*/
-uint32_t
+u32
 fc_flow4_cache_find(struct fc_flow4_cache *fc,
-                     const struct flow4_key *key, uint64_t now)
+                     const struct flow4_key *key, u64 now)
 {
     struct fc_flow4_result r;
     _fc_flow4_active->find_bulk(fc, key, 1, now, &r);
     return r.entry_idx;
 }
 
-uint32_t
+u32
 fc_flow4_cache_findadd(struct fc_flow4_cache *fc,
-                        const struct flow4_key *key, uint64_t now)
+                        const struct flow4_key *key, u64 now)
 {
     struct fc_flow4_result r;
     _fc_flow4_active->findadd_bulk(fc, key, 1, now, &r);
     return r.entry_idx;
 }
 
-uint32_t
+u32
 fc_flow4_cache_add(struct fc_flow4_cache *fc,
-                    const struct flow4_key *key, uint64_t now)
+                    const struct flow4_key *key, u64 now)
 {
     struct fc_flow4_result r;
     _fc_flow4_active->add_bulk(fc, key, 1, now, &r);
@@ -626,33 +626,33 @@ fc_flow4_cache_del(struct fc_flow4_cache *fc,
 }
 
 int
-fc_flow4_cache_del_idx(struct fc_flow4_cache *fc, uint32_t entry_idx)
+fc_flow4_cache_del_idx(struct fc_flow4_cache *fc, u32 entry_idx)
 {
     return fc_flow4_ops_gen.remove_idx(fc, entry_idx);
 }
 
 /*--- flow6 single ---*/
-uint32_t
+u32
 fc_flow6_cache_find(struct fc_flow6_cache *fc,
-                     const struct flow6_key *key, uint64_t now)
+                     const struct flow6_key *key, u64 now)
 {
     struct fc_flow6_result r;
     _fc_flow6_active->find_bulk(fc, key, 1, now, &r);
     return r.entry_idx;
 }
 
-uint32_t
+u32
 fc_flow6_cache_findadd(struct fc_flow6_cache *fc,
-                        const struct flow6_key *key, uint64_t now)
+                        const struct flow6_key *key, u64 now)
 {
     struct fc_flow6_result r;
     _fc_flow6_active->findadd_bulk(fc, key, 1, now, &r);
     return r.entry_idx;
 }
 
-uint32_t
+u32
 fc_flow6_cache_add(struct fc_flow6_cache *fc,
-                    const struct flow6_key *key, uint64_t now)
+                    const struct flow6_key *key, u64 now)
 {
     struct fc_flow6_result r;
     _fc_flow6_active->add_bulk(fc, key, 1, now, &r);
@@ -667,33 +667,33 @@ fc_flow6_cache_del(struct fc_flow6_cache *fc,
 }
 
 int
-fc_flow6_cache_del_idx(struct fc_flow6_cache *fc, uint32_t entry_idx)
+fc_flow6_cache_del_idx(struct fc_flow6_cache *fc, u32 entry_idx)
 {
     return fc_flow6_ops_gen.remove_idx(fc, entry_idx);
 }
 
 /*--- flowu single ---*/
-uint32_t
+u32
 fc_flowu_cache_find(struct fc_flowu_cache *fc,
-                     const struct flowu_key *key, uint64_t now)
+                     const struct flowu_key *key, u64 now)
 {
     struct fc_flowu_result r;
     _fc_flowu_active->find_bulk(fc, key, 1, now, &r);
     return r.entry_idx;
 }
 
-uint32_t
+u32
 fc_flowu_cache_findadd(struct fc_flowu_cache *fc,
-                        const struct flowu_key *key, uint64_t now)
+                        const struct flowu_key *key, u64 now)
 {
     struct fc_flowu_result r;
     _fc_flowu_active->findadd_bulk(fc, key, 1, now, &r);
     return r.entry_idx;
 }
 
-uint32_t
+u32
 fc_flowu_cache_add(struct fc_flowu_cache *fc,
-                    const struct flowu_key *key, uint64_t now)
+                    const struct flowu_key *key, u64 now)
 {
     struct fc_flowu_result r;
     _fc_flowu_active->add_bulk(fc, key, 1, now, &r);
@@ -708,7 +708,7 @@ fc_flowu_cache_del(struct fc_flowu_cache *fc,
 }
 
 int
-fc_flowu_cache_del_idx(struct fc_flowu_cache *fc, uint32_t entry_idx)
+fc_flowu_cache_del_idx(struct fc_flowu_cache *fc, u32 entry_idx)
 {
     return fc_flowu_ops_gen.remove_idx(fc, entry_idx);
 }

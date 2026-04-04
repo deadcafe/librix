@@ -81,9 +81,9 @@
  * on x86-64.
  */
 static inline struct flow4_key
-fc_flow4_key_make(uint32_t src_ip, uint32_t dst_ip,
-                  uint16_t src_port, uint16_t dst_port,
-                  uint8_t proto, uint32_t vrfid)
+fc_flow4_key_make(u32 src_ip, u32 dst_ip,
+                  u16 src_port, u16 dst_port,
+                  u8 proto, u32 vrfid)
 {
     return (struct flow4_key){
         .family = FC_FLOW_FAMILY_IPV4,
@@ -106,7 +106,7 @@ fc_flow4_key_make(uint32_t src_ip, uint32_t dst_ip,
  * to obtain the entry pointer.
  */
 struct fc_flow4_result {
-    uint32_t entry_idx; /**< 1-origin pool index; 0 = miss / full. */
+    u32 entry_idx; /**< 1-origin pool index; 0 = miss / full. */
 };
 
 /**
@@ -134,7 +134,7 @@ RIX_SLIST_HEAD(fc_flow4_free_head, fc_flow4_entry);
  * (timeout_tsc = 1000000, pressure = FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS).
  */
 struct fc_flow4_config {
-    uint64_t timeout_tsc;           /**< Entry lifetime in TSC ticks.
+    u64 timeout_tsc;           /**< Entry lifetime in TSC ticks.
                                          Adaptive scaling shrinks this
                                          as the cache fills. */
     unsigned ts_shift;              /**< Stored timestamp right-shift.
@@ -143,7 +143,7 @@ struct fc_flow4_config {
                                          Relief eviction triggers when a
                                          target bucket has <= this many
                                          empty slots. */
-    uint64_t maint_interval_tsc;    /**< Minimum interval between GC runs
+    u64 maint_interval_tsc;    /**< Minimum interval between GC runs
                                          (TSC ticks).  0 = every call. */
     unsigned maint_base_bk;         /**< Buckets per GC step at 1x scale.
                                          0 = nb_bk (full sweep). */
@@ -158,23 +158,23 @@ struct fc_flow4_config {
  * atomically per call (single-writer assumed).
  */
 struct fc_flow4_stats {
-    uint64_t lookups;               /**< Keys submitted to find/findadd. */
-    uint64_t hits;                  /**< Keys found (find/findadd hit). */
-    uint64_t misses;                /**< Keys not found (find/findadd miss). */
-    uint64_t fills;                 /**< Entries inserted by add/findadd paths. */
-    uint64_t fill_full;             /**< Inserts failed (cache full). */
-    uint64_t relief_calls;          /**< Times insert-relief was invoked. */
-    uint64_t relief_bucket_checks;  /**< Buckets scanned by relief. */
-    uint64_t relief_evictions;      /**< Entries evicted by relief (total). */
-    uint64_t relief_bk0_evictions;  /**< Relief evictions from primary bucket. */
-    uint64_t relief_bk1_evictions;  /**< Relief evictions from alternate bucket. */
-    uint64_t oldest_reclaim_calls;  /**< Last-resort oldest reclaim attempts. */
-    uint64_t oldest_reclaim_evictions; /**< Entries evicted by oldest reclaim. */
-    uint64_t maint_calls;           /**< Times maintain was called. */
-    uint64_t maint_bucket_checks;   /**< Buckets scanned by maintain. */
-    uint64_t maint_evictions;       /**< Entries evicted by maintain. */
-    uint64_t maint_step_calls;      /**< Times maintain_step was called. */
-    uint64_t maint_step_skipped_bks;/**< Buckets skipped by SIMD empty check. */
+    u64 lookups;               /**< Keys submitted to find/findadd. */
+    u64 hits;                  /**< Keys found (find/findadd hit). */
+    u64 misses;                /**< Keys not found (find/findadd miss). */
+    u64 fills;                 /**< Entries inserted by add/findadd paths. */
+    u64 fill_full;             /**< Inserts failed (cache full). */
+    u64 relief_calls;          /**< Times insert-relief was invoked. */
+    u64 relief_bucket_checks;  /**< Buckets scanned by relief. */
+    u64 relief_evictions;      /**< Entries evicted by relief (total). */
+    u64 relief_bk0_evictions;  /**< Relief evictions from primary bucket. */
+    u64 relief_bk1_evictions;  /**< Relief evictions from alternate bucket. */
+    u64 oldest_reclaim_calls;  /**< Last-resort oldest reclaim attempts. */
+    u64 oldest_reclaim_evictions; /**< Entries evicted by oldest reclaim. */
+    u64 maint_calls;           /**< Times maintain was called. */
+    u64 maint_bucket_checks;   /**< Buckets scanned by maintain. */
+    u64 maint_evictions;       /**< Entries evicted by maintain. */
+    u64 maint_step_calls;      /**< Times maintain_step was called. */
+    u64 maint_step_skipped_bks;/**< Buckets skipped by SIMD empty check. */
 };
 
 enum fc_flow4_event {
@@ -188,7 +188,7 @@ enum fc_flow4_event {
 };
 
 typedef void (*fc_flow4_event_cb)(enum fc_flow4_event event,
-                                  uint32_t entry_idx,
+                                  u32 entry_idx,
                                   void *arg);
 
 /**
@@ -206,13 +206,13 @@ struct fc_flow4_cache {
     size_t                    pool_stride;
     size_t                    pool_entry_offset;
     struct fc_flow4_ht        ht_head;
-    uint64_t                   timeout_tsc;
-    uint64_t                   eff_timeout_tsc;
-    uint64_t                   timeout_min_tsc;
+    u64                   timeout_tsc;
+    u64                   eff_timeout_tsc;
+    u64                   timeout_min_tsc;
     unsigned                   nb_bk;
     unsigned                   max_entries;
     unsigned                   total_slots;
-    uint8_t                    ts_shift;
+    u8                    ts_shift;
     unsigned                   pressure_empty_slots;
     /* --- CL1 --- */
     unsigned                   timeout_lo_entries;
@@ -220,9 +220,9 @@ struct fc_flow4_cache {
     unsigned                   relief_mid_entries;
     unsigned                   relief_hi_entries;
     unsigned                   maint_cursor;
-    uint64_t                   last_maint_tsc;
-    uint64_t                   last_maint_fills;
-    uint64_t                   maint_interval_tsc;
+    u64                   last_maint_tsc;
+    u64                   last_maint_fills;
+    u64                   maint_interval_tsc;
     unsigned                   maint_base_bk;
     unsigned                   maint_fill_threshold;
     unsigned                   last_maint_start_bk;  /**< Start bk of last sweep. */
@@ -309,7 +309,7 @@ void fc_flow4_cache_set_event_cb(struct fc_flow4_cache *fc,
  * @return Record base, or NULL on invalid input.
  */
 static inline void *
-fc_flow4_cache_record_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
+fc_flow4_cache_record_ptr(struct fc_flow4_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -317,7 +317,7 @@ fc_flow4_cache_record_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
 }
 
 static inline const void *
-fc_flow4_cache_record_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
+fc_flow4_cache_record_cptr(const struct fc_flow4_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -335,7 +335,7 @@ fc_flow4_cache_record_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
  * @return Entry pointer, or NULL on invalid input.
  */
 static inline struct fc_flow4_entry *
-fc_flow4_cache_entry_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
+fc_flow4_cache_entry_ptr(struct fc_flow4_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -344,7 +344,7 @@ fc_flow4_cache_entry_ptr(struct fc_flow4_cache *fc, uint32_t entry_idx)
 }
 
 static inline const struct fc_flow4_entry *
-fc_flow4_cache_entry_cptr(const struct fc_flow4_cache *fc, uint32_t entry_idx)
+fc_flow4_cache_entry_cptr(const struct fc_flow4_cache *fc, u32 entry_idx)
 {
     if (fc == NULL || entry_idx == 0u || entry_idx > fc->max_entries)
         return NULL;
@@ -435,7 +435,7 @@ unsigned fc_flow4_cache_nb_entries(const struct fc_flow4_cache *fc);
  */
 void fc_flow4_cache_find_bulk(struct fc_flow4_cache *fc,
                                const struct flow4_key *keys,
-                               unsigned nb_keys, uint64_t now,
+                               unsigned nb_keys, u64 now,
                                struct fc_flow4_result *results);
 
 /**
@@ -453,7 +453,7 @@ void fc_flow4_cache_find_bulk(struct fc_flow4_cache *fc,
  */
 void fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
                                   const struct flow4_key *keys,
-                                  unsigned nb_keys, uint64_t now,
+                                  unsigned nb_keys, u64 now,
                                   struct fc_flow4_result *results);
 
 /**
@@ -472,7 +472,7 @@ void fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
  */
 void fc_flow4_cache_findadd_burst32(struct fc_flow4_cache *fc,
                                      const struct flow4_key *keys,
-                                     unsigned nb_keys, uint64_t now,
+                                     unsigned nb_keys, u64 now,
                                      struct fc_flow4_result *results);
 
 /**
@@ -489,7 +489,7 @@ void fc_flow4_cache_findadd_burst32(struct fc_flow4_cache *fc,
  */
 void fc_flow4_cache_add_bulk(struct fc_flow4_cache *fc,
                               const struct flow4_key *keys,
-                              unsigned nb_keys, uint64_t now,
+                              unsigned nb_keys, u64 now,
                               struct fc_flow4_result *results);
 
 /**
@@ -515,7 +515,7 @@ void fc_flow4_cache_del_bulk(struct fc_flow4_cache *fc,
  * @param[in]     nb_idxs Number of indices.
  */
 void fc_flow4_cache_del_idx_bulk(struct fc_flow4_cache *fc,
-                                  const uint32_t *idxs,
+                                  const u32 *idxs,
                                   unsigned nb_idxs);
 
 /*===========================================================================
@@ -523,26 +523,26 @@ void fc_flow4_cache_del_idx_bulk(struct fc_flow4_cache *fc,
  *===========================================================================*/
 
 /** @brief Find a single key.  Returns 1-origin entry_idx or 0. */
-uint32_t fc_flow4_cache_find(struct fc_flow4_cache *fc,
+u32 fc_flow4_cache_find(struct fc_flow4_cache *fc,
                               const struct flow4_key *key,
-                              uint64_t now);
+                              u64 now);
 
 /** @brief Find or insert a single key.  Returns entry_idx or 0 if full. */
-uint32_t fc_flow4_cache_findadd(struct fc_flow4_cache *fc,
+u32 fc_flow4_cache_findadd(struct fc_flow4_cache *fc,
                                  const struct flow4_key *key,
-                                 uint64_t now);
+                                 u64 now);
 
 /** @brief Insert a single key.  Returns entry_idx or 0 if full. */
-uint32_t fc_flow4_cache_add(struct fc_flow4_cache *fc,
+u32 fc_flow4_cache_add(struct fc_flow4_cache *fc,
                              const struct flow4_key *key,
-                             uint64_t now);
+                             u64 now);
 
 /** @brief Remove a single entry by key. */
 void fc_flow4_cache_del(struct fc_flow4_cache *fc,
                          const struct flow4_key *key);
 
 /** @brief Remove a single entry by pool index.  Returns 1 if removed. */
-int fc_flow4_cache_del_idx(struct fc_flow4_cache *fc, uint32_t entry_idx);
+int fc_flow4_cache_del_idx(struct fc_flow4_cache *fc, u32 entry_idx);
 
 /**
  * @brief Expire stale entries from a range of buckets.
@@ -567,7 +567,7 @@ int fc_flow4_cache_del_idx(struct fc_flow4_cache *fc, uint32_t entry_idx);
 unsigned fc_flow4_cache_maintain(struct fc_flow4_cache *fc,
                                   unsigned start_bk,
                                   unsigned bucket_count,
-                                  uint64_t now);
+                                  u64 now);
 
 /**
  * @brief Adaptive GC for DPDK-style poll loops.
@@ -612,10 +612,10 @@ unsigned fc_flow4_cache_maintain_step_ex(struct fc_flow4_cache *fc,
                                           unsigned start_bk,
                                           unsigned bucket_count,
                                           unsigned skip_threshold,
-                                          uint64_t now);
+                                          u64 now);
 
 unsigned fc_flow4_cache_maintain_step(struct fc_flow4_cache *fc,
-                                       uint64_t now,
+                                       u64 now,
                                        int idle);
 
 
@@ -645,7 +645,7 @@ void fc_flow4_cache_stats(const struct fc_flow4_cache *fc,
  * @return 0 if all entries visited, or the negative value from @p cb.
  */
 int fc_flow4_cache_walk(struct fc_flow4_cache *fc,
-                         int (*cb)(uint32_t entry_idx, void *arg),
+                         int (*cb)(u32 entry_idx, void *arg),
                          void *arg);
 
 #endif /* _FLOW4_CACHE_H_ */

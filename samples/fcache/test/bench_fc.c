@@ -156,19 +156,19 @@ fcb_median_summary_double(const struct fcb_run_summary *samples,
     return med;
 }
 
-static uint64_t
+static u64
 fcb_median_summary_u64(const struct fcb_run_summary *samples,
                        unsigned start, unsigned n,
-                       uint64_t (*field)(const struct fcb_run_summary *))
+                       u64 (*field)(const struct fcb_run_summary *))
 {
-    uint64_t *vals = fcb_alloc((size_t)n * sizeof(*vals));
+    u64 *vals = fcb_alloc((size_t)n * sizeof(*vals));
     double med;
 
     for (unsigned i = 0; i < n; i++)
         vals[i] = field(&samples[start + i]);
     med = fcb_median_u64(vals, n);
     free(vals);
-    return (uint64_t)(med + 0.5);
+    return (u64)(med + 0.5);
 }
 
 static unsigned
@@ -176,7 +176,7 @@ fcb_median_summary_unsigned(const struct fcb_run_summary *samples,
                             unsigned start, unsigned n,
                             unsigned (*field)(const struct fcb_run_summary *))
 {
-    uint64_t *vals = fcb_alloc((size_t)n * sizeof(*vals));
+    u64 *vals = fcb_alloc((size_t)n * sizeof(*vals));
     double med;
 
     for (unsigned i = 0; i < n; i++)
@@ -188,11 +188,11 @@ fcb_median_summary_unsigned(const struct fcb_run_summary *samples,
 
 static double fcb_field_cycles(const struct fcb_run_summary *s) { return s->cycles_per_key; }
 static double fcb_field_hit_pct(const struct fcb_run_summary *s) { return s->hit_pct; }
-static uint64_t fcb_field_misses(const struct fcb_run_summary *s) { return s->misses; }
-static uint64_t fcb_field_relief(const struct fcb_run_summary *s) { return s->relief_evictions; }
-static uint64_t fcb_field_oldest(const struct fcb_run_summary *s) { return s->oldest_reclaim_evictions; }
-static uint64_t fcb_field_maint_calls(const struct fcb_run_summary *s) { return s->maint_calls; }
-static uint64_t fcb_field_maint_evict(const struct fcb_run_summary *s) { return s->maint_evictions; }
+static u64 fcb_field_misses(const struct fcb_run_summary *s) { return s->misses; }
+static u64 fcb_field_relief(const struct fcb_run_summary *s) { return s->relief_evictions; }
+static u64 fcb_field_oldest(const struct fcb_run_summary *s) { return s->oldest_reclaim_evictions; }
+static u64 fcb_field_maint_calls(const struct fcb_run_summary *s) { return s->maint_calls; }
+static u64 fcb_field_maint_evict(const struct fcb_run_summary *s) { return s->maint_evictions; }
 static double fcb_field_fill_start(const struct fcb_run_summary *s) { return s->fill_start_pct; }
 static double fcb_field_fill_end(const struct fcb_run_summary *s) { return s->fill_end_pct; }
 static double fcb_field_fill_avg(const struct fcb_run_summary *s) { return s->fill_avg_pct; }
@@ -422,47 +422,47 @@ fcb_make_key4(unsigned i)
     return fc_flow4_key_make(0x0a000000u | (i & 0x00ffffffu),
                              0x14000000u |
                              ((i * 2654435761u) & 0x00ffffffu),
-                             (uint16_t)(1024u + (i & 0x7fffu)),
-                             (uint16_t)(2048u + ((i >> 11) & 0x7fffu)),
-                             (uint8_t)(6u + (i & 1u)),
+                             (u16)(1024u + (i & 0x7fffu)),
+                             (u16)(2048u + ((i >> 11) & 0x7fffu)),
+                             (u8)(6u + (i & 1u)),
                              1u + (i >> 24));
 }
 
 static inline struct flow6_key
 fcb_make_key6(unsigned i)
 {
-    uint8_t src[16] = {0x20, 0x01};
-    uint8_t dst[16] = {0x20, 0x01};
-    uint32_t a, b;
+    u8 src[16] = {0x20, 0x01};
+    u8 dst[16] = {0x20, 0x01};
+    u32 a, b;
 
     a = 0x0a000000u | (i & 0x00ffffffu);
     b = 0x14000000u | ((i * 2654435761u) & 0x00ffffffu);
     memcpy(&src[12], &a, 4);
     memcpy(&dst[12], &b, 4);
     return fc_flow6_key_make(src, dst,
-                             (uint16_t)(1024u + (i & 0x7fffu)),
-                             (uint16_t)(2048u + ((i >> 11) & 0x7fffu)),
-                             (uint8_t)(6u + (i & 1u)),
+                             (u16)(1024u + (i & 0x7fffu)),
+                             (u16)(2048u + ((i >> 11) & 0x7fffu)),
+                             (u8)(6u + (i & 1u)),
                              1u + (i >> 24));
 }
 
 static inline struct flowu_key
 fcb_make_keyu(unsigned i)
 {
-    uint32_t src = 0x0a000000u | (i & 0x00ffffffu);
-    uint32_t dst = 0x14000000u | ((i * 2654435761u) & 0x00ffffffu);
+    u32 src = 0x0a000000u | (i & 0x00ffffffu);
+    u32 dst = 0x14000000u | ((i * 2654435761u) & 0x00ffffffu);
 
     return fc_flowu_key_v4(src, dst,
-                            (uint16_t)(1024u + (i & 0x7fffu)),
-                            (uint16_t)(2048u + ((i >> 11) & 0x7fffu)),
-                            (uint8_t)(6u + (i & 1u)),
+                            (u16)(1024u + (i & 0x7fffu)),
+                            (u16)(2048u + ((i >> 11) & 0x7fffu)),
+                            (u8)(6u + (i & 1u)),
                             1u + (i >> 24));
 }
 
 static inline void
 fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
                        const struct flow4_key *keys,
-                       unsigned n, uint64_t now,
+                       unsigned n, u64 now,
                        struct fc_flow4_result *results)
 {
     if (fcb_findadd_api_mode == FCB_FINDADD_API_BURST32 && n <= 32u) {
@@ -475,7 +475,7 @@ fcb_flow4_call_findadd(struct fc_flow4_cache *fc,
 static inline void
 fcb_flow6_call_findadd(struct fc_flow6_cache *fc,
                        const struct flow6_key *keys,
-                       unsigned n, uint64_t now,
+                       unsigned n, u64 now,
                        struct fc_flow6_result *results)
 {
     if (fcb_findadd_api_mode == FCB_FINDADD_API_BURST32 && n <= 32u) {
@@ -488,7 +488,7 @@ fcb_flow6_call_findadd(struct fc_flow6_cache *fc,
 static inline void
 fcb_flowu_call_findadd(struct fc_flowu_cache *fc,
                        const struct flowu_key *keys,
-                       unsigned n, uint64_t now,
+                       unsigned n, u64 now,
                        struct fc_flowu_result *results)
 {
     if (fcb_findadd_api_mode == FCB_FINDADD_API_BURST32 && n <= 32u) {
@@ -501,27 +501,27 @@ fcb_flowu_call_findadd(struct fc_flowu_cache *fc,
 struct fcb_flow4_record {
     struct fc_flow4_entry entry;
     struct {
-        uint64_t touch;
-        uint32_t cookie;
-        uint32_t last_event;
+        u64 touch;
+        u32 cookie;
+        u32 last_event;
     } __attribute__((aligned(8))) body;
 };
 
 struct fcb_flow6_record {
     struct fc_flow6_entry entry;
     struct {
-        uint64_t touch;
-        uint32_t cookie;
-        uint32_t last_event;
+        u64 touch;
+        u32 cookie;
+        u32 last_event;
     } __attribute__((aligned(8))) body;
 };
 
 struct fcb_flowu_record {
     struct fc_flowu_entry entry;
     struct {
-        uint64_t touch;
-        uint32_t cookie;
-        uint32_t last_event;
+        u64 touch;
+        u32 cookie;
+        u32 last_event;
     } __attribute__((aligned(8))) body;
 };
 

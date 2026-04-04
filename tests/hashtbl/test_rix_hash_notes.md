@@ -4,7 +4,7 @@
 
 | Item | Value |
 |------|-----|
-| Node type | `struct mynode { uint64_t key[2]; }` (128-bit key) |
+| Node type | `struct mynode { u64 key[2]; }` (128-bit key) |
 | Key assignment | `key[0] = 1-origin index, key[1] = 0xDEADC0DE00000000` (basic) / `0` (fuzz) |
 | Hash function | Murmur3-finalizer-style mix (independent mix of both 64-bit halves then XOR) |
 | Buckets for basic | `NB_BK_BASIC=4` (4×16=64 slots, 20 nodes) |

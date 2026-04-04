@@ -33,13 +33,13 @@ enum {
 
 struct profile_record4 {
     struct flow4_entry entry;
-    uint32_t cookie;
+    u32 cookie;
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
 static int opt_pin_core = -1;
 static unsigned char *cold_buf;
-static volatile uint64_t cold_sink;
+static volatile u64 cold_sink;
 
 static void *
 xaligned_zero(size_t count, size_t size)
@@ -89,9 +89,9 @@ profile_key4(unsigned i)
 
     memset(&k, 0, sizeof(k));
     k.family   = 2u;
-    k.proto    = (uint8_t)(6u + (i & 1u));
-    k.src_port = (uint16_t)(1024u + (i & 0x7fffu));
-    k.dst_port = (uint16_t)(2048u + ((i >> 11) & 0x7fffu));
+    k.proto    = (u8)(6u + (i & 1u));
+    k.src_port = (u16)(1024u + (i & 0x7fffu));
+    k.dst_port = (u16)(2048u + ((i >> 11) & 0x7fffu));
     k.vrfid    = 1u + (i >> 24);
     k.src_ip   = UINT32_C(0x0a000000) | (i & 0x00ffffffu);
     k.dst_ip   = UINT32_C(0x14000000)
@@ -102,7 +102,7 @@ profile_key4(unsigned i)
 static void
 cold_touch(void)
 {
-    uint64_t sum = 0u;
+    u64 sum = 0u;
 
     if (cold_buf == NULL)
         cold_buf = xaligned_zero(1u, COLD_BYTES);
@@ -146,13 +146,13 @@ parse_u32(const char *s, unsigned *out)
 static int
 cmp_u64(const void *a, const void *b)
 {
-    uint64_t av = *(const uint64_t *)a;
-    uint64_t bv = *(const uint64_t *)b;
+    u64 av = *(const u64 *)a;
+    u64 bv = *(const u64 *)b;
     return (av > bv) - (av < bv);
 }
 
-static uint64_t
-median_u64(uint64_t *samples, unsigned n)
+static u64
+median_u64(u64 *samples, unsigned n)
 {
     qsort(samples, n, sizeof(samples[0]), cmp_u64);
     if ((n & 1u) != 0u)
@@ -166,7 +166,7 @@ prefill(struct ft_flow4_table *ft, unsigned live, unsigned key_base)
     for (unsigned i = 0; i < live; i++) {
         struct profile_record4 *rec =
             FT_FLOW4_TABLE_RECORD_PTR_AS(ft, struct profile_record4, i + 1u);
-        uint32_t idx = i + 1u;
+        u32 idx = i + 1u;
 
         RIX_ASSUME_NONNULL(rec);
         rec->entry.key = profile_key4(key_base + i);
@@ -181,13 +181,13 @@ prefill(struct ft_flow4_table *ft, unsigned live, unsigned key_base)
 static void
 print_sample(const char *title,
              const struct bench_scope_group *group,
-             uint64_t per_event[][DEFAULT_REPEAT],
+             u64 per_event[][DEFAULT_REPEAT],
              unsigned repeat,
              unsigned query_n)
 {
     printf("%s\n", title);
     for (unsigned i = 0; i < group->count; i++) {
-        uint64_t med = median_u64(per_event[i], repeat);
+        u64 med = median_u64(per_event[i], repeat);
         double per_key = (double)med / (double)query_n;
         printf("  %-18s %" PRIu64 " total  %.2f /key\n",
                bench_scope_event_name(group->kinds[i]), med, per_key);
@@ -207,9 +207,9 @@ run_group(const char *title,
     struct ft_table_config cfg = profile_cfg();
     struct profile_record4 *records;
     struct ft_table_result *results;
-    uint32_t *idxv;
+    u32 *idxv;
     struct bench_scope_group group;
-    uint64_t per_event[BENCH_SCOPE_MAX_EVENTS][DEFAULT_REPEAT];
+    u64 per_event[BENCH_SCOPE_MAX_EVENTS][DEFAULT_REPEAT];
     unsigned live;
 
     memset(per_event, 0, sizeof(per_event));
@@ -232,7 +232,7 @@ run_group(const char *title,
         return 1;
     }
 
-    live = (unsigned)(((uint64_t)max_entries * fill_pct) / 100u);
+    live = (unsigned)(((u64)max_entries * fill_pct) / 100u);
     if (live + query_n > max_entries) {
         fprintf(stderr, "fill/query exceeds capacity\n");
         bench_scope_close(&group);
@@ -251,7 +251,7 @@ run_group(const char *title,
         memset(records, 0, (size_t)max_entries * sizeof(*records));
         prefill(&ft, live, prefill_base);
         for (unsigned i = 0; i < query_n; i++) {
-            uint32_t idx = live + i + 1u;
+            u32 idx = live + i + 1u;
             struct profile_record4 *rec =
                 FT_FLOW4_TABLE_RECORD_PTR_AS(&ft, struct profile_record4, idx);
             RIX_ASSUME_NONNULL(rec);

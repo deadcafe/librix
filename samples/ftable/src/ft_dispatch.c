@@ -37,7 +37,7 @@ extern void ft_##prefix##_table_status_gen(                                    \
     const struct ft_##prefix##_table *ft, struct fcore_status *out);      \
 extern int ft_##prefix##_table_walk_gen(                                       \
     struct ft_##prefix##_table *ft,                                            \
-    int (*cb)(uint32_t entry_idx, void *arg), void *arg);                     \
+    int (*cb)(u32 entry_idx, void *arg), void *arg);                     \
 extern int ft_##prefix##_table_grow_2x_gen(struct ft_##prefix##_table *ft);    \
 extern int ft_##prefix##_table_reserve_gen(                                    \
     struct ft_##prefix##_table *ft, unsigned min_entries)
@@ -151,7 +151,7 @@ ft_##prefix##_table_status(const struct ft_##prefix##_table *ft,               \
                                                                                \
 int                                                                            \
 ft_##prefix##_table_walk(struct ft_##prefix##_table *ft,                       \
-                         int (*cb)(uint32_t entry_idx, void *arg),             \
+                         int (*cb)(u32 entry_idx, void *arg),             \
                          void *arg)                                            \
 {                                                                              \
     return ft_##prefix##_table_walk_gen(ft, cb, arg);                           \
@@ -179,10 +179,10 @@ FT_DISPATCH_COLD(flowu)
  *===========================================================================*/
 #define FT_DISPATCH_HOT(prefix, active_ptr)                                    \
                                                                                \
-uint32_t                                                                       \
+u32                                                                       \
 ft_##prefix##_table_find(struct ft_##prefix##_table *ft,                       \
                          const struct prefix##_key *key,                       \
-                         uint64_t now)                                         \
+                         u64 now)                                         \
 {                                                                              \
     return active_ptr->find(ft, key, now);                                     \
 }                                                                              \
@@ -191,49 +191,49 @@ void                                                                           \
 ft_##prefix##_table_find_bulk(struct ft_##prefix##_table *ft,                  \
                               const struct prefix##_key *keys,                 \
                               unsigned nb_keys,                                \
-                              uint64_t now,                                    \
+                              u64 now,                                    \
                               struct ft_table_result *results)            \
 {                                                                              \
     active_ptr->find_bulk(ft, keys, nb_keys, now, results);                    \
 }                                                                              \
                                                                                \
-uint32_t                                                                       \
+u32                                                                       \
 ft_##prefix##_table_add_idx(struct ft_##prefix##_table *ft,                    \
-                            uint32_t entry_idx,                                \
-                            uint64_t now)                                      \
+                            u32 entry_idx,                                \
+                            u64 now)                                      \
 {                                                                              \
     return active_ptr->add_idx(ft, entry_idx, now);                            \
 }                                                                              \
                                                                                \
 unsigned                                                                       \
 ft_##prefix##_table_add_idx_bulk(struct ft_##prefix##_table *ft,               \
-                                 uint32_t *entry_idxv,                         \
+                                 u32 *entry_idxv,                         \
                                  unsigned nb_keys,                             \
                                  enum ft_add_policy policy,                    \
-                                 uint64_t now,                                 \
-                                 uint32_t *unused_idxv)                        \
+                                 u64 now,                                 \
+                                 u32 *unused_idxv)                        \
 {                                                                              \
     return active_ptr->add_idx_bulk(ft, entry_idxv, nb_keys, policy,          \
                                     now, unused_idxv);                        \
 }                                                                              \
                                                                                \
-uint32_t                                                                       \
+u32                                                                       \
 ft_##prefix##_table_del_key(struct ft_##prefix##_table *ft,                    \
                             const struct prefix##_key *key)                    \
 {                                                                              \
     return active_ptr->del_key(ft, key);                                       \
 }                                                                              \
                                                                                \
-uint32_t                                                                       \
+u32                                                                       \
 ft_##prefix##_table_del_entry_idx(struct ft_##prefix##_table *ft,              \
-                                  uint32_t entry_idx)                          \
+                                  u32 entry_idx)                          \
 {                                                                              \
     return active_ptr->del_entry_idx(ft, entry_idx);                           \
 }                                                                              \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_del_entry_idx_bulk(struct ft_##prefix##_table *ft,         \
-                                       const uint32_t *entry_idxv,             \
+                                       const u32 *entry_idxv,             \
                                        unsigned nb_keys)                       \
 {                                                                              \
     active_ptr->del_entry_idx_bulk(ft, entry_idxv, nb_keys);                   \

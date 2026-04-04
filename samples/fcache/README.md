@@ -106,15 +106,15 @@ Current datapath measurements are summarized in §16. In general:
 
 ```c
 struct flow4_key {
-    uint8_t  family;   /* always 4 */
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;      /* always 0 */
-    uint32_t vrfid;
-    uint32_t src_ip;
-    uint32_t dst_ip;
-    uint32_t zero;     /* must be 0 */
+    u8  family;   /* always 4 */
+    u8  proto;
+    u16 src_port;
+    u16 dst_port;
+    u16 pad;      /* always 0 */
+    u32 vrfid;
+    u32 src_ip;
+    u32 dst_ip;
+    u32 zero;     /* must be 0 */
 };
 ```
 
@@ -128,14 +128,14 @@ stay canonical.
 
 ```c
 struct flow6_key {
-    uint8_t  family;   /* always 6 */
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;      /* always 0 */
-    uint32_t vrfid;
-    uint8_t  src_ip[16];
-    uint8_t  dst_ip[16];
+    u8  family;   /* always 6 */
+    u8  proto;
+    u16 src_port;
+    u16 dst_port;
+    u16 pad;      /* always 0 */
+    u32 vrfid;
+    u8  src_ip[16];
+    u8  dst_ip[16];
 };
 ```
 
@@ -413,7 +413,7 @@ unsigned fc_PREFIX_cache_nb_entries(const struct fc_PREFIX_cache *fc);
 void     fc_PREFIX_cache_stats(const struct fc_PREFIX_cache *fc,
                                struct fc_PREFIX_stats *out);
 int      fc_PREFIX_cache_walk(struct fc_PREFIX_cache *fc,
-                              int (*cb)(uint32_t entry_idx, void *arg),
+                              int (*cb)(u32 entry_idx, void *arg),
                               void *arg);
 
 void     fc_PREFIX_cache_find_bulk(...);
@@ -422,9 +422,9 @@ void     fc_PREFIX_cache_add_bulk(...);
 void     fc_PREFIX_cache_del_bulk(...);
 void     fc_PREFIX_cache_del_idx_bulk(...);
 
-uint32_t fc_PREFIX_cache_find(...);
-uint32_t fc_PREFIX_cache_findadd(...);
-uint32_t fc_PREFIX_cache_add(...);
+u32 fc_PREFIX_cache_find(...);
+u32 fc_PREFIX_cache_findadd(...);
+u32 fc_PREFIX_cache_add(...);
 void     fc_PREFIX_cache_del(...);
 int      fc_PREFIX_cache_del_idx(...);
 
@@ -1011,7 +1011,7 @@ via function pointers.  Inlining is critical for pipeline performance.
 
 ```c
 static inline union rix_hash_hash_u
-fc_flow4_hash_fn(const struct flow4_key *key, uint32_t mask)
+fc_flow4_hash_fn(const struct flow4_key *key, u32 mask)
 {
 #if defined(__x86_64__) && defined(__SSE4_2__)
     /* Direct CRC32C — 3 x crc32q for 24B key */
@@ -1049,37 +1049,37 @@ struct fc_flow4_ops {
                  const struct fc_flow4_config *cfg);
     void (*flush)(struct fc_flow4_cache *fc);
     unsigned (*nb_entries)(const struct fc_flow4_cache *fc);
-    int (*remove_idx)(struct fc_flow4_cache *fc, uint32_t entry_idx);
+    int (*remove_idx)(struct fc_flow4_cache *fc, u32 entry_idx);
     void (*stats)(const struct fc_flow4_cache *fc,
                   struct fc_flow4_stats *out);
     int (*walk)(struct fc_flow4_cache *fc,
-                int (*cb)(uint32_t entry_idx, void *arg), void *arg);
+                int (*cb)(u32 entry_idx, void *arg), void *arg);
     /* hot-path */
     void (*find_bulk)(struct fc_flow4_cache *fc,
                       const struct flow4_key *keys,
-                      unsigned nb_keys, uint64_t now,
+                      unsigned nb_keys, u64 now,
                       struct fc_flow4_result *results);
     void (*findadd_bulk)(struct fc_flow4_cache *fc,
                          const struct flow4_key *keys,
-                         unsigned nb_keys, uint64_t now,
+                         unsigned nb_keys, u64 now,
                          struct fc_flow4_result *results);
     void (*add_bulk)(struct fc_flow4_cache *fc,
                      const struct flow4_key *keys,
-                     unsigned nb_keys, uint64_t now,
+                     unsigned nb_keys, u64 now,
                      struct fc_flow4_result *results);
     void (*del_bulk)(struct fc_flow4_cache *fc,
                      const struct flow4_key *keys,
                      unsigned nb_keys);
     void (*del_idx_bulk)(struct fc_flow4_cache *fc,
-                         const uint32_t *idxs, unsigned nb_idxs);
+                         const u32 *idxs, unsigned nb_idxs);
     unsigned (*maintain)(struct fc_flow4_cache *fc,
                          unsigned start_bk, unsigned bucket_count,
-                         uint64_t now);
+                         u64 now);
     unsigned (*maintain_step_ex)(struct fc_flow4_cache *fc,
                                  unsigned start_bk, unsigned bucket_count,
-                                 unsigned skip_threshold, uint64_t now);
+                                 unsigned skip_threshold, u64 now);
     unsigned (*maintain_step)(struct fc_flow4_cache *fc,
-                              uint64_t now, int idle);
+                              u64 now, int idle);
 };
 ```
 
@@ -1112,7 +1112,7 @@ fc_arch_init(unsigned arch_enable)
 void
 fc_flow4_cache_findadd_bulk(struct fc_flow4_cache *fc,
                              const struct flow4_key *keys,
-                             unsigned nb_keys, uint64_t now,
+                             unsigned nb_keys, u64 now,
                              struct fc_flow4_result *results)
 {
     _fc_flow4_active->findadd_bulk(fc, keys, nb_keys, now, results);
