@@ -30,7 +30,7 @@
  */
 
 /*
- * rix_hash64.h - index-based cuckoo hash table for 64-bit keys, C11
+ * rix_hash_64.h - index-based cuckoo hash table for 64-bit keys, C11
  *
  * Key type: u64, stored directly in bucket (no fingerprint array).
  * No hash_field required in the node struct.

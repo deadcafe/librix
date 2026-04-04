@@ -30,8 +30,8 @@
 #  include "rix_hash_fp.h"
 #  include "rix_hash_slot.h"
 #  include "rix_hash_keyonly.h"
-#  include "rix_hash32.h"
-#  include "rix_hash64.h"
+#  include "rix_hash_32.h"
+#  include "rix_hash_64.h"
 
 /*===========================================================================
  * Convenience macro API

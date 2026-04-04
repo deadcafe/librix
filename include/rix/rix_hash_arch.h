@@ -36,7 +36,7 @@
  *   - Fingerprint/key search:  find_u32x16, find_u64x16
  *   - Hash computation:        hash_bytes, hash_u32, hash_u64
  *
- * Used by rix_hash.h, rix_hash32.h, rix_hash64.h, and rix_hash_key.h.
+ * Used by rix_hash.h, rix_hash_32.h, rix_hash_64.h, and rix_hash_key.h.
  *
  * Included via the _RIX_HASH_COMMON_ guard so that including multiple hash
  * variant headers in one source file compiles this block only once.

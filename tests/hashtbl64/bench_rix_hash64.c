@@ -1,5 +1,5 @@
 /* bench_rix_hash64.c
- *  rix_hash64.h lookup performance & fill rate benchmark (64-bit key variant)
+ *  rix_hash_64.h lookup performance & fill rate benchmark (64-bit key variant)
  *  Metric: CPU cycles per 256 lookups
  *
  *  Usage: ./hash64_bench [table_n [nb_bk [repeat]]]
@@ -32,7 +32,7 @@
 #include <time.h>
 #include <sys/mman.h>
 
-#include "rix_hash64.h"
+#include "rix_hash_64.h"
 
 /* ================================================================== */
 /* Node definition                                                     */

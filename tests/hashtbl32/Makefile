@@ -22,10 +22,10 @@ BENCH_SRC    = bench_rix_hash32.c
 .PHONY: all clean test bench
 all: $(TEST_TARGET) $(BENCH_TARGET)
 
-$(TEST_TARGET): $(TEST_SRC) rix_hash32.h
+$(TEST_TARGET): $(TEST_SRC) rix_hash_32.h
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_SRC)
 
-$(BENCH_TARGET): $(BENCH_SRC) rix_hash32.h
+$(BENCH_TARGET): $(BENCH_SRC) rix_hash_32.h
 	$(CC) $(BENCH_CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SRC)
 
 test: $(TEST_TARGET)

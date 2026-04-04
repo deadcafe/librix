@@ -1,2 +1,2 @@
 /* shim: delegate to the canonical header */
-#include "../../include/rix/rix_hash32.h"
+#include "../../include/rix/rix_hash_32.h"

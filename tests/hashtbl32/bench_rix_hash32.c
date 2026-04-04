@@ -1,5 +1,5 @@
 /* bench_rix_hash32.c
- *  rix_hash32.h lookup performance benchmark (32-bit key variant)
+ *  rix_hash_32.h lookup performance benchmark (32-bit key variant)
  *  Metric: CPU cycles per 256 lookups
  *
  *  Usage: ./hash32_bench [table_n [nb_bk [repeat]]]
@@ -28,7 +28,7 @@
 #include <time.h>
 #include <sys/mman.h>
 
-#include "rix_hash32.h"
+#include "rix_hash_32.h"
 
 /* ================================================================== */
 /* Node definition                                                     */

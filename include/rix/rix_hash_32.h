@@ -30,7 +30,7 @@
  */
 
 /*
- * rix_hash32.h - index-based cuckoo hash table for 32-bit keys, C11
+ * rix_hash_32.h - index-based cuckoo hash table for 32-bit keys, C11
  *
  * Key type: u32, stored directly in bucket (no fingerprint array).
  * No hash_field required in the node struct.

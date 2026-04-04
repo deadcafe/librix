@@ -37,7 +37,7 @@
  *   Tree (rix/rix_tree.h)
  *     RIX_RB      -- red-black tree
  *
- *   Hash Tables (rix/rix_hash.h, rix/rix_hash32.h, rix/rix_hash64.h)
+ *   Hash Tables (rix/rix_hash.h, rix/rix_hash_32.h, rix/rix_hash_64.h)
  *     RIX_HASH (fp)      -- cuckoo hash, 16-way bucket, fingerprint
  *                           in bucket, variable-length key in node.
  *                           O(1) remove via hash_field.

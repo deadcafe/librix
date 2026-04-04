@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "rix_hash64.h"
+#include "rix_hash_64.h"
 
 #define FAIL(msg) do { \
     fprintf(stderr, "FAIL %s:%d:%s: %s\n", __FILE__, __LINE__, __func__, (msg)); \

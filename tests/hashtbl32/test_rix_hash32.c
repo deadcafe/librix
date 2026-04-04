@@ -4,7 +4,7 @@
  * Copyright (c) 2025 deadcafe.beef@gmail.com
  * All rights reserved.
  *
- * Unit tests for rix_hash32.h
+ * Unit tests for rix_hash_32.h
  */
 
 #include <stdio.h>
@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <assert.h>
 
-#include "rix_hash32.h"
+#include "rix_hash_32.h"
 
 /*---------------------------------------------------------------------------
  * Test node definition

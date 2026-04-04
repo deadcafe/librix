@@ -103,8 +103,8 @@ include/
     rix_hash_slot.h    cuckoo hash -- slot variant (hash_field + slot_field)
     rix_hash_keyonly.h cuckoo hash -- key-only variant (no auxiliary fields)
     rix_hash.h      cuckoo hash umbrella (includes fp, slot, keyonly, hash32, hash64)
-    rix_hash32.h    cuckoo hash -- u32 key variant
-    rix_hash64.h    cuckoo hash -- u64 key variant
+    rix_hash_32.h    cuckoo hash -- u32 key variant
+    rix_hash_64.h    cuckoo hash -- u64 key variant
     rix_hash_key.h  cuckoo hash -- u32 and u64 variants combined
 samples/              flow cache sample application (see samples/README.md)
 ```
@@ -123,8 +123,8 @@ Or include only what you need:
 #include "rix/rix_queue.h"   /* queue structures only              */
 #include "rix/rix_tree.h"    /* Red-Black tree only                */
 #include "rix/rix_hash.h"    /* cuckoo hash (fp)                   */
-#include "rix/rix_hash32.h"  /* cuckoo hash (u32 key)              */
-#include "rix/rix_hash64.h"  /* cuckoo hash (u64 key)              */
+#include "rix/rix_hash_32.h"  /* cuckoo hash (u32 key)              */
+#include "rix/rix_hash_64.h"  /* cuckoo hash (u64 key)              */
 #include "rix/rix_hash_key.h"/* cuckoo hash (u32 + u64, combined)  */
 ```
 
@@ -426,8 +426,8 @@ Five header-only, index-based cuckoo hash variants.  All share:
 | fp      | `rix_hash_fp.h`      | fingerprint in bucket, full key in node | `hash_field`                | 128 B (2 CL) | Variable-length keys, general purpose |
 | slot    | `rix_hash_slot.h`    | fingerprint in bucket, full key in node | `hash_field` + `slot_field` | 128 B (2 CL) | Variable-length keys, fastest remove |
 | keyonly | `rix_hash_keyonly.h` | fingerprint in bucket, full key in node | (none)                      | 128 B (2 CL) | Variable-length keys, smallest node |
-| hash32  | `rix_hash32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
-| hash64  | `rix_hash64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
+| hash32  | `rix_hash_32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
+| hash64  | `rix_hash_64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
 
 All fp/slot/keyonly variants share the same bucket layout and staged-find pipeline.
 `rix_hash.h` is the umbrella header that includes all five variants.
@@ -611,7 +611,7 @@ No `hash_field` required in the node struct.  The key itself is stored in the
 bucket, so `scan_bk` performs exact 32-bit comparison.
 
 ```c
-#include "rix/rix_hash32.h"
+#include "rix/rix_hash_32.h"
 
 typedef struct entry32 entry32;
 struct entry32 {
@@ -659,7 +659,7 @@ Same interface as RIX_HASH32 with `u64` keys.  Bucket is 192 B (3 cache lines)
 instead of 128 B.
 
 ```c
-#include "rix/rix_hash64.h"
+#include "rix/rix_hash_64.h"
 
 typedef struct entry64 entry64;
 struct entry64 {
