@@ -38,44 +38,54 @@ help:
 	  '  HTAGS_BIND=127.0.0.1  Bind address for htags-serve' \
 	  '  HTAGS_PORT=8000       Port for htags-serve'
 
-build:
-	@for d in $(SUBDIRS); do \
-	  echo "[BUILD] $$d"; \
-	  $(MAKE) -C $$d; \
-	done
+BUILD_TARGETS := $(addprefix build-,$(SUBDIRS))
+TEST_TARGETS  := $(addprefix test-,$(SUBDIRS))
+BENCH_TARGETS := $(addprefix bench-,$(BENCHDIRS))
+
+build: $(BUILD_TARGETS)
+
+$(BUILD_TARGETS): build-%:
+	@echo "[BUILD] $*"
+	@$(MAKE) -C $*
 
 test: build run-tests
 
-run-tests:
-	@for d in $(SUBDIRS); do \
-	  echo "[TEST] $$d"; \
-	  $(MAKE) -C $$d test; \
-	done
+run-tests: $(TEST_TARGETS)
+
+$(TEST_TARGETS): test-%: build-%
+	@echo "[TEST] $*"
+	@$(MAKE) -C $* test
 
 bench: build run-bench
 
-run-bench:
-	@for d in $(BENCHDIRS); do \
-	  echo "[BENCH] $$d"; \
-	  $(MAKE) -C $$d bench; \
-	done
+run-bench: $(BENCH_TARGETS)
+
+$(BENCH_TARGETS): bench-%: build-%
+	@echo "[BENCH] $*"
+	@$(MAKE) -C $* bench
+
+BENCH_FULL_DIRS := tests/hashtbl tests/hashtbl32 tests/hashtbl64
+BENCH_FULL_TARGETS := $(addprefix bench-full-,$(BENCH_FULL_DIRS))
+CLEAN_TARGETS := $(addprefix clean-,$(SUBDIRS))
 
 bench-full: build run-bench-full
 
-run-bench-full:
-	@for d in tests/hashtbl tests/hashtbl32 tests/hashtbl64; do \
-	  echo "[BENCH] $$d"; \
-	  $(MAKE) -C $$d bench; \
-	done
+run-bench-full: $(BENCH_FULL_TARGETS) bench-full-samples
+
+bench-full-samples: build-samples
 	@echo "[BENCH] samples"
 	@$(MAKE) -C samples bench-full
 
-clean:
-	@for d in $(SUBDIRS); do \
-	  echo "[CLEAN] $$d"; \
-	  $(MAKE) -C $$d clean; \
-	done
+$(BENCH_FULL_TARGETS): bench-full-%: build-%
+	@echo "[BENCH] $*"
+	@$(MAKE) -C $* bench
+
+clean: $(CLEAN_TARGETS)
 	rm -rf HTML
+
+$(CLEAN_TARGETS): clean-%:
+	@echo "[CLEAN] $*"
+	@$(MAKE) -C $* clean
 
 ftable:
 	@$(MAKE) -C samples ftable
