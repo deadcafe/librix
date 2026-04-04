@@ -72,7 +72,7 @@ name##_hptr(struct type *base, unsigned i)                                    \
 }
 
 RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
-    key, htbl_elm.cur_hash, htbl_elm.slot, ft_flow4_cmp, ft_flow4_hash_fn)
+    key, meta.cur_hash, meta.slot, ft_flow4_cmp, ft_flow4_hash_fn)
 
 #define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
     fcore_flow4_layout_entry_ptr_((owner), (idx))
@@ -158,7 +158,7 @@ name##_hptr(struct type *base, unsigned i)                                    \
 }
 
 RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow4_ht, flow4_entry, key,
-                                 htbl_elm.cur_hash, htbl_elm.slot,
+                                 meta.cur_hash, meta.slot,
                                  ft_flow4_cmp, ft_flow4_hash_fn)
 
 /* Enable FCORE-delegating bulk ops in FT_TABLE_GENERATE */

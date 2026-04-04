@@ -72,7 +72,7 @@ name##_hptr(struct type *base, unsigned i)                                    \
 }
 
 RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow6_ht, flow6_entry,
-    key, htbl_elm.cur_hash, htbl_elm.slot, ft_flow6_cmp, ft_flow6_hash_fn)
+    key, meta.cur_hash, meta.slot, ft_flow6_cmp, ft_flow6_hash_fn)
 
 #define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
     fcore_flow6_layout_entry_ptr_((owner), (idx))
@@ -130,7 +130,7 @@ FCORE_GENERATE(flow6, ft_flow6_table, fcore_flow6_ht,
     ft_flow6_layout_entry_ptr_((ft), (unsigned)(off0) + 1u)
 
 #define FTG_ENTRY_TYPE(p) struct flow6_entry
-#define FTG_ENTRY_IS_ACTIVE(entry, flag_active) ((entry)->htbl_elm.cur_hash != 0u)
+#define FTG_ENTRY_IS_ACTIVE(entry, flag_active) ((entry)->meta.cur_hash != 0u)
 #define FTG_ON_INSERT_SUCCESS(entry, flag_active) ((void)(entry))
 #define FTG_ENTRY_META_CLEAR_TAIL(entry) ((void)(entry))
 
@@ -152,7 +152,7 @@ name##_hptr(struct type *base, unsigned i)                                    \
 }
 
 RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow6_ht, flow6_entry, key,
-                                 htbl_elm.cur_hash, htbl_elm.slot,
+                                 meta.cur_hash, meta.slot,
                                  ft_flow6_cmp, ft_flow6_hash_fn)
 
 /* Enable FCORE-delegating bulk ops in FT_TABLE_GENERATE */

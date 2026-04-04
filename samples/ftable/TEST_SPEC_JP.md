@@ -37,6 +37,9 @@
 | A14 | `flush` | - | 全 entry を table から外す | void |
 | A15 | `grow_2x` | - | live entry を保持したまま bucket のみ拡張 | `0/-1` |
 | A16 | `reserve` | min_entries | 必要 bucket 数まで拡張 | `0/-1` |
+| A17 | `maintain` | bucket sweep 範囲 | timeout expired entry を bucket sweep で返す | `expired_n`, `next_bk` |
+| A18 | `maintain_idx_bulk` | hit idx 配列 | hit idx が属する bucket を局所的に expire する | `expired_n` |
+| A19 | `set_permanent_idx` | linked idx | timestamp=0 の permanent entry にする | `0/-1` |
 
 ## 3. add 系の仕様詳細
 
@@ -75,6 +78,23 @@
   - `unused_idxv[]` に積んだ個数
 - `FT_ADD_UPDATE` では、同一 batch 内 duplicate key は usage 上禁止
 
+## 3.4 maintenance
+
+- `maintain`
+  - bucket sweep により timeout expired entry を `expired_idxv[]` へ返す
+  - caller は `next_bk` を使って incremental に回せる
+  - expire 時間は API call ごとに caller が指定し、table 既定値は参照しない
+  - returned idx の reclaim と再利用準備は caller responsibility
+- `maintain_idx_bulk`
+  - input `idxv` から bucket を引き、その bucket だけを対象に expire する
+  - full sweep の代替ではなく、post-hit の局所 maintenance 用である
+  - expire 時間は API call ごとに caller が指定し、table 既定値は参照しない
+  - returned idx の reclaim と再利用準備は caller responsibility
+- `set_permanent_idx`
+  - linked entry の timestamp を 0 にする
+  - timestamp 0 の entry は expire 判定で常に keep される
+  - `find` / duplicate `add` でも timestamp 0 を維持する
+
 ## 4. test 対応表
 
 | Spec ID | 現在の test | 状態 |
@@ -95,6 +115,9 @@
 | A14 | `test_walk_flush_and_stats_reset`, `testv_walk_flush_and_del_idx` | covered |
 | A15 | `test_manual_grow_preserves_entries`, `test_grow_failure_preserves_table`, `testv_manual_grow_preserves_entries` | covered |
 | A16 | `test_reserve`, `test_allocator_failure_and_max_bucket_limit`, `testv_reserve` | covered |
+| A17 | `test_maintain_expire_and_reuse`, `testv_maintain_expire_and_reuse` | covered |
+| A18 | `testv_maintain_idx_bulk` | covered |
+| A19 | `testv_permanent_timestamp` | covered |
 
 ## 5. 現時点の不足
 

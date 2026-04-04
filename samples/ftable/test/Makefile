@@ -43,7 +43,7 @@ BENCH_SRC    = bench_flow_table.c
 LIBFT        = $(FTDIR)/lib/libftable.a
 DEPS         = $(TARGET).d $(BENCH).d
 
-.PHONY: all test bench bench-light bench-full clean libft
+.PHONY: all test bench bench-light bench-full bench-maint clean libft
 
 all: test bench-light
 
@@ -70,6 +70,12 @@ bench-light: $(BENCH)
 	./$(BENCH) $(BENCH_FT_OPTS) flowu 1048576 50
 
 bench: bench-light
+
+bench-maint: $(BENCH)
+	@echo "== ftable maintain bench (1M, fill=50%, perf metrics) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --maint flow4 1048576 50
+	./$(BENCH) $(BENCH_FT_OPTS) --maint flow6 1048576 50
+	./$(BENCH) $(BENCH_FT_OPTS) --maint flowu 1048576 50
 
 bench-full: $(BENCH)
 	@echo "== full ftable bench (1M baseline, cold bulk datapath sweep + grow@60%) =="

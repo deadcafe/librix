@@ -13,7 +13,7 @@
 
 #include <rix/rix_hash.h>
 
-struct flow_hashtbl_elm {
+struct flow_entry_meta {
     uint32_t cur_hash;
     uint16_t slot;
     uint16_t reserved0;
@@ -57,35 +57,50 @@ flow_timestamp_timeout_encode(uint64_t timeout, unsigned shift)
 }
 
 static inline uint64_t
-flow_timestamp_get(const struct flow_hashtbl_elm *elm)
+flow_timestamp_get(const struct flow_entry_meta *meta)
 {
-    return elm->timestamp;
+    return meta->timestamp;
 }
 
 static inline void
-flow_timestamp_set_raw(struct flow_hashtbl_elm *elm, uint64_t encoded)
+flow_timestamp_set_raw(struct flow_entry_meta *meta, uint64_t encoded)
 {
     encoded &= FLOW_TIMESTAMP_MASK;
-    elm->timestamp = (uint32_t)encoded;
+    meta->timestamp = (uint32_t)encoded;
 }
 
 static inline void
-flow_timestamp_store(struct flow_hashtbl_elm *elm, uint64_t now,
+flow_timestamp_store(struct flow_entry_meta *meta, uint64_t now,
                      unsigned shift)
 {
-    flow_timestamp_set_raw(elm, flow_timestamp_encode(now, shift));
+    flow_timestamp_set_raw(meta, flow_timestamp_encode(now, shift));
 }
 
 static inline void
-flow_timestamp_clear(struct flow_hashtbl_elm *elm)
+flow_timestamp_touch(struct flow_entry_meta *meta, uint64_t now,
+                     unsigned shift)
 {
-    elm->timestamp = 0u;
+    if (meta->timestamp == 0u)
+        return;
+    flow_timestamp_store(meta, now, shift);
+}
+
+static inline void
+flow_timestamp_clear(struct flow_entry_meta *meta)
+{
+    meta->timestamp = 0u;
+}
+
+static inline void
+flow_timestamp_set_permanent(struct flow_entry_meta *meta)
+{
+    meta->timestamp = 0u;
 }
 
 static inline int
-flow_timestamp_is_zero(const struct flow_hashtbl_elm *elm)
+flow_timestamp_is_zero(const struct flow_entry_meta *meta)
 {
-    return flow_timestamp_get(elm) == 0u;
+    return flow_timestamp_get(meta) == 0u;
 }
 
 static inline uint64_t
@@ -104,10 +119,10 @@ flow_timestamp_is_expired_raw(uint64_t ts_encoded, uint64_t now_encoded,
 }
 
 static inline int
-flow_timestamp_is_expired(const struct flow_hashtbl_elm *elm, uint64_t now,
+flow_timestamp_is_expired(const struct flow_entry_meta *meta, uint64_t now,
                           uint64_t timeout, unsigned shift)
 {
-    return flow_timestamp_is_expired_raw(flow_timestamp_get(elm),
+    return flow_timestamp_is_expired_raw(flow_timestamp_get(meta),
         flow_timestamp_encode(now, shift),
         flow_timestamp_timeout_encode(timeout, shift));
 }
@@ -126,7 +141,7 @@ struct flow4_key {
 
 struct flow4_entry {
     struct flow4_key key;
-    struct flow_hashtbl_elm htbl_elm;
+    struct flow_entry_meta meta;
 };
 
 struct flow6_key {
@@ -142,7 +157,7 @@ struct flow6_key {
 
 struct flow6_entry {
     struct flow6_key key;
-    struct flow_hashtbl_elm htbl_elm;
+    struct flow_entry_meta meta;
 };
 
 struct flowu_key {
@@ -167,7 +182,7 @@ struct flowu_key {
 
 struct flowu_entry {
     struct flowu_key key;
-    struct flow_hashtbl_elm htbl_elm;
+    struct flow_entry_meta meta;
 };
 
 /*===========================================================================

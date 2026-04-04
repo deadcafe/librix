@@ -238,7 +238,7 @@ RIX_STATIC_ASSERT(_FC_MAINT_STEP_MAX_BKS >= _FC_MAINT_STEP_PREFETCH_AHEAD,
 RIX_HASH_GENERATE_STATIC_SLOT_EX(                                         \
     _FCG_CAT(fc_, _FCG_CAT(p, _ht)),                                      \
     _FCG_CAT(fc_, _FCG_CAT(p, _entry)),                                   \
-    hdr.key, hdr.htbl_elm.cur_hash, hdr.htbl_elm.slot,                    \
+    hdr.key, hdr.meta.cur_hash, hdr.meta.slot,                            \
     cmp_fn, hash_fn)
 
 /*===========================================================================
@@ -363,7 +363,7 @@ _FCG_INT(p, free_entry)(_FCG_CACHE_T(p) *fc,                              \
     RIX_ASSUME_NONNULL(entry);                                             \
     idx = FCG_LAYOUT_ENTRY_INDEX(fc, entry);                               \
     FCG_EVENT_EMIT_FREE(fc, idx, reason);                                  \
-    flow_timestamp_clear(&entry->hdr.htbl_elm);                            \
+    flow_timestamp_clear(&entry->hdr.meta);                                \
     FCG_FREE_LIST_PUSH_ENTRY(fc, entry, idx);                              \
 }                                                                          \
                                                                            \
@@ -423,13 +423,13 @@ _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
             unsigned slot = slots[idx];                                    \
             _FCG_ENTRY_T(p) *entry = entries[idx];                        \
             if (!flow_timestamp_is_expired_raw(                            \
-                    flow_timestamp_get(&entry->hdr.htbl_elm),             \
+                    flow_timestamp_get(&entry->hdr.meta),                 \
                     now_ts, timeout_ts))                                   \
                 continue;                                                  \
             expired_slots[expired_count] = slot;                           \
             expired_count++;                                               \
-            if (flow_timestamp_get(&entry->hdr.htbl_elm) < oldest_ts) {    \
-                oldest_ts = flow_timestamp_get(&entry->hdr.htbl_elm);      \
+            if (flow_timestamp_get(&entry->hdr.meta) < oldest_ts) {        \
+                oldest_ts = flow_timestamp_get(&entry->hdr.meta);          \
                 *oldest_slotp = (int)slot;                                 \
             }                                                              \
         }                                                                  \
@@ -494,11 +494,11 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
             i -= max;                                                      \
         _FCG_ENTRY_T(p) *entry = FCG_LAYOUT_ENTRY_AT(fc, i);               \
         if (entry == NULL ||                                               \
-            flow_timestamp_is_zero(&entry->hdr.htbl_elm) ||                \
-            flow_timestamp_get(&entry->hdr.htbl_elm) == now_ts)            \
+            flow_timestamp_is_zero(&entry->hdr.meta) ||                    \
+            flow_timestamp_get(&entry->hdr.meta) == now_ts)                \
             continue;                                                      \
-        if (flow_timestamp_get(&entry->hdr.htbl_elm) < best_ts) {          \
-            best_ts = flow_timestamp_get(&entry->hdr.htbl_elm);            \
+        if (flow_timestamp_get(&entry->hdr.meta) < best_ts) {              \
+            best_ts = flow_timestamp_get(&entry->hdr.meta);                \
             victim = entry;                                                \
         }                                                                  \
     }                                                                      \
@@ -767,7 +767,7 @@ do {                                                                        \
         /* --- HIT --- */                                                    \
         _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
         RIX_ASSUME_NONNULL(_entry);                                          \
-        flow_timestamp_store(&_entry->hdr.htbl_elm, (now),                 \
+        flow_timestamp_store(&_entry->hdr.meta, (now),                     \
                              _FCG_TS_SHIFT(fc));                           \
         _FCG_INT(p, result_set_hit)(&(results)[(idx)],                       \
             _hit_idx);                                                       \
@@ -781,7 +781,7 @@ do {                                                                        \
         /* --- HIT in bk1 --- */                                             \
         _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
         RIX_ASSUME_NONNULL(_entry);                                          \
-        flow_timestamp_store(&_entry->hdr.htbl_elm, (now),                 \
+        flow_timestamp_store(&_entry->hdr.meta, (now),                     \
                              _FCG_TS_SHIFT(fc));                           \
         _FCG_INT(p, result_set_hit)(&(results)[(idx)],                       \
             _hit_idx);                                                       \
@@ -830,7 +830,7 @@ do {                                                                        \
         break;                                                               \
     }                                                                        \
     _entry->hdr.key = (keys)[(idx)];                                         \
-    flow_timestamp_store(&_entry->hdr.htbl_elm, (now),                     \
+    flow_timestamp_store(&_entry->hdr.meta, (now),                         \
                          _FCG_TS_SHIFT(fc));                               \
     /* insert_hashed: buckets in L1 from cmp_key,      */                   \
     /* hash reused from ctx (no rehash), dup-safe.     */                   \
@@ -875,7 +875,7 @@ do {                                                                        \
                                         FCG_EVENT_REASON_ROLLBACK);          \
                 /* duplicate found */                                        \
                 RIX_ASSUME_NONNULL(_ret);                                    \
-                flow_timestamp_store(&_ret->hdr.htbl_elm, (now),           \
+                flow_timestamp_store(&_ret->hdr.meta, (now),               \
                                      _FCG_TS_SHIFT(fc));                   \
                 _FCG_INT(p, result_set_filled)(                              \
                     &(results)[(idx)],                                        \
@@ -1052,7 +1052,7 @@ _FCG_API(p, flush)(_FCG_CACHE_T(p) *fc)                                    \
     for (unsigned i = fc->max_entries; i > 0u; i--) {                      \
         _FCG_ENTRY_T(p) *entry = FCG_LAYOUT_ENTRY_PTR(fc, i);              \
         RIX_ASSUME_NONNULL(entry);                                         \
-        if (!flow_timestamp_is_zero(&entry->hdr.htbl_elm))                 \
+        if (!flow_timestamp_is_zero(&entry->hdr.meta))                     \
             FCG_EVENT_EMIT_FREE(fc, i, FCG_EVENT_REASON_FLUSH);            \
         FCG_LAYOUT_ENTRY_CLEAR(fc, entry);                                 \
         FCG_FREE_LIST_PUSH_ENTRY(fc, entry, i);                            \
@@ -1129,7 +1129,7 @@ _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *fc,                                \
                     FCG_LAYOUT_HASH_BASE(fc));                              \
                 if (RIX_LIKELY(entry != NULL)) {                           \
                     if (now)                                                \
-                        flow_timestamp_store(&entry->hdr.htbl_elm, (now),  \
+                        flow_timestamp_store(&entry->hdr.meta, (now),      \
                                              _FCG_TS_SHIFT(fc));           \
                     _FCG_INT(p, result_set_hit)(&results[idx],            \
                         FCG_LAYOUT_ENTRY_INDEX(fc, entry));                \
@@ -1316,7 +1316,7 @@ _FCG_API(p, walk)(_FCG_CACHE_T(p) *fc,                                  \
                    int (*cb)(uint32_t entry_idx, void *arg), void *arg)    \
 {                                                                          \
     for (unsigned i = 0; i < fc->max_entries; i++) {                       \
-        if (!flow_timestamp_is_zero(&FCG_LAYOUT_ENTRY_AT(fc, i)->hdr.htbl_elm)) { \
+        if (!flow_timestamp_is_zero(&FCG_LAYOUT_ENTRY_AT(fc, i)->hdr.meta)) { \
             int rc = cb(i + 1u, arg);                                      \
             if (rc < 0)                                                    \
                 return rc;                                                 \
@@ -1384,7 +1384,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                     continue;                                              \
                 }                                                          \
                 entry->hdr.key = keys[idx];                                \
-                flow_timestamp_store(&entry->hdr.htbl_elm, (now),          \
+                flow_timestamp_store(&entry->hdr.meta, (now),              \
                                      _FCG_TS_SHIFT(fc));                   \
                 {                                                          \
                     _FCG_ENTRY_T(p) *_ret;                                \
@@ -1414,7 +1414,7 @@ _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                             _FCG_INT(p, free_entry)(fc, entry,            \
                                                     FCG_EVENT_REASON_ROLLBACK); \
                             RIX_ASSUME_NONNULL(_ret);                      \
-                            flow_timestamp_store(&_ret->hdr.htbl_elm,      \
+                            flow_timestamp_store(&_ret->hdr.meta,          \
                                                  (now),                    \
                                                  _FCG_TS_SHIFT(fc));       \
                             _FCG_INT(p, result_set_filled)(               \
@@ -1544,7 +1544,7 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
                 if (eidx == 0u || eidx > fc->max_entries)                  \
                     continue;                                              \
                 entry = FCG_LAYOUT_ENTRY_PTR(fc, eidx);                    \
-                if (entry == NULL || flow_timestamp_is_zero(&entry->hdr.htbl_elm)) \
+                if (entry == NULL || flow_timestamp_is_zero(&entry->hdr.meta)) \
                     continue;                                              \
                 _FCG_HT(p, remove)(&fc->ht_head, fc->buckets,            \
                                     FCG_LAYOUT_HASH_BASE(fc), entry);      \

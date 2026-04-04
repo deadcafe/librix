@@ -4,7 +4,7 @@
 to `samples/fcache/`, but its purpose is different:
 
 - no `findadd`
-- no reclaim or timeout-driven eviction
+- no implicit reclaim or timeout-driven eviction on datapath add
 - stable caller-owned record array
 - explicit `find`, `add`, and `del`
 - bucket-table growth without moving records
@@ -47,7 +47,8 @@ The table therefore prefers:
 - caller-controlled memory allocation for bucket storage
 
 This differs from `fcache`, which is optimized around reclaim and
-`findadd`.
+`findadd`. `ftable` now also has explicit timeout maintenance, but it is
+caller-invoked and leaves reclaim ownership to the caller.
 
 ## 2. Current Scope
 
@@ -58,6 +59,7 @@ The current prototype implements:
 - intrusive `init_ex()` with caller-defined record layout
 - runtime arch dispatch with unsuffixed public APIs
 - `grow_2x` and `reserve`
+- explicit timeout maintenance (`maintain`, `maintain_idx_bulk`)
 - bucket-table-only resize
 
 Not implemented yet:
@@ -67,6 +69,31 @@ Not implemented yet:
 - shrink
 - background or incremental resize
 - benchmark text and published performance tables
+
+## 2.1 Timeout Maintenance
+
+`ftable` does not reclaim on `add`. Expire is a separate maintenance step.
+
+- `maintain(...)`
+  - incremental bucket sweep
+  - caller controls `start_bk`, `expire_tsc`, `max_expired`, and `min_bk_entries`
+  - returns expired entry indices and `next_bk`
+- `maintain_idx_bulk(...)`
+  - local maintenance for buckets reached from recently hit `entry_idx[]`
+  - intended for post-`find`/post-`add` maintenance when the bucket is
+    likely still hot
+  - caller can override expire time per call via `expire_tsc`
+
+Both APIs return expired entry indices to the caller. Reclaiming those
+indices back to a free list is caller responsibility. Expire time is chosen
+per API call and is not taken from table state.
+
+Permanent entries are supported by setting the stored timestamp to zero.
+
+- `ft_flowX_table_set_permanent_idx(ft, idx)`
+  - marks a linked entry as permanent
+  - `maintain` and `maintain_idx_bulk` never expire it
+  - `find` and duplicate `add` keep the zero timestamp unchanged
 
 ## 3. Storage Model
 

@@ -708,19 +708,19 @@ test_##PREFIX##_find_bulk(void)                                                 
     }                                                                                        \
     /* Verify shifted timestamp updated to 200 */                                           \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
-        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta)                    \
             != flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT))                     \
             FAILF("find_bulk touch: timestamp=%" PRIu64 " expected %" PRIu64,                \
-                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),        \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta),            \
                   flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT));                 \
     }                                                                                        \
     /* now=0: no timestamp update */                                                         \
     fc_##PREFIX##_cache_find_bulk(&fc, keys, NB_KEYS, 0u, results);                          \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
-        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta)                    \
             != flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT))                     \
             FAILF("find_bulk now=0: timestamp=%" PRIu64 " should stay %" PRIu64,             \
-                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),        \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta),            \
                   flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT));                 \
     }                                                                                        \
 }                                                                                            \
@@ -743,18 +743,18 @@ test_##PREFIX##_timestamp_shift(void)                                           
         keys[i] = MAKE_KEY(20500u + i);                                                      \
     fc_##PREFIX##_cache_findadd_bulk(&fc, keys, NB_KEYS, 101u, results);                     \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
-        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta)                    \
             != flow_timestamp_encode(101u, TS_SHIFT))                                        \
             FAILF("findadd shift: ts=%" PRIu64 " expected %" PRIu64,                         \
-                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),         \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta),             \
                   flow_timestamp_encode(101u, TS_SHIFT));                                    \
     }                                                                                        \
     fc_##PREFIX##_cache_find_bulk(&fc, keys, NB_KEYS, 111u, results);                        \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
-        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta)                    \
             != flow_timestamp_encode(111u, TS_SHIFT))                                        \
             FAILF("find shift: ts=%" PRIu64 " expected %" PRIu64,                            \
-                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),         \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.meta),             \
                   flow_timestamp_encode(111u, TS_SHIFT));                                    \
     }                                                                                        \
 }                                                                                            \

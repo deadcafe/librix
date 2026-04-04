@@ -56,7 +56,8 @@ OBJS         = $(LIBDIR)/flow4_gen.o \
                $(LIBDIR)/flowu_sse.o \
                $(LIBDIR)/flowu_avx2.o \
                $(LIBDIR)/flowu_avx512.o \
-               $(LIBDIR)/ft_dispatch.o
+               $(LIBDIR)/ft_dispatch.o \
+               $(LIBDIR)/ft_maintain.o
 LIB_STATIC   = $(LIBDIR)/libftable.a
 DEPS         = $(OBJS:.o=.d)
 
@@ -109,6 +110,10 @@ $(LIBDIR)/flowu_avx512.o: $(SRCDIR)/flowu.c | $(LIBDIR)
 
 # dispatch
 $(LIBDIR)/ft_dispatch.o: $(DISPATCH_SRC) | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
+
+# maintain (protocol-free)
+$(LIBDIR)/ft_maintain.o: $(SRCDIR)/ft_maintain.c | $(LIBDIR)
 	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
 
 $(LIB_STATIC): $(OBJS)

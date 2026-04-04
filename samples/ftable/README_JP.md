@@ -4,7 +4,7 @@
 `samples/fcache/` と近縁だが、目的は異なる。
 
 - `findadd` は持たない
-- reclaim や timeout 起因の eviction を持たない
+- add datapath 上での暗黙 reclaim や timeout eviction を持たない
 - caller-owned の record array を固定配置で使う
 - `find`、`add`、`del` を明示的に分ける
 - resize では bucket hash table だけを拡大する
@@ -53,6 +53,8 @@ entry は caller が delete するまで生存する前提で扱う。
 - bucket storage の allocator を caller が制御できること
 
 これは reclaim と `findadd` を中心に設計された `fcache` とは異なる。
+ただし現在の `ftable` は、caller 明示呼び出しの maintain API により
+timeout expire 自体は持つ。
 
 ## 2. 現在の実装範囲
 
@@ -63,6 +65,7 @@ entry は caller が delete するまで生存する前提で扱う。
 - caller-defined record layout を扱う intrusive `init_ex()`
 - サフィックスなし公開 API + runtime arch dispatch
 - `grow_2x`、`reserve`
+- 明示 maintenance (`maintain`, `maintain_idx_bulk`)
 - bucket-table-only resize
 
 まだ未実装のもの:
@@ -72,6 +75,30 @@ entry は caller が delete するまで生存する前提で扱う。
 - shrink
 - background / incremental resize
 - benchmark 本文と性能表
+
+## 2.1 timeout maintenance
+
+`ftable` は `add` の中で reclaim しない。expire は明示 maintenance として
+分離されている。
+
+- `maintain(...)`
+  - bucket sweep ベースの incremental maintain
+  - caller が `start_bk`, `expire_tsc`, `max_expired`, `min_bk_entries` を制御する
+  - `expired_idxv[]` と `next_bk` を返す
+- `maintain_idx_bulk(...)`
+  - 直近に hit した `entry_idx[]` から bucket を引き、局所的に expire する
+  - `find/add` 直後の hot bucket を使う用途を想定する
+  - call ごとに `expire_tsc` override ができる
+
+どちらも expired idx の回収と free list への接続は caller responsibility
+である。expire 時間は API call ごとに caller が指定し、table 状態は参照しない。
+
+timestamp が 0 の entry は permanent として扱う。
+
+- `ft_flowX_table_set_permanent_idx(ft, idx)`
+  - linked 済み entry を permanent 化する
+  - `maintain` / `maintain_idx_bulk` では expire しない
+  - `find` や duplicate `add` でも timestamp 0 を保つ
 
 ## 3. ストレージモデル
 

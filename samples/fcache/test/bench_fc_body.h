@@ -192,7 +192,7 @@ FCB_FN(active_scan)(const struct FCB_FN(ctx) *ctx)
     unsigned count = 0u;
 
     for (unsigned i = 0; i < ctx->fc.max_entries; i++) {
-        if (!flow_timestamp_is_zero(&ctx->pool[i].entry.hdr.htbl_elm))
+        if (!flow_timestamp_is_zero(&ctx->pool[i].entry.hdr.meta))
             count++;
     }
     return count;
