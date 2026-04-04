@@ -63,7 +63,7 @@
 #ifndef FTG_ENTRY_IS_ACTIVE
 # ifdef FTG_USE_FCORE
 #  define FTG_ENTRY_IS_ACTIVE(entry, flag_active)                             \
-       ((entry)->htbl_elm.cur_hash != 0u)
+       ((entry)->meta.cur_hash != 0u)
 # else
 #  define FTG_ENTRY_IS_ACTIVE(entry, flag_active)                             \
        (((entry)->flags & (flag_active)) != 0u)
@@ -481,9 +481,9 @@ _FTG_INT(p, entry_is_active_)(const _FTG_ENTRY_T(p) *entry)                   \
 static inline void                                                            \
 _FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
 {                                                                             \
-    entry->htbl_elm.cur_hash = 0u;                                            \
-    entry->htbl_elm.slot = 0u;                                                \
-    flow_timestamp_clear(&entry->htbl_elm);                                   \
+    entry->meta.cur_hash = 0u;                                                \
+    entry->meta.slot = 0u;                                                    \
+    flow_timestamp_clear(&entry->meta);                                       \
     FTG_ENTRY_META_CLEAR_TAIL(entry);                                         \
 }                                                                             \
                                                                                \
@@ -623,7 +623,7 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
     unsigned bk0, bk1;                                                        \
     u32 fp;                                                                   \
     _rix_hash_buckets(h, mask, &bk0, &bk1, &fp);                              \
-    entry->htbl_elm.cur_hash = h.val32[0];                                    \
+    entry->meta.cur_hash = h.val32[0];                                        \
     for (unsigned pass = 0u; pass < 2u; pass++) {                             \
         unsigned bki = (pass == 0u) ? bk0 : bk1;                              \
         struct rix_hash_bucket_s *bk = &buckets[bki];                         \
@@ -633,8 +633,8 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
             bk->hash[s] = fp;                                                 \
             bk->idx[s] = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                   \
             if (pass == 1u)                                                   \
-                entry->htbl_elm.cur_hash = h.val32[1];                        \
-            entry->htbl_elm.slot = (uint16_t)s;                               \
+                entry->meta.cur_hash = h.val32[1];                            \
+            entry->meta.slot = (uint16_t)s;                                   \
             FTG_ON_INSERT_SUCCESS(entry, flag_active);                        \
             head->rhh_nb++;                                                   \
             return 0;                                                         \
@@ -655,12 +655,12 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
             if (pos < 0)                                                      \
                 return -1;                                                    \
             bki = bk1;                                                        \
-            entry->htbl_elm.cur_hash = h.val32[1];                            \
+            entry->meta.cur_hash = h.val32[1];                                \
         }                                                                     \
         bk = &buckets[bki];                                                   \
         bk->hash[pos] = fp;                                                   \
         bk->idx[pos] = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                     \
-        entry->htbl_elm.slot = (uint16_t)(unsigned)pos;                       \
+        entry->meta.slot = (uint16_t)(unsigned)pos;                           \
         FTG_ON_INSERT_SUCCESS(entry, flag_active);                            \
         head->rhh_nb++;                                                       \
         return 0;                                                             \

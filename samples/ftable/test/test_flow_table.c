@@ -202,11 +202,20 @@ struct test_variant_ops {
                              enum ft_add_policy policy,
                              uint64_t now,
                              uint32_t *unused_idxv);
+    int (*set_permanent_idx)(void *ft, uint32_t entry_idx);
     void (*del_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
                                unsigned nb_keys);
     int (*walk)(void *ft, int (*cb)(uint32_t entry_idx, void *arg), void *arg);
     int (*grow_2x)(void *ft);
     int (*reserve)(void *ft, unsigned min_entries);
+    unsigned (*maintain_idx_bulk)(void *ft,
+                                  const uint32_t *entry_idxv,
+                                  unsigned nb_idx,
+                                  uint64_t now,
+                                  uint64_t expire_tsc,
+                                  uint32_t *expired_idxv,
+                                  unsigned max_expired,
+                                  unsigned min_bk_entries);
     void *(*record_ptr)(void *ft, uint32_t entry_idx);
     void *(*entry_ptr)(void *ft, uint32_t entry_idx);
     void (*make_key)(void *out, unsigned i);
@@ -219,7 +228,8 @@ struct test_variant_ops {
                               add_idx_bulk_fn,                                 \
                               del_entry_idx_bulk_fn,                           \
                               walk_fn, grow_2x_fn,                              \
-                              reserve_fn, record_ptr_fn, entry_ptr_fn,          \
+                              reserve_fn, maintain_idx_bulk_fn,                 \
+                              record_ptr_fn, entry_ptr_fn,                      \
                               make_key_fn, default_min_nb_bk_v)                 \
 static int                                                                 \
 testv_init_##tag(void *ft, void *records, unsigned max_entries,            \
@@ -299,6 +309,12 @@ testv_add_idx_bulk_##tag(void *ft, uint32_t *entry_idxv,                   \
     return add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                \
                            entry_idxv, nb_keys, policy, now, unused_idxv);  \
 }                                                                          \
+static int                                                                  \
+testv_set_permanent_idx_##tag(void *ft, uint32_t entry_idx)                 \
+{                                                                          \
+    return ft_##prefix##_table_set_permanent_idx(                           \
+        (struct ft_##prefix##_table *)ft, entry_idx);                       \
+}                                                                          \
 static void                                                                 \
 testv_del_entry_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,        \
                                unsigned nb_keys)                             \
@@ -322,6 +338,19 @@ testv_reserve_##tag(void *ft, unsigned min_entries)                         \
 {                                                                          \
     return reserve_fn((struct ft_##prefix##_table *)ft, min_entries);       \
 }                                                                          \
+static unsigned                                                             \
+testv_maintain_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,         \
+                              unsigned nb_idx, uint64_t now,                \
+                              uint64_t expire_tsc,                          \
+                              uint32_t *expired_idxv,                        \
+                              unsigned max_expired,                          \
+                              unsigned min_bk_entries)                       \
+{                                                                          \
+    return maintain_idx_bulk_fn((struct ft_##prefix##_table *)ft,           \
+                                entry_idxv, nb_idx, now, expire_tsc,        \
+                                expired_idxv, max_expired,                  \
+                                min_bk_entries);                            \
+}                                                                          \
 static void *                                                               \
 testv_record_ptr_##tag(void *ft, uint32_t entry_idx)                        \
 {                                                                          \
@@ -343,7 +372,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .key_size = sizeof(key_t),                                              \
     .record_size = sizeof(record_t),                                        \
     .entry_offset = offsetof(record_t, entry),                              \
-    .meta_offset = offsetof(entry_t, htbl_elm),                             \
+    .meta_offset = offsetof(entry_t, meta),                                 \
     .cookie_offset = offsetof(record_t, cookie),                            \
     .default_min_nb_bk = (default_min_nb_bk_v),                             \
     .init = testv_init_##tag,                                               \
@@ -359,10 +388,12 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .del_entry_idx = testv_del_entry_idx_##tag,                             \
     .find_bulk = testv_find_bulk_##tag,                                     \
     .add_idx_bulk = testv_add_idx_bulk_##tag,                               \
+    .set_permanent_idx = testv_set_permanent_idx_##tag,                     \
     .del_entry_idx_bulk = testv_del_entry_idx_bulk_##tag,                   \
     .walk = testv_walk_##tag,                                               \
     .grow_2x = testv_grow_2x_##tag,                                         \
     .reserve = testv_reserve_##tag,                                         \
+    .maintain_idx_bulk = testv_maintain_idx_bulk_##tag,                     \
     .record_ptr = testv_record_ptr_##tag,                                   \
     .entry_ptr = testv_entry_ptr_##tag,                                     \
     .make_key = testv_make_key_##tag                                        \
@@ -378,6 +409,7 @@ TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
                       ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
                       ft_flow4_table_del_entry_idx_bulk, ft_flow4_table_walk,
                       ft_flow4_table_grow_2x, ft_flow4_table_reserve,
+                      ft_flow4_table_maintain_idx_bulk,
                       ft_flow4_table_record_ptr, ft_flow4_table_entry_ptr,
                       test_key, FT_FLOW4_DEFAULT_MIN_NB_BK);
 
@@ -391,6 +423,7 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
                       ft_flow6_table_del_entry_idx_bulk, ft_flow6_table_walk,
                       ft_flow6_table_grow_2x, ft_flow6_table_reserve,
+                      ft_flow6_table_maintain_idx_bulk,
                       ft_flow6_table_record_ptr, ft_flow6_table_entry_ptr,
                       test_key6, FT_FLOW6_DEFAULT_MIN_NB_BK);
 
@@ -404,6 +437,7 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
                       ft_flowu_table_del_entry_idx_bulk, ft_flowu_table_walk,
                       ft_flowu_table_grow_2x, ft_flowu_table_reserve,
+                      ft_flowu_table_maintain_idx_bulk,
                       ft_flowu_table_record_ptr, ft_flowu_table_entry_ptr,
                       test_keyu, FT_FLOWU_DEFAULT_MIN_NB_BK);
 
@@ -1180,6 +1214,317 @@ test_del_idx(void)
     return 0;
 }
 
+static int
+test_maintain_basic(void)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    const uint64_t expire_tsc = UINT64_C(100000);
+    struct ft_flow4_table ft;
+    struct test_user_record *pool;
+    struct flow4_key keys[16];
+    struct flow4_key new_key;
+    uint32_t expired[16];
+    unsigned n;
+    unsigned next_bk;
+
+    printf("[T] flow4 table maintain basic\n");
+    /* expire_tsc=100000; ts_shift=4 → timeout_encoded=6250 */
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+        FAIL("init failed");
+
+    /* Add 8 entries (TEST_NOW_ADD = 0x101 = 257) */
+    for (unsigned i = 0; i < 8u; i++) {
+        keys[i] = test_key(i + 50000u);
+        if (test_add_idx_key(&ft, i + 1u, &keys[i]) != i + 1u)
+            FAILF("add failed at %u", i);
+    }
+    if (ft_flow4_table_nb_entries(&ft) != 8u)
+        FAIL("should have 8 entries");
+
+    /* maintain with expire_tsc=0 should do nothing */
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(999999), 0u, expired, 16u, 0u, &next_bk);
+    if (n != 0u)
+        FAIL("maintain with expire_tsc=0 should return 0");
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(200000), expire_tsc,
+                                expired, 16u, 0u, &next_bk);
+    if (n != 8u)
+        FAIL("maintain expire_tsc override should expire entries");
+    if (ft_flow4_table_nb_entries(&ft) != 0u)
+        FAIL("override maintain should remove all entries");
+
+    for (unsigned i = 0; i < 8u; i++) {
+        struct flow4_entry *e = ft_flow4_table_entry_ptr(&ft, i + 1u);
+
+        if (e == NULL)
+            FAIL("entry ptr failed");
+        e->meta.cur_hash = 0u;
+        e->meta.slot = 0u;
+        flow_timestamp_clear(&e->meta);
+        if (test_add_idx_key(&ft, i + 1u, &keys[i]) != i + 1u)
+            FAILF("re-add failed at %u", i);
+    }
+    /* Verify: at now=1000, entries (added at TEST_NOW_ADD=0x101) are NOT expired */
+    {
+        struct flow4_entry *e = ft_flow4_table_entry_ptr(&ft, 1u);
+        if (flow_timestamp_is_expired(&e->meta, UINT64_C(1000),
+                                      expire_tsc, ft.ts_shift))
+            FAIL("entry should NOT be expired at now=1000");
+    }
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(1000), expire_tsc,
+                                expired, 16u, 0u, &next_bk);
+    if (n != 0u)
+        FAIL("no entries should be expired yet");
+    if (ft_flow4_table_nb_entries(&ft) != 8u)
+        FAIL("should still have 8 entries");
+
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(200000), UINT64_C(300000),
+                                expired, 16u, 0u, &next_bk);
+    if (n != 0u)
+        FAIL("longer expire_tsc override should keep entries");
+
+    /* Verify: at now=200000, entries ARE expired */
+    {
+        struct flow4_entry *e = ft_flow4_table_entry_ptr(&ft, 1u);
+        if (!flow_timestamp_is_expired(&e->meta, UINT64_C(200000),
+                                       expire_tsc, ft.ts_shift))
+            FAIL("entry should be expired at now=200000");
+    }
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(200000), expire_tsc,
+                                expired, 16u, 0u, &next_bk);
+    if (n != 8u)
+        FAILF("should expire 8 entries, got %u", n);
+    if (ft_flow4_table_nb_entries(&ft) != 0u)
+        FAIL("should have 0 entries after maintain");
+
+    /* expired entries should no longer be findable */
+    for (unsigned i = 0; i < 8u; i++) {
+        if (FT4_FIND(&ft, &keys[i]) != 0u)
+            FAILF("expired entry still found i=%u", i);
+    }
+
+    /*
+     * Contract: maintain() returns expired idx to the user, and after user
+     * reclaim/reset that same idx can be reused.
+     */
+    {
+        struct flow4_entry *entry = ft_flow4_table_entry_ptr(&ft, 1u);
+
+        if (entry == NULL)
+            FAIL("entry_ptr NULL after maintain");
+        entry->meta.cur_hash = 0u;
+        entry->meta.slot = 0u;
+        flow_timestamp_clear(&entry->meta);
+    }
+    new_key = test_key(90000u);
+    if (test_add_idx_key(&ft, 1u, &new_key) != 1u)
+        FAIL("same-idx reuse add failed");
+    if (FT4_FIND(&ft, &keys[0]) != 0u)
+        FAIL("old key should remain missing after same-idx reuse");
+    if (FT4_FIND(&ft, &new_key) != 1u)
+        FAIL("new key should be found after same-idx reuse");
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+static int
+test_maintain_partial_and_limit(void)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    const uint64_t expire_tsc = UINT64_C(100000);
+    struct ft_flow4_table ft;
+    struct test_user_record *pool;
+    struct flow4_key keys[16];
+    struct flow4_entry *entry;
+    uint32_t expired[4];
+    unsigned n, total_expired;
+    unsigned next_bk;
+
+    printf("[T] flow4 table maintain partial expiry and max_expired limit\n");
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+        FAIL("init failed");
+
+    /* Add 8 entries (TEST_NOW_ADD = 0x101 = 257) */
+    for (unsigned i = 0; i < 8u; i++) {
+        keys[i] = test_key(i + 60000u);
+        if (test_add_idx_key(&ft, i + 1u, &keys[i]) != i + 1u)
+            FAILF("add failed at %u", i);
+    }
+
+    /* Touch entries 5..8 with a recent timestamp so they survive maintain */
+    for (unsigned i = 4; i < 8u; i++) {
+        entry = ft_flow4_table_entry_ptr(&ft, i + 1u);
+        if (entry == NULL)
+            FAILF("entry_ptr NULL at %u", i);
+        flow_timestamp_store(&entry->meta, UINT64_C(150000),
+                             ft.ts_shift);
+    }
+
+    /* Verify expiry expectations at now=200000 using helpers:
+     * entries 1..4 (ts=TEST_NOW_ADD=257) should be expired,
+     * entries 5..8 (ts=150000) should NOT be expired */
+    for (unsigned i = 0; i < 8u; i++) {
+        entry = ft_flow4_table_entry_ptr(&ft, i + 1u);
+        int is_exp = flow_timestamp_is_expired(&entry->meta,
+                                               UINT64_C(200000),
+                                               expire_tsc, ft.ts_shift);
+        if (i < 4u && !is_exp)
+            FAILF("entry %u should be expired", i);
+        if (i >= 4u && is_exp)
+            FAILF("entry %u should NOT be expired", i);
+    }
+
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(200000), expire_tsc,
+                                expired, 16u, 0u, &next_bk);
+    if (n != 4u)
+        FAILF("should expire 4 entries, got %u", n);
+    if (ft_flow4_table_nb_entries(&ft) != 4u)
+        FAILF("should have 4 entries, got %u", ft_flow4_table_nb_entries(&ft));
+
+    /* expired entries (1..4) should not be findable */
+    for (unsigned i = 0; i < 4u; i++) {
+        if (FT4_FIND(&ft, &keys[i]) != 0u)
+            FAILF("expired entry still found i=%u", i);
+    }
+    /* surviving entries (5..8) should still be findable */
+    for (unsigned i = 4; i < 8u; i++) {
+        if (FT4_FIND(&ft, &keys[i]) != i + 1u)
+            FAILF("surviving entry not found i=%u", i);
+    }
+
+    /* Test max_expired limit with next_bk continuation.
+     * Use a fresh table to avoid flush+re-add cur_hash issues. */
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool 2");
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+        FAIL("init 2 failed");
+
+    for (unsigned i = 0; i < 8u; i++) {
+        keys[i] = test_key(i + 70000u);
+        if (test_add_idx_key(&ft, i + 1u, &keys[i]) != i + 1u)
+            FAILF("add2 failed at %u", i);
+    }
+
+    /* Sweep with max_expired=4, then continue from next_bk
+     * now=500000 → all entries at TEST_NOW_ADD=257 are well expired */
+    total_expired = 0u;
+    next_bk = 0u;
+    for (unsigned pass = 0; pass < 10u; pass++) {
+        n = ft_flow4_table_maintain(&ft, next_bk, UINT64_C(500000), expire_tsc,
+                                    expired, 4u, 0u, &next_bk);
+        total_expired += n;
+        if (total_expired >= 8u)
+            break;
+    }
+    if (total_expired != 8u)
+        FAILF("loop should expire all 8, got %u", total_expired);
+    if (ft_flow4_table_nb_entries(&ft) != 0u)
+        FAIL("should have 0 entries after full sweep");
+
+    /* Stats check */
+    {
+        struct ft_table_stats stats;
+        ft_flow4_table_stats(&ft, &stats);
+        if (stats.maint_evictions == 0u)
+            FAIL("maint_evictions should be > 0");
+        if (stats.maint_calls == 0u)
+            FAIL("maint_calls should be > 0");
+        if (stats.maint_bucket_checks == 0u)
+            FAIL("maint_bucket_checks should be > 0");
+    }
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+static int
+test_maintain_min_bk_entries(void)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    const uint64_t expire_tsc = UINT64_C(100000);
+    struct ft_flow4_table ft;
+    struct test_user_record *pool;
+    struct flow4_key keys[16];
+    struct flow4_entry *entry;
+    uint32_t expired[16];
+    unsigned n;
+    unsigned next_bk;
+
+    printf("[T] flow4 table maintain min_bk_entries skip\n");
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+        FAIL("init failed");
+
+    /* Add 8 entries, all expired */
+    for (unsigned i = 0; i < 8u; i++) {
+        keys[i] = test_key(i + 80000u);
+        if (test_add_idx_key(&ft, i + 1u, &keys[i]) != i + 1u)
+            FAILF("add failed at %u", i);
+    }
+
+    /* Verify all are expired at now=200000 */
+    for (unsigned i = 0; i < 8u; i++) {
+        entry = ft_flow4_table_entry_ptr(&ft, i + 1u);
+        if (!flow_timestamp_is_expired(&entry->meta, UINT64_C(200000),
+                                       expire_tsc, ft.ts_shift))
+            FAILF("entry %u should be expired", i);
+    }
+
+    /* min_bk_entries=0: should expire all 8 (no skip) */
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(200000), expire_tsc,
+                                expired, 16u, 0u, &next_bk);
+    if (n != 8u)
+        FAILF("min_bk=0 should expire 8, got %u", n);
+
+    /* Re-create table for skip test */
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool 2");
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+        FAIL("init 2 failed");
+
+    for (unsigned i = 0; i < 8u; i++) {
+        keys[i] = test_key(i + 80000u);
+        if (test_add_idx_key(&ft, i + 1u, &keys[i]) != i + 1u)
+            FAILF("add2 failed at %u", i);
+    }
+
+    /* min_bk_entries=16: only buckets with >=16 entries are scanned.
+     * 8 entries across many buckets means all buckets have < 16 → all skipped */
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(200000), expire_tsc,
+                                expired, 16u, 16u, &next_bk);
+    if (n != 0u)
+        FAILF("min_bk=16 should skip all, got %u expired", n);
+    if (ft_flow4_table_nb_entries(&ft) != 8u)
+        FAILF("should still have 8 entries, got %u", ft_flow4_table_nb_entries(&ft));
+
+    /* min_bk_entries=1: equivalent to 0 (no skip), should expire all */
+    n = ft_flow4_table_maintain(&ft, 0u, UINT64_C(200000), expire_tsc,
+                                expired, 16u, 1u, &next_bk);
+    if (n != 8u)
+        FAILF("min_bk=1 should expire 8, got %u", n);
+
+    ft_flow4_table_destroy(&ft);
+    free(pool);
+    return 0;
+}
+
 /*
  * Fuzz: random insert/find/delete with internal model validation.
  * Detects correctness issues under unpredictable access patterns.
@@ -1293,14 +1638,14 @@ testv_bind_key(const struct test_variant_ops *ops, void *ft,
     memcpy(entry, key, ops->key_size);
 }
 
-static struct flow_hashtbl_elm *
+static struct flow_entry_meta *
 testv_meta_ptr(const struct test_variant_ops *ops, void *ft, uint32_t entry_idx)
 {
     unsigned char *entry = (unsigned char *)ops->entry_ptr(ft, entry_idx);
 
     if (entry == NULL)
         return NULL;
-    return (struct flow_hashtbl_elm *)(void *)(entry + ops->meta_offset);
+    return (struct flow_entry_meta *)(void *)(entry + ops->meta_offset);
 }
 
 static uint32_t
@@ -1759,8 +2104,8 @@ testv_timestamp_update(const struct test_variant_ops *ops)
     uint32_t idxv[1] = { 2u };
     uint32_t unused_idxv[1];
     unsigned unused_n;
-    struct flow_hashtbl_elm *meta1;
-    struct flow_hashtbl_elm *meta2;
+    struct flow_entry_meta *meta1;
+    struct flow_entry_meta *meta2;
 
     printf("[T] %s table timestamp update\n", ops->name);
     if (pool == NULL || keys == NULL)
@@ -1833,6 +2178,174 @@ testv_timestamp_update(const struct test_variant_ops *ops)
         FAIL("shifted find timestamp mismatch");
 
     ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_permanent_timestamp(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(32u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(4u, ops->key_size);
+    uint32_t idxv[1];
+    uint32_t unused_idxv[1];
+    struct flow_entry_meta *meta1;
+    struct flow_entry_meta *meta2;
+    unsigned unused_n;
+
+    printf("[T] %s table permanent timestamp\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init(&ft, pool, 32u, &cfg) != 0)
+        FAIL("init failed");
+
+    ops->make_key(TEST_KEY_AT(keys, ops, 0u), 3000u);
+    testv_bind_key(ops, &ft, 1u, TEST_KEY_AT(keys, ops, 0u));
+    if (TEST_OPS_ADD_IDX(ops, &ft, 1u) != 1u)
+        FAIL("add failed");
+    if (ops->set_permanent_idx(&ft, 1u) != 0)
+        FAIL("set_permanent_idx failed");
+
+    meta1 = testv_meta_ptr(ops, &ft, 1u);
+    if (meta1 == NULL || !flow_timestamp_is_zero(meta1))
+        FAIL("permanent entry should have zero timestamp");
+
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0u)) != 1u)
+        FAIL("permanent entry find failed");
+    if (!flow_timestamp_is_zero(meta1))
+        FAIL("find should not update permanent timestamp");
+
+    testv_bind_key(ops, &ft, 2u, TEST_KEY_AT(keys, ops, 0u));
+    idxv[0] = 2u;
+    unused_idxv[0] = 0u;
+    unused_n = ops->add_idx_bulk(&ft, idxv, 1u, FT_ADD_IGNORE,
+                                 TEST_NOW_DUP, unused_idxv);
+    if (unused_n != 1u || idxv[0] != 1u || unused_idxv[0] != 2u)
+        FAIL("permanent duplicate ignore mismatch");
+    if (!flow_timestamp_is_zero(meta1))
+        FAIL("ignore duplicate should not update permanent timestamp");
+
+    meta2 = testv_meta_ptr(ops, &ft, 2u);
+    if (meta2 == NULL || !flow_timestamp_is_zero(meta2))
+        FAIL("ignored request timestamp should stay zero");
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_maintain_idx_bulk(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    const uint64_t expire_tsc = UINT64_C(100000);
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(2048u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(2048u, ops->key_size);
+    unsigned *bucket_of_idx = NULL;
+    unsigned *bucket_counts = NULL;
+    uint32_t expired_idxv[16];
+    uint32_t hit_idxv[1];
+    unsigned target_bk = UINT_MAX;
+    unsigned nb_bk;
+    unsigned inserted = 0u;
+    unsigned old_count = 0u;
+    uint32_t old_idxv[16];
+    uint8_t seen_old[129];
+    unsigned evicted;
+
+    printf("[T] %s table maintain_idx_bulk\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+
+    if (ops->init(&ft, pool, 2048u, &cfg) != 0)
+        FAIL("init failed");
+    nb_bk = ops->nb_bk(&ft);
+    bucket_of_idx = calloc(2049u, sizeof(*bucket_of_idx));
+    bucket_counts = calloc(nb_bk, sizeof(*bucket_counts));
+    if (bucket_of_idx == NULL || bucket_counts == NULL)
+        FAIL("alloc bucket state failed");
+
+    for (unsigned i = 0u; i < 2048u; i++) {
+        struct flow_entry_meta *meta;
+        unsigned bk;
+
+        ops->make_key(TEST_KEY_AT(keys, ops, i), i + 10000u);
+        testv_bind_key(ops, &ft, i + 1u, TEST_KEY_AT(keys, ops, i));
+        if (TEST_OPS_ADD_IDX(ops, &ft, i + 1u) != i + 1u)
+            FAIL("seed add failed");
+        meta = testv_meta_ptr(ops, &ft, i + 1u);
+        if (meta == NULL)
+            FAIL("meta ptr failed");
+        bk = meta->cur_hash & (ops->nb_bk(&ft) - 1u);
+        bucket_of_idx[i + 1u] = bk;
+        bucket_counts[bk]++;
+        inserted = i + 1u;
+        if (bucket_counts[bk] >= 2u) {
+            target_bk = bk;
+            break;
+        }
+    }
+    if (target_bk == UINT_MAX)
+        FAIL("failed to find bucket with multiple entries");
+
+    memset(seen_old, 0, sizeof(seen_old));
+    hit_idxv[0] = 0u;
+    for (unsigned idx = 1u; idx <= inserted; idx++) {
+        struct flow_entry_meta *meta;
+
+        if (bucket_of_idx[idx] != target_bk)
+            continue;
+        meta = testv_meta_ptr(ops, &ft, idx);
+        if (meta == NULL)
+            FAIL("meta ptr failed");
+        if (hit_idxv[0] == 0u) {
+            hit_idxv[0] = idx;
+            flow_timestamp_store(meta, UINT64_C(200000),
+                                 FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        } else {
+            if (old_count >= 16u)
+                FAIL("too many entries in target bucket for test");
+            old_idxv[old_count++] = idx;
+            flow_timestamp_store(meta, UINT64_C(16), FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        }
+    }
+    if (hit_idxv[0] == 0u || old_count == 0u)
+        FAIL("target bucket selection failed");
+
+    memset(expired_idxv, 0, sizeof(expired_idxv));
+    evicted = ops->maintain_idx_bulk(&ft, hit_idxv, 1u, UINT64_C(200000),
+                                     expire_tsc, expired_idxv, 16u, 1u);
+    if (evicted != old_count)
+        FAIL("maintain_idx_bulk evicted count mismatch");
+    for (unsigned i = 0u; i < evicted; i++) {
+        uint32_t idx = expired_idxv[i];
+
+        if (idx == 0u || idx > inserted)
+            FAIL("maintain_idx_bulk expired idx invalid");
+        if (bucket_of_idx[idx] != target_bk)
+            FAIL("maintain_idx_bulk expired wrong bucket");
+        seen_old[idx] = 1u;
+    }
+    for (unsigned i = 0u; i < old_count; i++) {
+        if (seen_old[old_idxv[i]] == 0u)
+            FAIL("maintain_idx_bulk missed expired idx");
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, old_idxv[i] - 1u)) != 0u)
+            FAIL("expired key should miss after maintain_idx_bulk");
+    }
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, hit_idxv[0] - 1u))
+        != hit_idxv[0])
+        FAIL("kept key should still hit after maintain_idx_bulk");
+
+    ops->destroy(&ft);
+    free(bucket_counts);
+    free(bucket_of_idx);
     free(keys);
     free(pool);
     return 0;
@@ -2038,6 +2551,10 @@ test_variant_suite(const struct test_variant_ops *ops)
         return 1;
     if (testv_timestamp_update(ops) != 0)
         return 1;
+    if (testv_permanent_timestamp(ops) != 0)
+        return 1;
+    if (testv_maintain_idx_bulk(ops) != 0)
+        return 1;
     if (testv_walk_flush_and_del_idx(ops) != 0)
         return 1;
     if (testv_manual_grow_preserves_entries(ops) != 0)
@@ -2082,6 +2599,14 @@ main(void)
     if (test_allocator_failure_and_max_bucket_limit() != 0)
         return 1;
     if (test_config_rounding_and_clamp() != 0)
+        return 1;
+
+    /* maintain */
+    if (test_maintain_basic() != 0)
+        return 1;
+    if (test_maintain_partial_and_limit() != 0)
+        return 1;
+    if (test_maintain_min_bk_entries() != 0)
         return 1;
 
     /* fill / kickout / fuzz */

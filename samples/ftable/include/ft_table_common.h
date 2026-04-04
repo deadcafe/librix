@@ -178,7 +178,42 @@ struct ft_table_stats {
     uint64_t grow_execs;
     uint64_t grow_failures;
     uint64_t reserve_calls;
+    uint64_t maint_calls;
+    uint64_t maint_bucket_checks;
+    uint64_t maint_evictions;
 };
+
+/*===========================================================================
+ * Protocol-free maintenance context
+ *===========================================================================*/
+struct ft_maint_ctx {
+    struct rix_hash_bucket_s *buckets;
+    unsigned                  rhh_mask;
+    unsigned                 *rhh_nb;
+    const unsigned char      *pool_base;
+    size_t                    pool_stride;
+    size_t                    meta_off;
+    uint8_t                   ts_shift;
+    struct ft_table_stats    *stats;
+};
+
+unsigned ft_table_maintain(const struct ft_maint_ctx *ctx,
+                           unsigned start_bk,
+                           uint64_t now,
+                           uint64_t expire_tsc,
+                           uint32_t *expired_idxv,
+                           unsigned max_expired,
+                           unsigned min_bk_entries,
+                           unsigned *next_bk);
+
+unsigned ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
+                                    const uint32_t *entry_idxv,
+                                    unsigned nb_idx,
+                                    uint64_t now,
+                                    uint64_t expire_tsc,
+                                    uint32_t *expired_idxv,
+                                    unsigned max_expired,
+                                    unsigned min_bk_entries);
 
 /**
  * @brief One-time CPU detection and SIMD dispatch selection.

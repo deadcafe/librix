@@ -19,6 +19,8 @@
 #include <string.h>
 #include <time.h>
 
+#include <bench/bench_scope.h>
+
 #include "flow_table.h"
 
 enum {
@@ -32,6 +34,7 @@ enum {
     FTB_COLD_REPEAT = 7u,
     FTB_SAMPLE_MAX = 64u,
     FTB_DEFAULT_ENTRIES = 1048576u,
+    FTB_MAINT_MAX_EXPIRED = 512u,
     FTB_COLD_BYTES = 64u * 1024u * 1024u
 };
 
@@ -99,6 +102,17 @@ struct ftb_variant_ops {
     void (*del_entry_idx_bulk)(void *ft, const uint32_t *entry_idxv,
                                unsigned nb_keys);
     int (*grow_2x)(void *ft);
+    unsigned (*maintain)(void *ft, unsigned start_bk, uint64_t now,
+                         uint64_t expire_tsc, uint32_t *expired_idxv,
+                         unsigned max_expired, unsigned min_bk_entries,
+                         unsigned *next_bk);
+    unsigned (*maintain_idx_bulk)(void *ft, const uint32_t *entry_idxv,
+                                  unsigned nb_idx, uint64_t now,
+                                  uint64_t expire_tsc,
+                                  uint32_t *expired_idxv,
+                                  unsigned max_expired,
+                                  unsigned min_bk_entries);
+    struct flow_entry_meta *(*entry_meta)(void *entry);
     void (*make_key)(void *out, unsigned i);
 };
 
@@ -311,13 +325,15 @@ ftb_print_usage(FILE *out, const char *prog)
             "  -k, --keep-n N           kept sample count (1..%u)\n"
             "  -q, --query N            query batch size (1..%u)\n"
             "  -g, --grow               run grow benchmark instead of datapath\n"
+            "  -m, --maint              run maintain benchmark instead of datapath\n"
             "  -p, --pin-core CORE      pin benchmark to a CPU core\n"
             "  -h, --help               show this help\n",
             prog, FTB_SAMPLE_MAX, FTB_SAMPLE_MAX, FTB_QUERY_MAX);
 }
 
 static int
-ftb_parse_options(int argc, char **argv, unsigned *arch_enable, int *run_grow)
+ftb_parse_options(int argc, char **argv, unsigned *arch_enable,
+                  int *run_grow, int *run_maint)
 {
     static const struct option long_opts[] = {
         { "arch",       required_argument, NULL, 'a' },
@@ -325,6 +341,7 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable, int *run_grow)
         { "keep-n",     required_argument, NULL, 'k' },
         { "query",      required_argument, NULL, 'q' },
         { "grow",       no_argument,       NULL, 'g' },
+        { "maint",      no_argument,       NULL, 'm' },
         { "pin-core",   required_argument, NULL, 'p' },
         { "help",       no_argument,       NULL, 'h' },
         { NULL,         0,                 NULL,  0  }
@@ -333,7 +350,7 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable, int *run_grow)
     int opt;
 
     opterr = 0;
-    while ((opt = getopt_long(argc, argv, "a:r:k:q:gp:h", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "a:r:k:q:gmp:h", long_opts, NULL)) != -1) {
         unsigned parsed = 0u;
 
         switch (opt) {
@@ -364,6 +381,9 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable, int *run_grow)
         case 'g':
             *run_grow = 1;
             break;
+        case 'm':
+            *run_maint = 1;
+            break;
         case 'p':
             if (ftb_parse_u32_text(optarg, &parsed, 1) != 0 || parsed > (unsigned)INT_MAX) {
                 fprintf(stderr, "--pin-core must be in 0..%d\n", INT_MAX);
@@ -387,6 +407,10 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable, int *run_grow)
 
     if (ftb_sample_keep_n > ftb_sample_raw_repeat) {
         fprintf(stderr, "--keep-n must be less than or equal to --raw-repeat\n");
+        return 2;
+    }
+    if (*run_grow && *run_maint) {
+        fprintf(stderr, "--grow and --maint are mutually exclusive\n");
         return 2;
     }
     return 0;
@@ -499,7 +523,8 @@ ftb_keyu(unsigned i)
                              entry_ptr_fn, add_idx_fn, find_bulk_fn,          \
                              add_idx_bulk_fn,                                 \
                              del_entry_idx_bulk_fn,                           \
-                             grow_2x_fn,                                      \
+                             grow_2x_fn, maintain_fn,                         \
+                             maintain_idx_bulk_fn,                            \
                              make_key_fn)                                     \
 static int                                                                    \
 ftb_init_##tag(void *ft, void *records, unsigned max_entries,                 \
@@ -533,6 +558,11 @@ static void *                                                                 \
 ftb_entry_ptr_##tag(void *ft, uint32_t entry_idx)                             \
 {                                                                             \
     return entry_ptr_fn((struct ft_##prefix##_table *)ft, entry_idx);         \
+}                                                                             \
+static struct flow_entry_meta *                                                \
+ftb_entry_meta_##tag(void *entry)                                             \
+{                                                                             \
+    return &((struct prefix##_entry *)entry)->meta;                           \
 }                                                                             \
 static uint32_t                                                               \
 ftb_add_idx_##tag(void *ft, uint32_t entry_idx, uint64_t now)                 \
@@ -569,6 +599,29 @@ ftb_grow_2x_##tag(void *ft)                                                   \
 {                                                                             \
     return grow_2x_fn((struct ft_##prefix##_table *)ft);                      \
 }                                                                             \
+static unsigned                                                               \
+ftb_maintain_##tag(void *ft, unsigned start_bk, uint64_t now,                 \
+                   uint64_t expire_tsc, uint32_t *expired_idxv,               \
+                   unsigned max_expired, unsigned min_bk_entries,             \
+                   unsigned *next_bk)                                         \
+{                                                                             \
+    return maintain_fn((struct ft_##prefix##_table *)ft, start_bk, now,       \
+                       expire_tsc, expired_idxv, max_expired,                 \
+                       min_bk_entries, next_bk);                              \
+}                                                                             \
+static unsigned                                                               \
+ftb_maintain_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,             \
+                            unsigned nb_idx, uint64_t now,                    \
+                            uint64_t expire_tsc,                              \
+                            uint32_t *expired_idxv,                           \
+                            unsigned max_expired,                             \
+                            unsigned min_bk_entries)                          \
+{                                                                             \
+    return maintain_idx_bulk_fn((struct ft_##prefix##_table *)ft,             \
+                                entry_idxv, nb_idx, now, expire_tsc,          \
+                                expired_idxv, max_expired,                    \
+                                min_bk_entries);                              \
+}                                                                             \
 static void                                                                   \
 ftb_make_key_##tag(void *out, unsigned i)                                     \
 {                                                                             \
@@ -590,6 +643,9 @@ static const struct ftb_variant_ops ftb_ops_##tag = {                         \
     .add_idx_bulk = ftb_add_idx_bulk_##tag,                                   \
     .del_entry_idx_bulk = ftb_del_entry_idx_bulk_##tag,                       \
     .grow_2x = ftb_grow_2x_##tag,                                             \
+    .maintain = ftb_maintain_##tag,                                           \
+    .maintain_idx_bulk = ftb_maintain_idx_bulk_##tag,                         \
+    .entry_meta = ftb_entry_meta_##tag,                                       \
     .make_key = ftb_make_key_##tag                                            \
 }
 
@@ -600,7 +656,9 @@ FTB_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct ftb_user_record4,
                      ft_flow4_table_add_idx, ft_flow4_table_find_bulk,
                      ft_flow4_table_add_idx_bulk,
                      ft_flow4_table_del_entry_idx_bulk,
-                     ft_flow4_table_grow_2x, ftb_key4);
+                     ft_flow4_table_grow_2x, ft_flow4_table_maintain,
+                     ft_flow4_table_maintain_idx_bulk,
+                     ftb_key4);
 
 FTB_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct ftb_user_record6,
                      ft_flow6_table_init_ex, ft_flow6_table_destroy,
@@ -609,7 +667,9 @@ FTB_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct ftb_user_record6,
                      ft_flow6_table_add_idx, ft_flow6_table_find_bulk,
                      ft_flow6_table_add_idx_bulk,
                      ft_flow6_table_del_entry_idx_bulk,
-                     ft_flow6_table_grow_2x, ftb_key6);
+                     ft_flow6_table_grow_2x, ft_flow6_table_maintain,
+                     ft_flow6_table_maintain_idx_bulk,
+                     ftb_key6);
 
 FTB_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct ftb_user_recordu,
                      ft_flowu_table_init_ex, ft_flowu_table_destroy,
@@ -618,7 +678,9 @@ FTB_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct ftb_user_recordu,
                      ft_flowu_table_add_idx, ft_flowu_table_find_bulk,
                      ft_flowu_table_add_idx_bulk,
                      ft_flowu_table_del_entry_idx_bulk,
-                     ft_flowu_table_grow_2x, ftb_keyu);
+                     ft_flowu_table_grow_2x, ft_flowu_table_maintain,
+                     ft_flowu_table_maintain_idx_bulk,
+                     ftb_keyu);
 
 #define FTB_KEY_AT(base, ops, i) \
     ((void *)((unsigned char *)(base) + (size_t)(i) * (ops)->key_size))
@@ -937,6 +999,335 @@ ftb_sample_grow(const struct ftb_variant_ops *ops,
                                 ftb_sample_keep_n);
 }
 
+struct ftb_maint_metrics {
+    double cycles_per_entry;
+    double ipc;
+    double cache_hit_rate;
+};
+
+enum ftb_maint_mode {
+    FTB_MAINT_EXPIRE_DENSE = 0,
+    FTB_MAINT_NOHIT_DENSE,
+    FTB_MAINT_HIT_IDX_EXPIRE
+};
+
+static uint64_t
+ftb_perf_value(const struct bench_scope_sample *sample,
+               enum bench_scope_event_kind kind)
+{
+    for (unsigned i = 0; i < sample->count; i++) {
+        if (sample->values[i].kind == kind)
+            return sample->values[i].value;
+    }
+    return 0u;
+}
+
+static void
+ftb_prepare_maint_table(const struct ftb_variant_ops *ops, void *ft,
+                        unsigned entries, unsigned fill_pct, unsigned key_base,
+                        enum ftb_maint_mode mode)
+{
+    unsigned live = ftb_fill_target(entries, fill_pct);
+
+    ftb_prefill(ops, ft, live, key_base);
+    if (mode == FTB_MAINT_NOHIT_DENSE) {
+        for (unsigned i = 0; i < live; i++) {
+            void *entry = ops->entry_ptr(ft, i + 1u);
+            struct flow_entry_meta *meta;
+
+            if (entry == NULL) {
+                fprintf(stderr, "maint setup entry_ptr failed for %s at %u\n",
+                        ops->name, i);
+                exit(1);
+            }
+            meta = ops->entry_meta(entry);
+            flow_timestamp_store(meta, UINT64_C(150000), FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        }
+    }
+}
+
+static unsigned
+ftb_prepare_maint_hit_idx(const struct ftb_variant_ops *ops, void *ft,
+                          unsigned entries, unsigned fill_pct, unsigned key_base,
+                          void *keys, uint32_t *hit_idxv, uint64_t *used_out)
+{
+    unsigned live = ftb_fill_target(entries, fill_pct);
+    unsigned nb_bk;
+    unsigned *bucket_of_idx;
+    unsigned *bucket_counts;
+    unsigned *keeper_by_bk;
+    unsigned hit_n = 0u;
+    uint64_t used_sum = 0u;
+
+    ftb_prefill(ops, ft, live, key_base);
+    nb_bk = ops->nb_bk(ft);
+    bucket_of_idx = ftb_xcalloc(live + 1u, sizeof(*bucket_of_idx));
+    bucket_counts = ftb_xcalloc(nb_bk, sizeof(*bucket_counts));
+    keeper_by_bk = ftb_xcalloc(nb_bk, sizeof(*keeper_by_bk));
+
+    for (unsigned idx = 1u; idx <= live; idx++) {
+        void *entry = ops->entry_ptr(ft, idx);
+        struct flow_entry_meta *meta = ops->entry_meta(entry);
+        unsigned bk = meta->cur_hash & (nb_bk - 1u);
+
+        bucket_of_idx[idx] = bk;
+        bucket_counts[bk]++;
+    }
+
+    for (unsigned idx = 1u; idx <= live && hit_n < ftb_query_n; idx++) {
+        unsigned bk = bucket_of_idx[idx];
+
+        if (bucket_counts[bk] < 2u || keeper_by_bk[bk] != 0u)
+            continue;
+        keeper_by_bk[bk] = idx;
+        hit_idxv[hit_n] = idx;
+        memcpy(FTB_KEY_AT(keys, ops, hit_n), ops->entry_ptr(ft, idx),
+               ops->key_size);
+        used_sum += bucket_counts[bk];
+        hit_n++;
+    }
+
+    for (unsigned idx = 1u; idx <= live; idx++) {
+        void *entry = ops->entry_ptr(ft, idx);
+        struct flow_entry_meta *meta = ops->entry_meta(entry);
+        unsigned bk = bucket_of_idx[idx];
+
+        if (keeper_by_bk[bk] == 0u)
+            continue;
+        if (keeper_by_bk[bk] == idx)
+            flow_timestamp_store(meta, UINT64_C(200000), FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        else
+            flow_timestamp_store(meta, UINT64_C(16), FLOW_TIMESTAMP_DEFAULT_SHIFT);
+    }
+
+    free(keeper_by_bk);
+    free(bucket_counts);
+    free(bucket_of_idx);
+    if (used_out != NULL)
+        *used_out = used_sum;
+    return hit_n;
+}
+
+static int
+ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
+                            unsigned entries, unsigned fill_pct,
+                            enum ftb_maint_mode mode,
+                            const enum bench_scope_event_kind *kinds,
+                            unsigned kind_count,
+                            struct bench_scope_sample *out,
+                            uint64_t *evicted_out,
+                            uint64_t *units_out)
+{
+    unsigned max_entries = ftb_pool_count(entries);
+    struct ft_table_config cfg = ftb_cfg(max_entries, 1);
+    union ftb_any_table ft;
+    void *pool = ftb_alloc_zero(max_entries, ops->record_size);
+    uint32_t *expired_idxv =
+        ftb_xcalloc(FTB_MAINT_MAX_EXPIRED, sizeof(*expired_idxv));
+    void *keys = NULL;
+    struct ft_table_result *results = NULL;
+    uint32_t *hit_idxv = NULL;
+    struct bench_scope_group group;
+    uint64_t now = (mode == FTB_MAINT_EXPIRE_DENSE)
+                 ? UINT64_C(200000) : UINT64_C(1000);
+    unsigned start_bk = 0u;
+    unsigned next_bk = 0u;
+    unsigned prev_bk;
+    unsigned evicted;
+    uint64_t total_evicted = 0u;
+    int rc;
+
+    if (ops->init(&ft, pool, max_entries, &cfg) != 0) {
+        fprintf(stderr, "maint bench init failed for %s\n", ops->name);
+        exit(1);
+    }
+    if (mode == FTB_MAINT_HIT_IDX_EXPIRE) {
+        unsigned hit_n;
+        uint64_t used_n = 0u;
+
+        keys = ftb_xcalloc(ftb_query_n, ops->key_size);
+        results = ftb_xcalloc(ftb_query_n, sizeof(*results));
+        hit_idxv = ftb_xcalloc(ftb_query_n, sizeof(*hit_idxv));
+        hit_n = ftb_prepare_maint_hit_idx(ops, &ft, max_entries, fill_pct,
+                                          700000u, keys, hit_idxv, &used_n);
+        if (hit_n == 0u) {
+            fprintf(stderr, "maint_hit_idx setup failed for %s\n", ops->name);
+            exit(1);
+        }
+        ops->find_bulk(&ft, keys, hit_n, FTB_NOW_FIND, results);
+        for (unsigned i = 0u; i < hit_n; i++) {
+            if (results[i].entry_idx == 0u) {
+                fprintf(stderr, "maint_hit_idx find setup miss for %s\n",
+                        ops->name);
+                exit(1);
+            }
+            hit_idxv[i] = results[i].entry_idx;
+        }
+        *units_out = used_n;
+    } else {
+        ftb_prepare_maint_table(ops, &ft, max_entries, fill_pct, 700000u, mode);
+        ftb_cold_touch();
+        *units_out = ftb_fill_target(max_entries, fill_pct);
+    }
+
+    rc = bench_scope_open(&group, kinds, kind_count);
+    if (rc != 0) {
+        ops->destroy(&ft);
+        free(hit_idxv);
+        free(results);
+        free(keys);
+        free(expired_idxv);
+        free(pool);
+        return -1;
+    }
+    if (bench_scope_begin(&group) != 0) {
+        bench_scope_close(&group);
+        ops->destroy(&ft);
+        free(hit_idxv);
+        free(results);
+        free(keys);
+        free(expired_idxv);
+        free(pool);
+        return -1;
+    }
+    if (mode == FTB_MAINT_HIT_IDX_EXPIRE) {
+        evicted = ops->maintain_idx_bulk(&ft, hit_idxv, (unsigned)*units_out,
+                                         UINT64_C(200000), UINT64_C(100000),
+                                         expired_idxv,
+                                         FTB_MAINT_MAX_EXPIRED, 2u);
+        total_evicted = evicted;
+    } else {
+        for (;;) {
+            prev_bk = start_bk;
+            evicted = ops->maintain(&ft, start_bk, now, UINT64_C(100000),
+                                    expired_idxv,
+                                    FTB_MAINT_MAX_EXPIRED, 8u, &next_bk);
+            total_evicted += evicted;
+            start_bk = next_bk;
+            if (evicted == 0u && start_bk == prev_bk)
+                break;
+        }
+    }
+    if (bench_scope_end(&group, out) != 0) {
+        bench_scope_close(&group);
+        ops->destroy(&ft);
+        free(hit_idxv);
+        free(results);
+        free(keys);
+        free(expired_idxv);
+        free(pool);
+        return -1;
+    }
+    bench_scope_close(&group);
+    ops->destroy(&ft);
+    free(hit_idxv);
+    free(results);
+    free(keys);
+    free(expired_idxv);
+    free(pool);
+    *evicted_out = total_evicted;
+    return 0;
+}
+
+static struct ftb_maint_metrics
+ftb_measure_maint_metrics(const struct ftb_variant_ops *ops,
+                          unsigned entries, unsigned fill_pct,
+                          enum ftb_maint_mode mode)
+{
+    static const enum bench_scope_event_kind ipc_kinds[] = {
+        BENCH_SCOPE_EVT_CYCLES,
+        BENCH_SCOPE_EVT_INSTRUCTIONS
+    };
+    static const enum bench_scope_event_kind cache_kinds[] = {
+        BENCH_SCOPE_EVT_CACHE_REFERENCES,
+        BENCH_SCOPE_EVT_CACHE_MISSES
+    };
+    double cycles_samples[FTB_SAMPLE_MAX];
+    double ipc_samples[FTB_SAMPLE_MAX];
+    double hit_rate_samples[FTB_SAMPLE_MAX];
+    struct ftb_maint_metrics out = { 0.0, 0.0, 0.0 };
+    unsigned max_entries = ftb_pool_count(entries);
+
+    for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
+        struct bench_scope_sample ipc_sample;
+        struct bench_scope_sample cache_sample;
+        uint64_t evicted_ipc = 0u, evicted_cache = 0u;
+        uint64_t units_ipc = 0u, units_cache = 0u;
+        uint64_t cycles, instructions, cache_refs, cache_misses;
+        double denom;
+
+        if (ftb_measure_maint_perf_once(ops, max_entries, fill_pct, mode,
+                                        ipc_kinds, 2u, &ipc_sample,
+                                        &evicted_ipc, &units_ipc) != 0) {
+            fprintf(stderr, "perf open failed for maintain ipc metrics\n");
+            exit(1);
+        }
+        if (ftb_measure_maint_perf_once(ops, max_entries, fill_pct, mode,
+                                        cache_kinds, 2u, &cache_sample,
+                                        &evicted_cache, &units_cache) != 0) {
+            fprintf(stderr, "perf open failed for maintain cache metrics\n");
+            exit(1);
+        }
+        (void)evicted_ipc;
+        (void)evicted_cache;
+        cycles = ftb_perf_value(&ipc_sample, BENCH_SCOPE_EVT_CYCLES);
+        instructions = ftb_perf_value(&ipc_sample, BENCH_SCOPE_EVT_INSTRUCTIONS);
+        cache_refs = ftb_perf_value(&cache_sample, BENCH_SCOPE_EVT_CACHE_REFERENCES);
+        cache_misses = ftb_perf_value(&cache_sample, BENCH_SCOPE_EVT_CACHE_MISSES);
+        denom = (double)units_ipc;
+        cycles_samples[r] = (denom > 0.0) ? ((double)cycles / denom) : 0.0;
+        ipc_samples[r] = (cycles != 0u)
+                       ? ((double)instructions / (double)cycles) : 0.0;
+        hit_rate_samples[r] = (cache_refs != 0u)
+                            ? (100.0 * (double)(cache_refs - cache_misses)
+                               / (double)cache_refs)
+                            : 100.0;
+    }
+    out.cycles_per_entry = ftb_aggregate_double(
+        cycles_samples, ftb_sample_raw_repeat, ftb_sample_keep_n);
+    out.ipc = ftb_aggregate_double(
+        ipc_samples, ftb_sample_raw_repeat, ftb_sample_keep_n);
+    out.cache_hit_rate = ftb_aggregate_double(
+        hit_rate_samples, ftb_sample_raw_repeat, ftb_sample_keep_n);
+    return out;
+}
+
+static void
+ftb_parse_entries_fill(int argc, char **argv, unsigned base_arg,
+                       unsigned *entries, unsigned *fill_pct);
+
+static void
+ftb_run_maint(const struct ftb_variant_ops *ops,
+              int argc, char **argv, unsigned base_arg)
+{
+    unsigned entries, fill_pct;
+    struct ftb_maint_metrics expire_dense, nohit_dense, hit_idx_expire;
+
+    ftb_parse_entries_fill(argc, argv, base_arg, &entries, &fill_pct);
+    printf("\nftable maintain benchmark (%s)\n\n", ops->name);
+    ftb_print_sampling_config();
+    printf("  maintain metrics: cycles/entry  IPC  cache-hit-rate\n");
+
+    expire_dense = ftb_measure_maint_metrics(
+        ops, entries, fill_pct, FTB_MAINT_EXPIRE_DENSE);
+    nohit_dense = ftb_measure_maint_metrics(
+        ops, entries, fill_pct, FTB_MAINT_NOHIT_DENSE);
+    hit_idx_expire = ftb_measure_maint_metrics(
+        ops, entries, fill_pct, FTB_MAINT_HIT_IDX_EXPIRE);
+
+    printf("[entries=%u fill=%u%% min_bk_entries=8 max_expired=%u expire_tsc=100000]\n",
+           ftb_pool_count(entries), fill_pct, FTB_MAINT_MAX_EXPIRED);
+    printf("  maint_expire_dense  %8.2f cy/entry  IPC %5.2f  cache-hit %6.2f%%\n",
+           expire_dense.cycles_per_entry, expire_dense.ipc,
+           expire_dense.cache_hit_rate);
+    printf("  maint_nohit_dense   %8.2f cy/entry  IPC %5.2f  cache-hit %6.2f%%\n",
+           nohit_dense.cycles_per_entry, nohit_dense.ipc,
+           nohit_dense.cache_hit_rate);
+    printf("  maint_idx_expire     %7.2f cy/entry  IPC %5.2f  cache-hit %6.2f%%\n",
+           hit_idx_expire.cycles_per_entry, hit_idx_expire.ipc,
+           hit_idx_expire.cache_hit_rate);
+}
+
 static int
 ftb_parse_u32_arg(const char *s, unsigned *out)
 {
@@ -1082,11 +1473,12 @@ main(int argc, char **argv)
     unsigned arch_enable = FT_ARCH_AUTO;
     const struct ftb_variant_ops *ops = &ftb_ops_flow4;
     int run_grow = 0;
+    int run_maint = 0;
     int pos_argc;
     char **pos_argv;
     int rc;
 
-    rc = ftb_parse_options(argc, argv, &arch_enable, &run_grow);
+    rc = ftb_parse_options(argc, argv, &arch_enable, &run_grow, &run_maint);
     if (rc == 1)
         return 0;
     if (rc != 0)
@@ -1121,6 +1513,10 @@ main(int argc, char **argv)
 
     if (run_grow) {
         ftb_run_grow(ops, pos_argc, pos_argv, 0u);
+        return 0;
+    }
+    if (run_maint) {
+        ftb_run_maint(ops, pos_argc, pos_argv, 0u);
         return 0;
     }
     ftb_run_datapath(ops, pos_argc, pos_argv, 0u);

@@ -87,6 +87,19 @@ uint32_t ft_flow4_table_add_idx(struct ft_flow4_table *ft,
                                 uint32_t entry_idx,
                                 uint64_t now);
 
+static inline int
+ft_flow4_table_set_permanent_idx(struct ft_flow4_table *ft, uint32_t entry_idx)
+{
+    struct flow4_entry *entry;
+
+    if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
+        return -1;
+    entry = FT_RECORD_MEMBER_PTR(ft->pool_base, ft->pool_stride, entry_idx,
+                                 ft->pool_entry_offset, struct flow4_entry);
+    flow_timestamp_set_permanent(&entry->meta);
+    return 0;
+}
+
 unsigned ft_flow4_table_add_idx_bulk(struct ft_flow4_table *ft,
                                      uint32_t *entry_idxv,
                                      unsigned nb_keys,
@@ -218,6 +231,62 @@ static inline uint32_t
 ft_flow4_table_del_idx(struct ft_flow4_table *ft, uint32_t entry_idx)
 {
     return ft_flow4_table_del_entry_idx(ft, entry_idx);
+}
+
+/*===========================================================================
+ * Maintenance (protocol-free, delegates to ft_table_maintain)
+ *===========================================================================*/
+
+static inline unsigned
+ft_flow4_table_maintain(struct ft_flow4_table *ft,
+                        unsigned start_bk,
+                        uint64_t now,
+                        uint64_t expire_tsc,
+                        uint32_t *expired_idxv,
+                        unsigned max_expired,
+                        unsigned min_bk_entries,
+                        unsigned *next_bk)
+{
+    struct ft_maint_ctx ctx = {
+        .buckets      = ft->buckets,
+        .rhh_mask     = ft->ht_head.rhh_mask,
+        .rhh_nb       = &ft->ht_head.rhh_nb,
+        .pool_base    = ft->pool_base,
+        .pool_stride  = ft->pool_stride,
+        .meta_off     = ft->pool_entry_offset +
+                        offsetof(struct flow4_entry, meta),
+        .ts_shift     = ft->ts_shift,
+        .stats        = &ft->stats,
+    };
+    return ft_table_maintain(&ctx, start_bk, now, expire_tsc, expired_idxv,
+                             max_expired, min_bk_entries, next_bk);
+}
+
+static inline unsigned
+ft_flow4_table_maintain_idx_bulk(struct ft_flow4_table *ft,
+                                 const uint32_t *entry_idxv,
+                                 unsigned nb_idx,
+                                 uint64_t now,
+                                 uint64_t expire_tsc,
+                                 uint32_t *expired_idxv,
+                                 unsigned max_expired,
+                                 unsigned min_bk_entries)
+{
+    struct ft_maint_ctx ctx = {
+        .buckets      = ft->buckets,
+        .rhh_mask     = ft->ht_head.rhh_mask,
+        .rhh_nb       = &ft->ht_head.rhh_nb,
+        .pool_base    = ft->pool_base,
+        .pool_stride  = ft->pool_stride,
+        .meta_off     = ft->pool_entry_offset +
+                        offsetof(struct flow4_entry, meta),
+        .ts_shift     = ft->ts_shift,
+        .stats        = &ft->stats,
+    };
+    return ft_table_maintain_idx_bulk(&ctx, entry_idxv, nb_idx, now,
+                                      expire_tsc,
+                                      expired_idxv, max_expired,
+                                      min_bk_entries);
 }
 
 #endif /* _FLOW4_TABLE_H_ */
