@@ -111,7 +111,8 @@ struct ftb_variant_ops {
                                   uint64_t expire_tsc,
                                   uint32_t *expired_idxv,
                                   unsigned max_expired,
-                                  unsigned min_bk_entries);
+                                  unsigned min_bk_entries,
+                                  int enable_filter);
     struct flow_entry_meta *(*entry_meta)(void *entry);
     void (*make_key)(void *out, unsigned i);
 };
@@ -615,12 +616,13 @@ ftb_maintain_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,             \
                             uint64_t expire_tsc,                              \
                             uint32_t *expired_idxv,                           \
                             unsigned max_expired,                             \
-                            unsigned min_bk_entries)                          \
+                            unsigned min_bk_entries,                          \
+                            int enable_filter)                                \
 {                                                                             \
     return maintain_idx_bulk_fn((struct ft_##prefix##_table *)ft,             \
                                 entry_idxv, nb_idx, now, expire_tsc,          \
                                 expired_idxv, max_expired,                    \
-                                min_bk_entries);                              \
+                                min_bk_entries, enable_filter);               \
 }                                                                             \
 static void                                                                   \
 ftb_make_key_##tag(void *out, unsigned i)                                     \
@@ -1008,7 +1010,8 @@ struct ftb_maint_metrics {
 enum ftb_maint_mode {
     FTB_MAINT_EXPIRE_DENSE = 0,
     FTB_MAINT_NOHIT_DENSE,
-    FTB_MAINT_HIT_IDX_EXPIRE
+    FTB_MAINT_HIT_IDX_EXPIRE,
+    FTB_MAINT_HIT_IDX_EXPIRE_FILTERED,
 };
 
 static uint64_t
@@ -1141,7 +1144,8 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         fprintf(stderr, "maint bench init failed for %s\n", ops->name);
         exit(1);
     }
-    if (mode == FTB_MAINT_HIT_IDX_EXPIRE) {
+    if (mode == FTB_MAINT_HIT_IDX_EXPIRE
+        || mode == FTB_MAINT_HIT_IDX_EXPIRE_FILTERED) {
         unsigned hit_n;
         uint64_t used_n = 0u;
 
@@ -1194,7 +1198,13 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         evicted = ops->maintain_idx_bulk(&ft, hit_idxv, (unsigned)*units_out,
                                          UINT64_C(200000), UINT64_C(100000),
                                          expired_idxv,
-                                         FTB_MAINT_MAX_EXPIRED, 2u);
+                                         FTB_MAINT_MAX_EXPIRED, 2u, 0);
+        total_evicted = evicted;
+    } else if (mode == FTB_MAINT_HIT_IDX_EXPIRE_FILTERED) {
+        evicted = ops->maintain_idx_bulk(&ft, hit_idxv, (unsigned)*units_out,
+                                         UINT64_C(200000), UINT64_C(100000),
+                                         expired_idxv,
+                                         FTB_MAINT_MAX_EXPIRED, 2u, 1);
         total_evicted = evicted;
     } else {
         for (;;) {
@@ -1301,7 +1311,8 @@ ftb_run_maint(const struct ftb_variant_ops *ops,
               int argc, char **argv, unsigned base_arg)
 {
     unsigned entries, fill_pct;
-    struct ftb_maint_metrics expire_dense, nohit_dense, hit_idx_expire;
+    struct ftb_maint_metrics expire_dense, nohit_dense;
+    struct ftb_maint_metrics hit_idx_expire, hit_idx_filtered;
 
     ftb_parse_entries_fill(argc, argv, base_arg, &entries, &fill_pct);
     printf("\nftable maintain benchmark (%s)\n\n", ops->name);
@@ -1314,6 +1325,8 @@ ftb_run_maint(const struct ftb_variant_ops *ops,
         ops, entries, fill_pct, FTB_MAINT_NOHIT_DENSE);
     hit_idx_expire = ftb_measure_maint_metrics(
         ops, entries, fill_pct, FTB_MAINT_HIT_IDX_EXPIRE);
+    hit_idx_filtered = ftb_measure_maint_metrics(
+        ops, entries, fill_pct, FTB_MAINT_HIT_IDX_EXPIRE_FILTERED);
 
     printf("[entries=%u fill=%u%% min_bk_entries=8 max_expired=%u expire_tsc=100000]\n",
            ftb_pool_count(entries), fill_pct, FTB_MAINT_MAX_EXPIRED);
@@ -1326,6 +1339,9 @@ ftb_run_maint(const struct ftb_variant_ops *ops,
     printf("  maint_idx_expire     %7.2f cy/entry  IPC %5.2f  cache-hit %6.2f%%\n",
            hit_idx_expire.cycles_per_entry, hit_idx_expire.ipc,
            hit_idx_expire.cache_hit_rate);
+    printf("  maint_idx_filtered   %7.2f cy/entry  IPC %5.2f  cache-hit %6.2f%%\n",
+           hit_idx_filtered.cycles_per_entry, hit_idx_filtered.ipc,
+           hit_idx_filtered.cache_hit_rate);
 }
 
 static int

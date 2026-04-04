@@ -270,7 +270,8 @@ ft_flow4_table_maintain_idx_bulk(struct ft_flow4_table *ft,
                                  uint64_t expire_tsc,
                                  uint32_t *expired_idxv,
                                  unsigned max_expired,
-                                 unsigned min_bk_entries)
+                                 unsigned min_bk_entries,
+                                 int enable_filter)
 {
     struct ft_maint_ctx ctx = {
         .buckets      = ft->buckets,
@@ -286,7 +287,7 @@ ft_flow4_table_maintain_idx_bulk(struct ft_flow4_table *ft,
     return ft_table_maintain_idx_bulk(&ctx, entry_idxv, nb_idx, now,
                                       expire_tsc,
                                       expired_idxv, max_expired,
-                                      min_bk_entries);
+                                      min_bk_entries, enable_filter);
 }
 
 #endif /* _FLOW4_TABLE_H_ */

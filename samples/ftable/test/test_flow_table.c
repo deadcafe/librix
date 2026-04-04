@@ -215,7 +215,8 @@ struct test_variant_ops {
                                   uint64_t expire_tsc,
                                   uint32_t *expired_idxv,
                                   unsigned max_expired,
-                                  unsigned min_bk_entries);
+                                  unsigned min_bk_entries,
+                                  int enable_filter);
     void *(*record_ptr)(void *ft, uint32_t entry_idx);
     void *(*entry_ptr)(void *ft, uint32_t entry_idx);
     void (*make_key)(void *out, unsigned i);
@@ -344,12 +345,13 @@ testv_maintain_idx_bulk_##tag(void *ft, const uint32_t *entry_idxv,         \
                               uint64_t expire_tsc,                          \
                               uint32_t *expired_idxv,                        \
                               unsigned max_expired,                          \
-                              unsigned min_bk_entries)                       \
+                              unsigned min_bk_entries,                       \
+                              int enable_filter)                             \
 {                                                                          \
     return maintain_idx_bulk_fn((struct ft_##prefix##_table *)ft,           \
                                 entry_idxv, nb_idx, now, expire_tsc,        \
                                 expired_idxv, max_expired,                  \
-                                min_bk_entries);                            \
+                                min_bk_entries, enable_filter);             \
 }                                                                          \
 static void *                                                               \
 testv_record_ptr_##tag(void *ft, uint32_t entry_idx)                        \
@@ -2247,6 +2249,7 @@ testv_maintain_idx_bulk(const struct test_variant_ops *ops)
     union test_any_table ft;
     void *pool = test_aligned_calloc(2048u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
+    void *pool2 = NULL;
     void *keys = calloc(2048u, ops->key_size);
     unsigned *bucket_of_idx = NULL;
     unsigned *bucket_counts = NULL;
@@ -2319,9 +2322,10 @@ testv_maintain_idx_bulk(const struct test_variant_ops *ops)
     if (hit_idxv[0] == 0u || old_count == 0u)
         FAIL("target bucket selection failed");
 
+    /* Test with enable_filter=0 */
     memset(expired_idxv, 0, sizeof(expired_idxv));
     evicted = ops->maintain_idx_bulk(&ft, hit_idxv, 1u, UINT64_C(200000),
-                                     expire_tsc, expired_idxv, 16u, 1u);
+                                     expire_tsc, expired_idxv, 16u, 1u, 0);
     if (evicted != old_count)
         FAIL("maintain_idx_bulk evicted count mismatch");
     for (unsigned i = 0u; i < evicted; i++) {
@@ -2343,10 +2347,96 @@ testv_maintain_idx_bulk(const struct test_variant_ops *ops)
         != hit_idxv[0])
         FAIL("kept key should still hit after maintain_idx_bulk");
 
+    /* Test with enable_filter=1 using a fresh table */
+    ops->destroy(&ft);
+    memset(bucket_counts, 0, nb_bk * sizeof(*bucket_counts));
+    memset(bucket_of_idx, 0, 2049u * sizeof(*bucket_of_idx));
+    pool2 = test_aligned_calloc(2048u, ops->record_size,
+                                FT_TABLE_CACHE_LINE_SIZE);
+    if (pool2 == NULL)
+        FAIL("alloc pool2 failed");
+    if (ops->init(&ft, pool2, 2048u, &cfg) != 0)
+        FAIL("init pool2 failed");
+
+    target_bk = UINT_MAX;
+    inserted = 0u;
+    for (unsigned i = 0u; i < 2048u; i++) {
+        struct flow_entry_meta *meta;
+        unsigned bk;
+
+        ops->make_key(TEST_KEY_AT(keys, ops, i), i + 20000u);
+        testv_bind_key(ops, &ft, i + 1u, TEST_KEY_AT(keys, ops, i));
+        if (TEST_OPS_ADD_IDX(ops, &ft, i + 1u) != i + 1u)
+            FAIL("seed add (filtered) failed");
+        meta = testv_meta_ptr(ops, &ft, i + 1u);
+        if (meta == NULL)
+            FAIL("meta ptr (filtered) failed");
+        bk = meta->cur_hash & (ops->nb_bk(&ft) - 1u);
+        bucket_of_idx[i + 1u] = bk;
+        bucket_counts[bk]++;
+        inserted = i + 1u;
+        if (bucket_counts[bk] >= 2u) {
+            target_bk = bk;
+            break;
+        }
+    }
+    if (target_bk == UINT_MAX)
+        FAIL("failed to find bucket (filtered)");
+
+    memset(seen_old, 0, sizeof(seen_old));
+    hit_idxv[0] = 0u;
+    old_count = 0u;
+    for (unsigned idx = 1u; idx <= inserted; idx++) {
+        struct flow_entry_meta *meta;
+
+        if (bucket_of_idx[idx] != target_bk)
+            continue;
+        meta = testv_meta_ptr(ops, &ft, idx);
+        if (meta == NULL)
+            FAIL("meta ptr (filtered) failed");
+        if (hit_idxv[0] == 0u) {
+            hit_idxv[0] = idx;
+            flow_timestamp_store(meta, UINT64_C(200000),
+                                 FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        } else {
+            if (old_count >= 16u)
+                FAIL("too many entries in target bucket (filtered)");
+            old_idxv[old_count++] = idx;
+            flow_timestamp_store(meta, UINT64_C(16), FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        }
+    }
+    if (hit_idxv[0] == 0u || old_count == 0u)
+        FAIL("target bucket selection (filtered) failed");
+
+    memset(expired_idxv, 0, sizeof(expired_idxv));
+    evicted = ops->maintain_idx_bulk(&ft, hit_idxv, 1u, UINT64_C(200000),
+                                     expire_tsc, expired_idxv, 16u, 1u, 1);
+    if (evicted != old_count)
+        FAIL("maintain_idx_bulk (filtered) evicted count mismatch");
+    for (unsigned i = 0u; i < evicted; i++) {
+        uint32_t idx = expired_idxv[i];
+
+        if (idx == 0u || idx > inserted)
+            FAIL("maintain_idx_bulk (filtered) expired idx invalid");
+        if (bucket_of_idx[idx] != target_bk)
+            FAIL("maintain_idx_bulk (filtered) expired wrong bucket");
+        seen_old[idx] = 1u;
+    }
+    for (unsigned i = 0u; i < old_count; i++) {
+        if (seen_old[old_idxv[i]] == 0u)
+            FAIL("maintain_idx_bulk (filtered) missed expired idx");
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, old_idxv[i] - 1u)) != 0u)
+            FAIL("expired key should miss after maintain_idx_bulk (filtered)");
+    }
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, hit_idxv[0] - 1u))
+        != hit_idxv[0])
+        FAIL("kept key should still hit after maintain_idx_bulk (filtered)");
+
     ops->destroy(&ft);
     free(bucket_counts);
     free(bucket_of_idx);
     free(keys);
+    free(pool2);
     free(pool);
     return 0;
 }

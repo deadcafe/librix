@@ -197,6 +197,28 @@ struct ft_maint_ctx {
     struct ft_table_stats    *stats;
 };
 
+/**
+ * @brief Sweep buckets linearly and evict expired entries.
+ *
+ * Scans buckets starting from @p start_bk, wrapping around the full
+ * table if needed, until @p max_expired entries have been collected or
+ * all buckets have been visited.  Buckets whose occupancy is below
+ * @p min_bk_entries are skipped.
+ *
+ * @param ctx            Maintenance context (pool layout, buckets, stats).
+ * @param start_bk       Bucket index to begin scanning (masked internally).
+ * @param now            Current timestamp (raw TSC / nanoseconds).
+ * @param expire_tsc     Expiry threshold in the same unit as @p now.
+ *                       Entries older than @p now - @p expire_tsc are evicted.
+ *                       Pass 0 to disable expiry (returns 0 immediately).
+ * @param expired_idxv   Output array receiving evicted entry indices.
+ * @param max_expired    Capacity of @p expired_idxv.
+ * @param min_bk_entries Skip buckets with fewer than this many occupied slots.
+ *                       Use 0 or 1 to scan every bucket unconditionally.
+ * @param next_bk        If non-NULL, receives the next bucket index to resume
+ *                       scanning in a subsequent call.
+ * @return Number of evicted entries written to @p expired_idxv.
+ */
 unsigned ft_table_maintain(const struct ft_maint_ctx *ctx,
                            unsigned start_bk,
                            uint64_t now,
@@ -206,6 +228,30 @@ unsigned ft_table_maintain(const struct ft_maint_ctx *ctx,
                            unsigned min_bk_entries,
                            unsigned *next_bk);
 
+/**
+ * @brief Evict expired entries from buckets derived from a list of entry indices.
+ *
+ * For each entry in @p entry_idxv, reads its flow_entry_meta to determine
+ * the owning bucket, then scans that bucket for expired entries.  Uses a
+ * three-stage software pipeline (meta prefetch -> bucket identification
+ * + bucket prefetch -> bucket scan) to hide memory latency.
+ *
+ * @param ctx            Maintenance context (pool layout, buckets, stats).
+ * @param entry_idxv     Array of entry indices whose buckets are to be scanned.
+ * @param nb_idx         Number of entries in @p entry_idxv.
+ * @param now            Current timestamp (raw TSC / nanoseconds).
+ * @param expire_tsc     Expiry threshold in the same unit as @p now.
+ *                       Pass 0 to disable expiry (returns 0 immediately).
+ * @param expired_idxv   Output array receiving evicted entry indices.
+ * @param max_expired    Capacity of @p expired_idxv.
+ * @param min_bk_entries Skip buckets with fewer than this many occupied slots.
+ *                       Use 0 or 1 to scan every bucket unconditionally.
+ * @param enable_filter  If non-zero, enable a direct-mapped duplicate bucket
+ *                       filter (64-entry cache) to skip buckets already scanned
+ *                       in this call.  Effective when @p nb_idx is large and
+ *                       many entries map to the same bucket.
+ * @return Number of evicted entries written to @p expired_idxv.
+ */
 unsigned ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
                                     const uint32_t *entry_idxv,
                                     unsigned nb_idx,
@@ -213,7 +259,8 @@ unsigned ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
                                     uint64_t expire_tsc,
                                     uint32_t *expired_idxv,
                                     unsigned max_expired,
-                                    unsigned min_bk_entries);
+                                    unsigned min_bk_entries,
+                                    int enable_filter);
 
 /**
  * @brief One-time CPU detection and SIMD dispatch selection.

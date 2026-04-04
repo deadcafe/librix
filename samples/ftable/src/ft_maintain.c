@@ -186,39 +186,38 @@ ft_table_maintain(const struct ft_maint_ctx *ctx,
     return count;
 }
 
-unsigned
-ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
-                           const uint32_t *entry_idxv,
-                           unsigned nb_idx,
-                           uint64_t now,
-                           uint64_t expire_tsc,
-                           uint32_t *expired_idxv,
-                           unsigned max_expired,
-                           unsigned min_bk_entries)
+/*
+ * Core pipeline loop for idx_bulk maintenance.
+ * The use_filter parameter is a compile-time constant when inlined,
+ * allowing the compiler to eliminate the filter branch entirely.
+ */
+static inline unsigned
+ft_maint_idx_bulk_loop_(const struct ft_maint_ctx *ctx,
+                        const uint32_t *entry_idxv,
+                        unsigned nb_idx,
+                        uint64_t now_ts,
+                        uint64_t timeout_ts,
+                        uint32_t *expired_idxv,
+                        unsigned max_expired,
+                        unsigned min_bk_entries,
+                        int use_filter)
 {
     enum { FT_MAINT_HIT_STEP = 4u, FT_MAINT_HIT_AHEAD = 8u };
+    enum { FT_MAINT_FILTER_SZ = 64u, FT_MAINT_FILTER_MASK = 63u };
     const struct flow_entry_meta *meta_ring[16];
     unsigned bk_ring[16];
     uint8_t valid_ring[16];
+    unsigned scanned[FT_MAINT_FILTER_SZ];
     unsigned count = 0u;
-    uint64_t now_ts;
-    uint64_t timeout_ts;
     unsigned total;
 
     RIX_ASSERT((FT_MAINT_HIT_AHEAD * 2u) <= 16u);
 
-    if (ctx == NULL || entry_idxv == NULL || nb_idx == 0u
-        || max_expired == 0u || expired_idxv == NULL)
-        return 0u;
-    if (expire_tsc == 0u)
-        return 0u;
-
-    ctx->stats->maint_calls++;
-    now_ts = flow_timestamp_encode(now, ctx->ts_shift);
-    timeout_ts = flow_timestamp_timeout_encode(expire_tsc, ctx->ts_shift);
     memset(meta_ring, 0, sizeof(meta_ring));
     memset(bk_ring, 0, sizeof(bk_ring));
     memset(valid_ring, 0, sizeof(valid_ring));
+    if (use_filter)
+        memset(scanned, 0xff, sizeof(scanned));
     total = nb_idx + (FT_MAINT_HIT_AHEAD * 2u);
 
     for (unsigned i = 0u; i < total; i += FT_MAINT_HIT_STEP) {
@@ -260,21 +259,67 @@ ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
 
             for (unsigned j = 0u; j < n; j++) {
                 unsigned pos = (base + j) & 15u;
+                unsigned bk_idx;
 
                 if (!valid_ring[pos])
                     continue;
+
+                bk_idx = bk_ring[pos];
+                if (use_filter) {
+                    unsigned fslot = bk_idx & FT_MAINT_FILTER_MASK;
+
+                    if (scanned[fslot] == bk_idx)
+                        continue;
+                    scanned[fslot] = bk_idx;
+                }
+
                 ctx->stats->maint_bucket_checks++;
-                count = ft_maint_scan_bucket_(ctx, bk_ring[pos], now_ts,
+                count = ft_maint_scan_bucket_(ctx, bk_idx, now_ts,
                                               timeout_ts, expired_idxv, count,
                                               max_expired, min_bk_entries,
                                               NULL);
-                if (count >= max_expired) {
-                    ctx->stats->maint_evictions += count;
+                if (count >= max_expired)
                     return count;
-                }
             }
         }
     }
+
+    return count;
+}
+
+unsigned
+ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
+                           const uint32_t *entry_idxv,
+                           unsigned nb_idx,
+                           uint64_t now,
+                           uint64_t expire_tsc,
+                           uint32_t *expired_idxv,
+                           unsigned max_expired,
+                           unsigned min_bk_entries,
+                           int enable_filter)
+{
+    uint64_t now_ts;
+    uint64_t timeout_ts;
+    unsigned count;
+
+    if (ctx == NULL || entry_idxv == NULL || nb_idx == 0u
+        || max_expired == 0u || expired_idxv == NULL)
+        return 0u;
+    if (expire_tsc == 0u)
+        return 0u;
+
+    ctx->stats->maint_calls++;
+    now_ts = flow_timestamp_encode(now, ctx->ts_shift);
+    timeout_ts = flow_timestamp_timeout_encode(expire_tsc, ctx->ts_shift);
+
+    if (enable_filter)
+        count = ft_maint_idx_bulk_loop_(ctx, entry_idxv, nb_idx,
+                                        now_ts, timeout_ts, expired_idxv,
+                                        max_expired, min_bk_entries, 1);
+    else
+        count = ft_maint_idx_bulk_loop_(ctx, entry_idxv, nb_idx,
+                                        now_ts, timeout_ts, expired_idxv,
+                                        max_expired, min_bk_entries, 0);
 
     ctx->stats->maint_evictions += count;
     return count;
