@@ -252,7 +252,7 @@ _rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
  *                      return memcmp(a, b, sizeof(*a));
  *                  }
  *
- * Default hashing is provided internally via rix_hash_hash_bytes_fast()
+ * Default hashing is provided internally via rix_hash_bytes_fast()
  * (CRC32C on x86_64+SSE4.2, FNV-1a fallback elsewhere, plus fixed-size
  * fast paths where available).
  *
@@ -359,7 +359,7 @@ _rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
     _RIX_HASH_DEFAULT_HASH_FN_NAME(name)(                                      \
         const _RIX_HASH_KEY_TYPE(type, key_field) *key, u32 mask)              \
     {                                                                          \
-        return rix_hash_hash_bytes_fast((const void *)key,                     \
+        return rix_hash_bytes_fast((const void *)key,                     \
                                         sizeof(((struct type *)0)->key_field), \
                                         mask);                                 \
     }

@@ -189,7 +189,7 @@ struct flowu_entry {
  * flow4 key hash / cmp
  *
  * 24B key: 3x CRC32C unrolled on x86+SSE4.2, fallback to
- * rix_hash_hash_bytes_fast.  Non-zero guaranteed by rix_hash layer.
+ * rix_hash_bytes_fast.  Non-zero guaranteed by rix_hash layer.
  *===========================================================================*/
 
 static inline union rix_hash_hash_u
@@ -221,7 +221,7 @@ flow4_key_hash(const struct flow4_key *key, uint32_t mask)
     r.val32[1] = h1;
     return r;
 #else
-    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
+    return rix_hash_bytes_fast(key, sizeof(*key), mask);
 #endif
 }
 
@@ -250,7 +250,7 @@ flow4_key_cmp(const struct flow4_key *a, const struct flow4_key *b)
 static inline union rix_hash_hash_u
 flow6_key_hash(const struct flow6_key *key, uint32_t mask)
 {
-    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
+    return rix_hash_bytes_fast(key, sizeof(*key), mask);
 }
 
 static inline int
@@ -266,7 +266,7 @@ flow6_key_cmp(const struct flow6_key *a, const struct flow6_key *b)
 static inline union rix_hash_hash_u
 flowu_key_hash(const struct flowu_key *key, uint32_t mask)
 {
-    return rix_hash_hash_bytes_fast(key, sizeof(*key), mask);
+    return rix_hash_bytes_fast(key, sizeof(*key), mask);
 }
 
 static inline int

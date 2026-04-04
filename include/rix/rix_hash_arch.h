@@ -166,7 +166,8 @@ static RIX_UNUSED const struct rix_hash_arch_s *rix_hash_arch =
  * Generic (scalar) find implementations
  *===========================================================================*/
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u32x16_GEN(const u32 *arr, u32 val)
+rix_hash_find_u32x16_GEN(const u32 *arr,
+                         u32 val)
 {
     u32 mask = 0u;
     for (unsigned i = 0u; i < 16u; i++)
@@ -176,8 +177,11 @@ _rix_hash_find_u32x16_GEN(const u32 *arr, u32 val)
 }
 
 static RIX_FORCE_INLINE void
-_rix_hash_find_u32x16_2_GEN(const u32 *arr, u32 val0, u32 val1,
-                            u32 *mask0, u32 *mask1)
+rix_hash_find_u32x16_2_GEN(const u32 *arr,
+                           u32 val0,
+                           u32 val1,
+                           u32 *mask0,
+                           u32 *mask1)
 {
     u32 m0 = 0u;
     u32 m1 = 0u;
@@ -193,7 +197,8 @@ _rix_hash_find_u32x16_2_GEN(const u32 *arr, u32 val0, u32 val1,
 }
 
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u64x16_GEN(const u64 *arr, u64 val)
+rix_hash_find_u64x16_GEN(const u64 *arr,
+                         u64 val)
 {
     u32 mask = 0u;
     for (unsigned i = 0u; i < 16u; i++)
@@ -212,7 +217,8 @@ _rix_hash_find_u64x16_GEN(const u64 *arr, u64 val)
  * All variants guarantee (val32[0] & mask) != (val32[1] & mask).
  *===========================================================================*/
 static RIX_FORCE_INLINE union rix_hash_hash_u
-_rix_hash_hash_u32_GEN(u32 key, u32 mask)
+rix_hash_u32_GEN(u32 key,
+                 u32 mask)
 {
     union rix_hash_hash_u r;
     u32 h0  = key * 2654435761u;
@@ -229,7 +235,8 @@ _rix_hash_hash_u32_GEN(u32 key, u32 mask)
 }
 
 static RIX_FORCE_INLINE union rix_hash_hash_u
-_rix_hash_hash_u64_GEN(u64 key, u32 mask)
+rix_hash_u64_GEN(u64 key,
+                 u32 mask)
 {
     union rix_hash_hash_u r;
     u32 lo  = (u32)key;
@@ -248,7 +255,9 @@ _rix_hash_hash_u64_GEN(u64 key, u32 mask)
 }
 
 static RIX_FORCE_INLINE union rix_hash_hash_u
-_rix_hash_hash_bytes_GEN(const void *key, size_t key_bytes, u32 mask)
+rix_hash_bytes_GEN(const void *key,
+                   size_t key_bytes,
+                   u32 mask)
 {
     union rix_hash_hash_u r;
     const u8 *p = (const u8 *)key;
@@ -286,28 +295,33 @@ _rix_hash_hash_bytes_GEN(const void *key, size_t key_bytes, u32 mask)
  * non-multiples of 8; memcpy is used for safe unaligned partial reads.
  */
 static RIX_FORCE_INLINE u32
-_rix_hash_crc32_bytes(u32 crc, const void *key, size_t key_bytes)
+rix_crc32_bytes(u32 crc,
+                const void *key,
+                size_t key_bytes)
 {
-    const u8 *p   = (const u8 *)key;
-    size_t         rem = key_bytes;
+    const u8 *p = (const u8 *)key;
+    size_t rem = key_bytes;
 
     while (rem >= 8u) {
         u64 w;
         memcpy(&w, p, 8u);
         crc = (u32)__builtin_ia32_crc32di((u64)crc, w);
-        p += 8u; rem -= 8u;
+        p += 8u;
+        rem -= 8u;
     }
     if (rem >= 4u) {
         u32 w;
         memcpy(&w, p, 4u);
         crc = (u32)__builtin_ia32_crc32si(crc, w);
-        p += 4u; rem -= 4u;
+        p += 4u;
+        rem -= 4u;
     }
     if (rem >= 2u) {
         u16 w;
         memcpy(&w, p, 2u);
         crc = (u32)__builtin_ia32_crc32hi(crc, (unsigned short)w);
-        p += 2u; rem -= 2u;
+        p += 2u;
+        rem -= 2u;
     }
     if (rem >= 1u) {
         crc = (u32)__builtin_ia32_crc32qi(crc, (unsigned char)*p);
@@ -315,23 +329,19 @@ _rix_hash_crc32_bytes(u32 crc, const void *key, size_t key_bytes)
     return crc;
 }
 
-static RIX_FORCE_INLINE u32
-rix_hash_crc32_bytes(u32 crc, const void *key, size_t key_bytes)
-{
-    return _rix_hash_crc32_bytes(crc, key, key_bytes);
-}
-
 static RIX_FORCE_INLINE union rix_hash_hash_u
-_rix_hash_hash_bytes_CRC32(const void *key, size_t key_bytes, u32 mask)
+rix_hash_bytes_CRC32(const void *key,
+                     size_t key_bytes,
+                     u32 mask)
 {
     union rix_hash_hash_u r;
-    u32 h0   = _rix_hash_crc32_bytes(0u, key, key_bytes);
-    h0 |= !h0;
+    u32 h0   = rix_crc32_bytes(0u, key, key_bytes);
+    h0       |= !h0;
     u32 bk0  = h0 & mask;
     u32 seed = ~h0;
     u32 h1;
     do {
-        h1   = _rix_hash_crc32_bytes(seed, key, key_bytes);
+        h1   = rix_crc32_bytes(seed, key, key_bytes);
         h1 |= !h1;
         seed = (u32)__builtin_ia32_crc32di((u64)seed, (u64)h0);
     } while ((h1 & mask) == bk0);
@@ -341,16 +351,19 @@ _rix_hash_hash_bytes_CRC32(const void *key, size_t key_bytes, u32 mask)
 }
 
 static RIX_FORCE_INLINE union rix_hash_hash_u
-_rix_hash_hash_u32_CRC32(u32 key, u32 mask)
+rix_hash_u32_CRC32(u32 key,
+                   u32 mask)
 {
     union rix_hash_hash_u r;
     u32 h0   = (u32)__builtin_ia32_crc32si(0u, key);
+    h0      |= !h0;
     u32 bk0  = h0 & mask;
     u32 seed = ~h0;
     u32 h1;
     do {
-        h1   = (u32)__builtin_ia32_crc32si(seed, key);
         seed = (u32)__builtin_ia32_crc32si(seed, ~key);
+        h1   = (u32)__builtin_ia32_crc32si(seed, key);
+        h1  |= !h1;
     } while ((h1 & mask) == bk0);
     r.val32[0] = h0;
     r.val32[1] = h1;
@@ -358,16 +371,19 @@ _rix_hash_hash_u32_CRC32(u32 key, u32 mask)
 }
 
 static RIX_FORCE_INLINE union rix_hash_hash_u
-_rix_hash_hash_u64_CRC32(u64 key, u32 mask)
+rix_hash_u64_CRC32(u64 key,
+                   u32 mask)
 {
     union rix_hash_hash_u r;
     u32 h0   = (u32)__builtin_ia32_crc32di(0ULL, key);
+    h0      |= !h0;
     u32 bk0  = h0 & mask;
     u32 seed = ~h0;
     u32 h1;
     do {
-        h1   = (u32)__builtin_ia32_crc32di((u64)seed, key);
         seed = (u32)__builtin_ia32_crc32di((u64)seed, ~key);
+        h1   = (u32)__builtin_ia32_crc32di((u64)seed, key);
+        h1  |= !h1;
     } while ((h1 & mask) == bk0);
     r.val32[0] = h0;
     r.val32[1] = h1;
@@ -376,24 +392,24 @@ _rix_hash_hash_u64_CRC32(u64 key, u32 mask)
 
 /* GEN find + CRC32 hash: for SIMD=gen (scalar scan, hardware hash) */
 static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_GEN = {
-    _rix_hash_find_u32x16_GEN,
-    _rix_hash_find_u32x16_2_GEN,
-    _rix_hash_find_u64x16_GEN,
-    _rix_hash_hash_bytes_CRC32,
-    _rix_hash_hash_u32_CRC32,
-    _rix_hash_hash_u64_CRC32,
+    rix_hash_find_u32x16_GEN,
+    rix_hash_find_u32x16_2_GEN,
+    rix_hash_find_u64x16_GEN,
+    rix_hash_bytes_CRC32,
+    rix_hash_u32_CRC32,
+    rix_hash_u64_CRC32,
 };
 
 #    else /* !(__x86_64__ && __SSE4_2__) */
 
 /* GEN find + GEN hash: pure portable fallback */
 static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_GEN = {
-    _rix_hash_find_u32x16_GEN,
-    _rix_hash_find_u32x16_2_GEN,
-    _rix_hash_find_u64x16_GEN,
-    _rix_hash_hash_bytes_GEN,
-    _rix_hash_hash_u32_GEN,
-    _rix_hash_hash_u64_GEN,
+    rix_hash_find_u32x16_GEN,
+    rix_hash_find_u32x16_2_GEN,
+    rix_hash_find_u64x16_GEN,
+    rix_hash_bytes_GEN,
+    rix_hash_u32_GEN,
+    rix_hash_u64_GEN,
 };
 
 #    endif /* __x86_64__ && __SSE4_2__ */
@@ -410,7 +426,8 @@ static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_GEN = {
 #    if defined(__x86_64__) && defined(__SSE4_2__)
 
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u32x16_SSE(const u32 *arr, u32 val)
+rix_hash_find_u32x16_SSE(const u32 *arr,
+                         u32 val)
 {
     __m128i vval = _mm_set1_epi32((int)val);
     __m128i eq0  = _mm_cmpeq_epi32(
@@ -428,15 +445,12 @@ _rix_hash_find_u32x16_SSE(const u32 *arr, u32 val)
     return m0 | (m1 << 4) | (m2 << 8) | (m3 << 12);
 }
 
-static RIX_FORCE_INLINE u32
-rix_hash_find_u32x16_sse(const u32 *arr, u32 val)
-{
-    return _rix_hash_find_u32x16_SSE(arr, val);
-}
-
 static RIX_FORCE_INLINE void
-_rix_hash_find_u32x16_2_SSE(const u32 *arr, u32 val0, u32 val1,
-                            u32 *mask0, u32 *mask1)
+rix_hash_find_u32x16_2_SSE(const u32 *arr,
+                           u32 val0,
+                           u32 val1,
+                           u32 *mask0,
+                           u32 *mask1)
 {
     __m128i v0 = _mm_loadu_si128((const __m128i *)(const void *)(arr +  0));
     __m128i v1 = _mm_loadu_si128((const __m128i *)(const void *)(arr +  4));
@@ -464,15 +478,9 @@ _rix_hash_find_u32x16_2_SSE(const u32 *arr, u32 val0, u32 val1,
     *mask1 = m10 | (m11 << 4) | (m12 << 8) | (m13 << 12);
 }
 
-static RIX_FORCE_INLINE void
-rix_hash_find_u32x16_2_sse(const u32 *arr, u32 val0, u32 val1,
-                           u32 *mask0, u32 *mask1)
-{
-    _rix_hash_find_u32x16_2_SSE(arr, val0, val1, mask0, mask1);
-}
-
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u64x16_SSE(const u64 *arr, u64 val)
+rix_hash_find_u64x16_SSE(const u64 *arr,
+                         u64 val)
 {
     __m128i vval = _mm_set1_epi64x((long long)val);
     __m128i eq0  = _mm_cmpeq_epi64(
@@ -505,12 +513,12 @@ _rix_hash_find_u64x16_SSE(const u64 *arr, u64 val)
 
 /* SSE find + CRC32 hash (SSE4.2 is our baseline, so CRC32 always available) */
 static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_SSE = {
-    _rix_hash_find_u32x16_SSE,
-    _rix_hash_find_u32x16_2_SSE,
-    _rix_hash_find_u64x16_SSE,
-    _rix_hash_hash_bytes_CRC32,
-    _rix_hash_hash_u32_CRC32,
-    _rix_hash_hash_u64_CRC32,
+    rix_hash_find_u32x16_SSE,
+    rix_hash_find_u32x16_2_SSE,
+    rix_hash_find_u64x16_SSE,
+    rix_hash_bytes_CRC32,
+    rix_hash_u32_CRC32,
+    rix_hash_u64_CRC32,
 };
 
 #    endif /* __x86_64__ && __SSE4_2__ */
@@ -521,7 +529,8 @@ static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_SSE = {
 #    if defined(__x86_64__) && defined(__AVX2__)
 
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u32x16_AVX2(const u32 *arr, u32 val)
+rix_hash_find_u32x16_AVX2(const u32 *arr,
+                          u32 val)
 {
     __m256i vval = _mm256_set1_epi32((int)val);
     __m256i a0   = _mm256_loadu_si256((const __m256i *)(const void *)arr);
@@ -535,15 +544,12 @@ _rix_hash_find_u32x16_AVX2(const u32 *arr, u32 val)
     return lo | (hi << 8);
 }
 
-static RIX_FORCE_INLINE u32
-rix_hash_find_u32x16_avx2(const u32 *arr, u32 val)
-{
-    return _rix_hash_find_u32x16_AVX2(arr, val);
-}
-
 static RIX_FORCE_INLINE void
-_rix_hash_find_u32x16_2_AVX2(const u32 *arr, u32 val0, u32 val1,
-                             u32 *mask0, u32 *mask1)
+rix_hash_find_u32x16_2_AVX2(const u32 *arr,
+                            u32 val0,
+                            u32 val1,
+                            u32 *mask0,
+                            u32 *mask1)
 {
     __m256i a0  = _mm256_loadu_si256((const __m256i *)(const void *)arr);
     __m256i a1  = _mm256_loadu_si256((const __m256i *)(const void *)(arr + 8));
@@ -565,15 +571,9 @@ _rix_hash_find_u32x16_2_AVX2(const u32 *arr, u32 val0, u32 val1,
     *mask1 = lo1 | (hi1 << 8);
 }
 
-static RIX_FORCE_INLINE void
-rix_hash_find_u32x16_2_avx2(const u32 *arr, u32 val0, u32 val1,
-                            u32 *mask0, u32 *mask1)
-{
-    _rix_hash_find_u32x16_2_AVX2(arr, val0, val1, mask0, mask1);
-}
-
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u64x16_AVX2(const u64 *arr, u64 val)
+rix_hash_find_u64x16_AVX2(const u64 *arr,
+                          u64 val)
 {
     __m256i vval = _mm256_set1_epi64x((long long)val);
     __m256i v0   =
@@ -597,12 +597,12 @@ _rix_hash_find_u64x16_AVX2(const u64 *arr, u64 val)
 
 /* AVX2 find + CRC32 hash (AVX2 always implies SSE4.2) */
 static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_AVX2 = {
-    _rix_hash_find_u32x16_AVX2,
-    _rix_hash_find_u32x16_2_AVX2,
-    _rix_hash_find_u64x16_AVX2,
-    _rix_hash_hash_bytes_CRC32,
-    _rix_hash_hash_u32_CRC32,
-    _rix_hash_hash_u64_CRC32,
+    rix_hash_find_u32x16_AVX2,
+    rix_hash_find_u32x16_2_AVX2,
+    rix_hash_find_u64x16_AVX2,
+    rix_hash_bytes_CRC32,
+    rix_hash_u32_CRC32,
+    rix_hash_u64_CRC32,
 };
 
 #    endif /* __x86_64__ && __AVX2__ */
@@ -613,7 +613,8 @@ static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_AVX2 = {
 #    if defined(__x86_64__) && defined(__AVX512F__)
 
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u32x16_AVX512(const u32 *arr, u32 val)
+rix_hash_find_u32x16_AVX512(const u32 *arr,
+                            u32 val)
 {
     __m512i vval = _mm512_set1_epi32((int)val);
     __m512i va   = _mm512_loadu_si512((const void *)arr);
@@ -621,15 +622,12 @@ _rix_hash_find_u32x16_AVX512(const u32 *arr, u32 val)
     return (u32)m;
 }
 
-static RIX_FORCE_INLINE u32
-rix_hash_find_u32x16_avx512(const u32 *arr, u32 val)
-{
-    return _rix_hash_find_u32x16_AVX512(arr, val);
-}
-
 static RIX_FORCE_INLINE void
-_rix_hash_find_u32x16_2_AVX512(const u32 *arr, u32 val0,
-                               u32 val1, u32 *mask0, u32 *mask1)
+rix_hash_find_u32x16_2_AVX512(const u32 *arr,
+                              u32 val0,
+                              u32 val1,
+                              u32 *mask0,
+                              u32 *mask1)
 {
     __m512i va  = _mm512_loadu_si512((const void *)arr);
     __m512i vv0 = _mm512_set1_epi32((int)val0);
@@ -638,15 +636,9 @@ _rix_hash_find_u32x16_2_AVX512(const u32 *arr, u32 val0,
     *mask1 = (u32)_mm512_cmpeq_epi32_mask(va, vv1);
 }
 
-static RIX_FORCE_INLINE void
-rix_hash_find_u32x16_2_avx512(const u32 *arr, u32 val0,
-                              u32 val1, u32 *mask0, u32 *mask1)
-{
-    _rix_hash_find_u32x16_2_AVX512(arr, val0, val1, mask0, mask1);
-}
-
 static RIX_FORCE_INLINE u32
-_rix_hash_find_u64x16_AVX512(const u64 *arr, u64 val)
+rix_hash_find_u64x16_AVX512(const u64 *arr,
+                            u64 val)
 {
     __m512i vval = _mm512_set1_epi64((long long)val);
     __m512i va   = _mm512_loadu_si512((const void *)(arr + 0));
@@ -658,18 +650,20 @@ _rix_hash_find_u64x16_AVX512(const u64 *arr, u64 val)
 
 /* AVX-512 find + CRC32 hash (AVX-512 always implies SSE4.2) */
 static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_AVX512 = {
-    _rix_hash_find_u32x16_AVX512,
-    _rix_hash_find_u32x16_2_AVX512,
-    _rix_hash_find_u64x16_AVX512,
-    _rix_hash_hash_bytes_CRC32,
-    _rix_hash_hash_u32_CRC32,
-    _rix_hash_hash_u64_CRC32,
+    rix_hash_find_u32x16_AVX512,
+    rix_hash_find_u32x16_2_AVX512,
+    rix_hash_find_u64x16_AVX512,
+    rix_hash_bytes_CRC32,
+    rix_hash_u32_CRC32,
+    rix_hash_u64_CRC32,
 };
 
 #    endif /* __x86_64__ && __AVX512F__ */
 
 static RIX_FORCE_INLINE union rix_hash_hash_u
-rix_hash_hash_bytes_fast(const void *key, size_t key_bytes, u32 mask)
+rix_hash_bytes_fast(const void *key,
+                    size_t key_bytes,
+                    u32 mask)
 {
     return rix_hash_arch->hash_bytes(key, key_bytes, mask);
 }

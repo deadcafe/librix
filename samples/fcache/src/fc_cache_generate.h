@@ -169,16 +169,16 @@
 #undef RIX_HASH_FIND_U32X16
 #undef RIX_HASH_FIND_U32X16_2
 #define RIX_HASH_FIND_U32X16(arr, val) \
-    rix_hash_find_u32x16_avx512((arr), (val))
+    rix_hash_find_u32x16_AVX512((arr), (val))
 #define RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
-    rix_hash_find_u32x16_2_avx512((arr), (val0), (val1), (mask0), (mask1))
+    rix_hash_find_u32x16_2_AVX512((arr), (val0), (val1), (mask0), (mask1))
 #elif defined(__AVX2__)
 #undef RIX_HASH_FIND_U32X16
 #undef RIX_HASH_FIND_U32X16_2
 #define RIX_HASH_FIND_U32X16(arr, val) \
-    rix_hash_find_u32x16_avx2((arr), (val))
+    rix_hash_find_u32x16_AVX2((arr), (val))
 #define RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
-    rix_hash_find_u32x16_2_avx2((arr), (val0), (val1), (mask0), (mask1))
+    rix_hash_find_u32x16_2_AVX2((arr), (val0), (val1), (mask0), (mask1))
 #endif
 
 /*===========================================================================
@@ -1559,7 +1559,7 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
  * Per-TU rix_hash_arch auto-initialization (constructor)
  *
  * Each arch-specific TU has its own static rix_hash_arch pointer.
- * Without this, rix_hash_hash_bytes_fast() falls back to Generic
+ * Without this, rix_hash_bytes_fast() falls back to Generic
  * even when compiled with -mavx2.  The constructor runs once per
  * shared-library load (or at program start for static linking).
  *===========================================================================*/
