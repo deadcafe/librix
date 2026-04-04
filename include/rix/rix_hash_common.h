@@ -25,15 +25,6 @@
         rix_hash_arch->find_u32x16_2((arr), (val0), (val1), (mask0), (mask1))
 #  endif
 
-#  ifndef _RIX_HASH_FIND_U32X16
-#    define _RIX_HASH_FIND_U32X16(arr, val) \
-        RIX_HASH_FIND_U32X16((arr), (val))
-#  endif
-
-#  ifndef _RIX_HASH_FIND_U32X16_2
-#    define _RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
-        RIX_HASH_FIND_U32X16_2((arr), (val0), (val1), (mask0), (mask1))
-#  endif
 
 /*
  * Map a generated hash-table prefix and an operation suffix to the actual
@@ -56,7 +47,7 @@ struct rix_hash_bucket_s {
 /*===========================================================================
  * Head struct and init macros
  *===========================================================================*/
-#  define RIX_HASH_HEAD(name)                                                   \
+#  define RIX_HASH_HEAD(name)                                                 \
     struct name {                                                             \
         unsigned rhh_mask;                                                    \
         unsigned rhh_nb;                                                      \
@@ -206,14 +197,6 @@ rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
     *fp_out  = h.val32[0] ^ h.val32[1];
 }
 
-/* Private alias for GENERATE macros */
-static RIX_FORCE_INLINE void
-_rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
-                  unsigned *bk0_out, unsigned *bk1_out, u32 *fp_out)
-{
-    rix_hash_buckets(h, mask, bk0_out, bk1_out, fp_out);
-}
-
 /*===========================================================================
  * RIX_HASH_GENERATE(name, type, key_field, hash_field, cmp_fn)
  * RIX_HASH_GENERATE_EX(name, type, key_field, hash_field, cmp_fn, hash_fn)
@@ -302,10 +285,10 @@ _rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
  *   (key_type = __typeof__(((struct type *)0)->key_field))
  *===========================================================================*/
 /* Derive the key type from key_field for use in typed API parameters. */
-#  define _RIX_HASH_KEY_TYPE(type, key_field)     \
+#  define RIX_HASH_KEY_TYPE(type, key_field)     \
     __typeof__(((struct type *)0)->key_field)
 
-#  define _RIX_HASH_SLOT_TYPE(type, slot_field)   \
+#  define RIX_HASH_SLOT_TYPE(type, slot_field)   \
     __typeof__(((struct type *)0)->slot_field)
 
 #  define RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, attr) \
@@ -352,12 +335,12 @@ _rix_hash_buckets(const union rix_hash_hash_u h, unsigned mask,
 #  define RIX_HASH_PROTOTYPE_STATIC_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn) \
     RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
-#  define _RIX_HASH_DEFAULT_HASH_FN_NAME(name) name ## _default_hash
+#  define RIX_HASH_DEFAULT_HASH_FN_NAME(name) name ## _default_hash
 
-#  define _RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)              \
+#  define RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)              \
     static RIX_UNUSED RIX_FORCE_INLINE union rix_hash_hash_u                   \
-    _RIX_HASH_DEFAULT_HASH_FN_NAME(name)(                                      \
-        const _RIX_HASH_KEY_TYPE(type, key_field) *key, u32 mask)              \
+    RIX_HASH_DEFAULT_HASH_FN_NAME(name)(                                      \
+        const RIX_HASH_KEY_TYPE(type, key_field) *key, u32 mask)              \
     {                                                                          \
         return rix_hash_bytes_fast((const void *)key,                     \
                                         sizeof(((struct type *)0)->key_field), \

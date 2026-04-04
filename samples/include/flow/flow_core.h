@@ -19,7 +19,7 @@
  *
  *   // 2. Define hash/cmp functions
  *   static inline union rix_hash_hash_u
- *   fcore_flow4_hash_fn(const struct flow4_key *key, uint32_t mask) { ... }
+ *   fcore_flow4_hash_fn(const struct flow4_key *key, u32 mask) { ... }
  *   static inline int
  *   fcore_flow4_cmp(const struct flow4_key *a, const struct flow4_key *b) { ... }
  *
@@ -51,20 +51,20 @@
  *   owner->pool_base          : unsigned char *
  *   owner->pool_stride        : size_t
  *   owner->pool_entry_offset  : size_t
- *   owner->free_head          : uint32_t (RIX_NIL when empty)
- *   FCORE_STATS(owner).lookups      : uint64_t
- *   FCORE_STATS(owner).hits         : uint64_t
- *   FCORE_STATS(owner).misses       : uint64_t
- *   FCORE_STATS(owner).adds         : uint64_t
- *   FCORE_STATS(owner).add_existing : uint64_t
- *   FCORE_STATS(owner).add_failed   : uint64_t
- *   FCORE_STATS(owner).dels         : uint64_t
- *   FCORE_STATS(owner).del_miss     : uint64_t
- *   FCORE_STATUS(owner).entries     : uint32_t
- *   FCORE_STATUS(owner).kickouts    : uint32_t
- *   FCORE_STATUS(owner).add_bk0     : uint32_t
- *   FCORE_STATUS(owner).add_bk1     : uint32_t
- *   owner->ts_shift                 : uint8_t
+ *   owner->free_head          : u32 (RIX_NIL when empty)
+ *   FCORE_STATS(owner).lookups      : u64
+ *   FCORE_STATS(owner).hits         : u64
+ *   FCORE_STATS(owner).misses       : u64
+ *   FCORE_STATS(owner).adds         : u64
+ *   FCORE_STATS(owner).add_existing : u64
+ *   FCORE_STATS(owner).add_failed   : u64
+ *   FCORE_STATS(owner).dels         : u64
+ *   FCORE_STATS(owner).del_miss     : u64
+ *   FCORE_STATUS(owner).entries     : u32
+ *   FCORE_STATUS(owner).kickouts    : u32
+ *   FCORE_STATUS(owner).add_bk0     : u32
+ *   FCORE_STATUS(owner).add_bk1     : u32
+ *   owner->ts_shift                 : u8
  */
 
 #ifndef _FLOW_CORE_H_
@@ -209,25 +209,25 @@ struct fcore_bucket_allocator {
  * Shared datapath statistics
  *===========================================================================*/
 struct fcore_stats {
-    uint64_t lookups;
-    uint64_t hits;
-    uint64_t misses;
-    uint64_t adds;
-    uint64_t add_existing;
-    uint64_t add_failed;
-    uint64_t dels;
-    uint64_t del_miss;
+    u64 lookups;
+    u64 hits;
+    u64 misses;
+    u64 adds;
+    u64 add_existing;
+    u64 add_failed;
+    u64 dels;
+    u64 del_miss;
 };
 
 struct fcore_status {
-    uint32_t entries;
-    uint32_t kickouts;
-    uint32_t add_bk0;
-    uint32_t add_bk1;
+    u32 entries;
+    u32 kickouts;
+    u32 add_bk0;
+    u32 add_bk1;
 };
 
 static inline void
-fcore_status_reset(struct fcore_status *status, uint32_t entries)
+fcore_status_reset(struct fcore_status *status, u32 entries)
 {
     if (status == NULL)
         return;
@@ -393,18 +393,18 @@ _FCORE_INT(p, free_list_init_)(_FCORE_OT(ot) *owner)                         \
         _FCORE_ENTRY_T(p) *entry = FCORE_LAYOUT_ENTRY_PTR(owner, i);         \
         RIX_ASSUME_NONNULL(entry);                                            \
         FCORE_FREE_NEXT(entry) = (i < owner->max_entries) ? i + 1u           \
-                                                        : (uint32_t)RIX_NIL; \
+                                                        : (u32)RIX_NIL; \
         entry->meta.slot = 0u;                                                \
         FCORE_CLEAR_TIMESTAMP(entry);                                         \
     }                                                                         \
     owner->free_head = 1u;                                                    \
 }                                                                             \
                                                                               \
-static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
+static RIX_UNUSED RIX_FORCE_INLINE u32                                   \
 _FCORE_INT(p, alloc_idx_)(_FCORE_OT(ot) *owner)                              \
 {                                                                             \
-    uint32_t idx = owner->free_head;                                          \
-    if (idx != (uint32_t)RIX_NIL) {                                           \
+    u32 idx = owner->free_head;                                          \
+    if (idx != (u32)RIX_NIL) {                                           \
         _FCORE_ENTRY_T(p) *entry = FCORE_LAYOUT_ENTRY_PTR(owner, idx);       \
         RIX_ASSUME_NONNULL(entry);                                            \
         owner->free_head = FCORE_FREE_NEXT(entry);                            \
@@ -416,7 +416,7 @@ _FCORE_INT(p, alloc_idx_)(_FCORE_OT(ot) *owner)                              \
 }                                                                             \
                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-_FCORE_INT(p, free_idx_)(_FCORE_OT(ot) *owner, uint32_t idx)                 \
+_FCORE_INT(p, free_idx_)(_FCORE_OT(ot) *owner, u32 idx)                 \
 {                                                                             \
     _FCORE_ENTRY_T(p) *entry = FCORE_LAYOUT_ENTRY_PTR(owner, idx);           \
     RIX_ASSUME_NONNULL(entry);                                                \
@@ -428,7 +428,7 @@ _FCORE_INT(p, free_idx_)(_FCORE_OT(ot) *owner, uint32_t idx)                 \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 _FCORE_INT(p, prefetch_free_head_)(_FCORE_OT(ot) *owner)                     \
 {                                                                             \
-    if (owner->free_head != (uint32_t)RIX_NIL) {                              \
+    if (owner->free_head != (u32)RIX_NIL) {                              \
         _FCORE_ENTRY_T(p) *entry = FCORE_LAYOUT_ENTRY_PTR(owner,             \
                                                        owner->free_head);     \
         if (entry != NULL)                                                    \
@@ -456,15 +456,15 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
                               const _FCORE_KEY_T(p) *keys,                    \
                               unsigned nb_keys,                               \
-                              uint64_t now,                                   \
-                              uint32_t *results);                             \
+                              u64 now,                                   \
+                              u32 *results);                             \
                                                                               \
-static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
+static RIX_UNUSED RIX_FORCE_INLINE u32                                   \
 _FCORE_INT(p, find_key_oneshot_)(_FCORE_OT(ot) *owner,                       \
                                  const _FCORE_KEY_T(p) *key,                  \
-                                 uint64_t now)                                \
+                                 u64 now)                                \
 {                                                                             \
-    uint32_t result = 0u;                                                     \
+    u32 result = 0u;                                                     \
     _FCORE_INT(p, find_key_bulk_)(owner, key, 1u, now, &result);             \
     return result;                                                            \
 }                                                                             \
@@ -475,17 +475,17 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, find_key_bulk_org_)(_FCORE_OT(ot) *owner,                      \
                                   const _FCORE_KEY_T(p) *keys,               \
                                   unsigned nb_keys,                          \
-                                  uint64_t now,                              \
-                                  uint32_t *results)                         \
+                                  u64 now,                              \
+                                  u32 *results)                         \
 {                                                                             \
     enum { _FCORE_FIND_CTX_COUNT = 64u };                                     \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
     _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
-    const uint32_t hash_mask = FCORE_HASH_MASK(owner, ht);                    \
+    const u32 hash_mask = FCORE_HASH_MASK(owner, ht);                    \
     struct rix_hash_find_ctx_s ctx[_FCORE_FIND_CTX_COUNT];                    \
-    uint64_t hit_count = 0u;                                                  \
-    uint64_t miss_count = 0u;                                                 \
+    u64 hit_count = 0u;                                                  \
+    u64 miss_count = 0u;                                                 \
     const unsigned ctx_mask = _FCORE_FIND_CTX_COUNT - 1u;                     \
     const unsigned ahead = 12u;                                               \
     const unsigned step  = 4u;                                                \
@@ -524,7 +524,7 @@ _FCORE_INT(p, find_key_bulk_org_)(_FCORE_OT(ot) *owner,                      \
                 _FCORE_ENTRY_T(p) *entry = _FCORE_HT(ht, cmp_key)(            \
                     &ctx[_idx & ctx_mask], hash_base);                        \
                 if (RIX_LIKELY(entry != NULL)) {                              \
-                    uint32_t _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
+                    u32 _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
                     FCORE_TOUCH_TIMESTAMP(owner, entry, now);                 \
                     FCORE_ON_HIT(owner, entry, _eidx);                        \
                     results[_idx] = _eidx;                                    \
@@ -547,17 +547,17 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
                               const _FCORE_KEY_T(p) *keys,                    \
                               unsigned nb_keys,                               \
-                              uint64_t now,                                   \
-                              uint32_t *results)                              \
+                              u64 now,                                   \
+                              u32 *results)                              \
 {                                                                             \
     enum { _FCORE_FIND_CTX_COUNT = 32u };                                     \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
     _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
-    const uint32_t hash_mask = FCORE_HASH_MASK(owner, ht);                    \
+    const u32 hash_mask = FCORE_HASH_MASK(owner, ht);                    \
     struct rix_hash_find_ctx_s ctx[_FCORE_FIND_CTX_COUNT];                    \
-    uint64_t hit_count = 0u;                                                  \
-    uint64_t miss_count = 0u;                                                 \
+    u64 hit_count = 0u;                                                  \
+    u64 miss_count = 0u;                                                 \
     const unsigned ctx_mask = _FCORE_FIND_CTX_COUNT - 1u;                     \
     const unsigned ahead = 8u;                                                \
     const unsigned step  = 8u;                                                \
@@ -590,7 +590,7 @@ _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
                 _FCORE_ENTRY_T(p) *entry = _FCORE_HT(ht, cmp_key)(            \
                     &ctx[_idx & ctx_mask], hash_base);                        \
                 if (RIX_LIKELY(entry != NULL)) {                              \
-                    uint32_t _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
+                    u32 _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
                     FCORE_TOUCH_TIMESTAMP(owner, entry, now);                 \
                     FCORE_ON_HIT(owner, entry, _eidx);                        \
                     results[_idx] = _eidx;                                    \
@@ -612,16 +612,16 @@ _FCORE_INT(p, find_key_bulk_)(_FCORE_OT(ot) *owner,                          \
                                                                               \
 static RIX_UNUSED void                                                        \
 _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
-                             const uint32_t *entry_idxv,                      \
+                             const u32 *entry_idxv,                      \
                              unsigned nb_keys,                                 \
-                             uint64_t now,                                     \
-                             uint32_t *results)                                \
+                             u64 now,                                     \
+                             u32 *results)                                \
 {                                                                             \
     enum { _FCORE_ADD_CTX_COUNT = 8u };                                       \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
     _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
-    const uint32_t hash_mask = FCORE_HASH_MASK(owner, ht);                    \
+    const u32 hash_mask = FCORE_HASH_MASK(owner, ht);                    \
     const unsigned ctx_mask = _FCORE_ADD_CTX_COUNT - 1u;                      \
     const unsigned step  = 4u;                                                \
     const unsigned ahead = 8u;                                                \
@@ -633,7 +633,7 @@ _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
     {                                                                         \
         unsigned _prefetch_n = (nb_keys < ahead) ? nb_keys : ahead;           \
         for (unsigned _i = 0; _i < _prefetch_n; _i++) {                       \
-            uint32_t _eidx = entry_idxv[_i];                                  \
+            u32 _eidx = entry_idxv[_i];                                  \
             _FCORE_ENTRY_T(p) *entry =                                        \
                 FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                         \
             RIX_ASSERT(_eidx != 0u);                                          \
@@ -649,7 +649,7 @@ _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
             unsigned _n = (_i + step <= nb_keys) ? step : (nb_keys - _i);     \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
                 unsigned _idx = _i + _j;                                      \
-                uint32_t _eidx = entry_idxv[_idx];                            \
+                u32 _eidx = entry_idxv[_idx];                            \
                 _FCORE_ENTRY_T(p) *entry;                                     \
                 struct rix_hash_find_ctx_s *_ctxp =                           \
                     &ctx[_idx & ctx_mask];                                    \
@@ -659,7 +659,7 @@ _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
                 entry = FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                 \
                 RIX_ASSUME_NONNULL(entry);                                    \
                 if (_idx + ahead < nb_keys) {                                 \
-                    uint32_t _peidx = entry_idxv[_idx + ahead];               \
+                    u32 _peidx = entry_idxv[_idx + ahead];               \
                     _FCORE_ENTRY_T(p) *_pentry =                              \
                         FCORE_LAYOUT_ENTRY_PTR(owner, _peidx);                \
                     RIX_ASSERT(_peidx != 0u);                                 \
@@ -684,10 +684,10 @@ _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
                                                     : (nb_keys - _base);      \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
                 unsigned _idx = _base + _j;                                   \
-                uint32_t _eidx = entry_idxv[_idx];                            \
+                u32 _eidx = entry_idxv[_idx];                            \
                 struct rix_hash_find_ctx_s *_ctxp;                            \
                 _FCORE_ENTRY_T(p) *entry;                                     \
-                uint32_t _ret_idx = (uint32_t)RIX_NIL;                        \
+                u32 _ret_idx = (u32)RIX_NIL;                        \
                 RIX_ASSERT(_eidx != 0u);                                      \
                 RIX_ASSERT(_eidx <= owner->max_entries);                      \
                 _ctxp = &ctx[_idx & ctx_mask];                                \
@@ -705,10 +705,10 @@ _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
                     u32 _hits = _ctxp->fp_hits[0];                            \
                     while (RIX_UNLIKELY(_hits != 0u)) {                       \
                         unsigned _bit = (unsigned)__builtin_ctz(_hits);       \
-                        uint32_t _nidx = _ctxp->bk[0]->idx[_bit];             \
+                        u32 _nidx = _ctxp->bk[0]->idx[_bit];             \
                         _FCORE_ENTRY_T(p) *_node;                             \
                         _hits &= _hits - 1u;                                  \
-                        if (RIX_UNLIKELY(_nidx == (uint32_t)RIX_NIL))         \
+                        if (RIX_UNLIKELY(_nidx == (u32)RIX_NIL))         \
                             continue;                                         \
                         _node = FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);         \
                         RIX_ASSUME_NONNULL(_node);                            \
@@ -726,10 +726,10 @@ _FCORE_INT(p, add_idx_bulk_legacy_)(_FCORE_OT(ot) *owner,                    \
                     u32 _hits = _ctxp->fp_hits[1];                            \
                     while (RIX_UNLIKELY(_hits != 0u)) {                       \
                         unsigned _bit = (unsigned)__builtin_ctz(_hits);       \
-                        uint32_t _nidx = _ctxp->bk[1]->idx[_bit];             \
+                        u32 _nidx = _ctxp->bk[1]->idx[_bit];             \
                         _FCORE_ENTRY_T(p) *_node;                             \
                         _hits &= _hits - 1u;                                  \
-                        if (RIX_UNLIKELY(_nidx == (uint32_t)RIX_NIL))         \
+                        if (RIX_UNLIKELY(_nidx == (u32)RIX_NIL))         \
                             continue;                                         \
                         _node = FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);         \
                         RIX_ASSUME_NONNULL(_node);                            \
@@ -817,17 +817,17 @@ _fcore_add_idx_next_: ;                                                      \
                                                                               \
 static RIX_UNUSED unsigned                                                    \
 _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
-                              uint32_t *entry_idxv,                           \
+                              u32 *entry_idxv,                           \
                               unsigned nb_keys,                               \
                               enum ft_add_policy policy,                      \
-                              uint64_t now,                                   \
-                              uint32_t *unused_idxv)                          \
+                              u64 now,                                   \
+                              u32 *unused_idxv)                          \
 {                                                                             \
     enum { _FCORE_ADD_CTX_COUNT = 8u };                                       \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
     _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
-    const uint32_t hash_mask = FCORE_HASH_MASK(owner, ht);                    \
+    const u32 hash_mask = FCORE_HASH_MASK(owner, ht);                    \
     const unsigned ctx_mask = _FCORE_ADD_CTX_COUNT - 1u;                      \
     const unsigned step  = 4u;                                                \
     const unsigned ahead = 8u;                                                \
@@ -839,7 +839,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
     {                                                                         \
         unsigned _prefetch_n = (nb_keys < ahead) ? nb_keys : ahead;           \
         for (unsigned _i = 0; _i < _prefetch_n; _i++) {                       \
-            uint32_t _eidx = entry_idxv[_i];                                  \
+            u32 _eidx = entry_idxv[_i];                                  \
             _FCORE_ENTRY_T(p) *entry =                                        \
                 FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                         \
             RIX_ASSERT(_eidx != 0u);                                          \
@@ -854,7 +854,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
             unsigned _n = (_i + step <= nb_keys) ? step : (nb_keys - _i);     \
             for (unsigned _j = 0; _j < _n; _j++) {                            \
                 unsigned _idx = _i + _j;                                      \
-                uint32_t _eidx = entry_idxv[_idx];                            \
+                u32 _eidx = entry_idxv[_idx];                            \
                 _FCORE_ENTRY_T(p) *entry;                                     \
                 struct rix_hash_find_ctx_s *_ctxp =                           \
                     &ctx[_idx & ctx_mask];                                    \
@@ -864,7 +864,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 entry = FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                 \
                 RIX_ASSUME_NONNULL(entry);                                    \
                 if (_idx + ahead < nb_keys) {                                 \
-                    uint32_t _peidx = entry_idxv[_idx + ahead];               \
+                    u32 _peidx = entry_idxv[_idx + ahead];               \
                     _FCORE_ENTRY_T(p) *_pentry =                              \
                         FCORE_LAYOUT_ENTRY_PTR(owner, _peidx);                \
                     RIX_ASSERT(_peidx != 0u);                                 \
@@ -888,11 +888,11 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                                                     : (nb_keys - _base);      \
             for (unsigned _j = 0; _j < _n; _j++) {                            \
                 unsigned _idx = _base + _j;                                   \
-                uint32_t _eidx = entry_idxv[_idx];                            \
+                u32 _eidx = entry_idxv[_idx];                            \
                 struct rix_hash_find_ctx_s *_ctxp = &ctx[_idx & ctx_mask];    \
                 _FCORE_ENTRY_T(p) *entry =                                    \
                     (_FCORE_ENTRY_T(p) *)(uintptr_t)_ctxp->key;               \
-                uint32_t _ret_idx = (uint32_t)RIX_NIL;                        \
+                u32 _ret_idx = (u32)RIX_NIL;                        \
                 RIX_ASSERT(_eidx != 0u);                                      \
                 RIX_ASSERT(_eidx <= owner->max_entries);                      \
                 RIX_ASSUME_NONNULL(entry);                                    \
@@ -906,10 +906,10 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                     u32 _hits = _ctxp->fp_hits[0];                            \
                     while (RIX_UNLIKELY(_hits != 0u)) {                       \
                         unsigned _bit = (unsigned)__builtin_ctz(_hits);       \
-                        uint32_t _nidx = _ctxp->bk[0]->idx[_bit];             \
+                        u32 _nidx = _ctxp->bk[0]->idx[_bit];             \
                         _FCORE_ENTRY_T(p) *_node;                             \
                         _hits &= _hits - 1u;                                  \
-                        if (RIX_UNLIKELY(_nidx == (uint32_t)RIX_NIL))         \
+                        if (RIX_UNLIKELY(_nidx == (u32)RIX_NIL))         \
                             continue;                                         \
                         _node = FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);         \
                         RIX_ASSUME_NONNULL(_node);                            \
@@ -941,10 +941,10 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                     u32 _hits = _ctxp->fp_hits[1];                            \
                     while (RIX_UNLIKELY(_hits != 0u)) {                       \
                         unsigned _bit = (unsigned)__builtin_ctz(_hits);       \
-                        uint32_t _nidx = _ctxp->bk[1]->idx[_bit];             \
+                        u32 _nidx = _ctxp->bk[1]->idx[_bit];             \
                         _FCORE_ENTRY_T(p) *_node;                             \
                         _hits &= _hits - 1u;                                  \
-                        if (RIX_UNLIKELY(_nidx == (uint32_t)RIX_NIL))         \
+                        if (RIX_UNLIKELY(_nidx == (u32)RIX_NIL))         \
                             continue;                                         \
                         _node = FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);         \
                         RIX_ASSUME_NONNULL(_node);                            \
@@ -1017,7 +1017,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                     if (policy == FT_ADD_UPDATE) {                            \
                         _FCORE_ENTRY_T(p) *_node =                            \
                             FCORE_LAYOUT_ENTRY_PTR(owner, _ret_idx);          \
-                        uint32_t _ins_idx;                                    \
+                        u32 _ins_idx;                                    \
                         RIX_ASSUME_NONNULL(_node);                            \
                         _ins_idx = _ret_idx;                                  \
                         RIX_ASSERT(_FCORE_HT(ht, remove)(                      \
@@ -1054,12 +1054,12 @@ _fcore_add_idx_next_: ;                                                      \
                                                                               \
 /*=== add_idx_oneshot (single, by index via bulk path) =====================*/\
                                                                               \
-static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
+static RIX_UNUSED RIX_FORCE_INLINE u32                                   \
 _FCORE_INT(p, add_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
-                                uint32_t entry_idx,                           \
-                                uint64_t now)                                 \
+                                u32 entry_idx,                           \
+                                u64 now)                                 \
 {                                                                             \
-    uint32_t result = 0u;                                                     \
+    u32 result = 0u;                                                     \
     _FCORE_INT(p, add_idx_bulk_legacy_)(owner, &entry_idx, 1u, now, &result);\
     return result;                                                            \
 }                                                                             \
@@ -1068,7 +1068,7 @@ _FCORE_INT(p, add_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
                                                                               \
 static RIX_UNUSED void                                                        \
 _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
-                             const uint32_t *idxs,                            \
+                             const u32 *idxs,                            \
                              unsigned nb_idxs)                                 \
 {                                                                             \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
@@ -1082,7 +1082,7 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
         if (_i < nb_idxs) {                                                   \
             unsigned _n = (_i + step <= nb_idxs) ? step : (nb_idxs - _i);    \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
-                uint32_t _eidx = idxs[_i + _j];                              \
+                u32 _eidx = idxs[_i + _j];                              \
                 RIX_ASSERT(_eidx != 0u);                                      \
                 RIX_ASSERT(_eidx <= owner->max_entries);                      \
                 rix_hash_prefetch_entry_of(                                   \
@@ -1094,7 +1094,7 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
             unsigned _n = (_base + step <= nb_idxs) ? step                    \
                                                     : (nb_idxs - _base);      \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
-                uint32_t _eidx = idxs[_base + _j];                           \
+                u32 _eidx = idxs[_base + _j];                           \
                 _FCORE_ENTRY_T(p) *entry;                                     \
                 RIX_ASSERT(_eidx != 0u);                                      \
                 RIX_ASSERT(_eidx <= owner->max_entries);                      \
@@ -1117,9 +1117,9 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                                                                               \
 /*=== del_idx_oneshot (single, by index via bulk path) =====================*/\
                                                                               \
-static RIX_UNUSED RIX_FORCE_INLINE uint32_t                                   \
+static RIX_UNUSED RIX_FORCE_INLINE u32                                   \
 _FCORE_INT(p, del_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
-                                uint32_t entry_idx)                           \
+                                u32 entry_idx)                           \
 {                                                                             \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     _FCORE_ENTRY_T(p) *entry;                                                 \
@@ -1144,7 +1144,7 @@ _FCORE_INT(p, del_idx_oneshot_)(_FCORE_OT(ot) *owner,                        \
                                                                               \
 static RIX_UNUSED int                                                         \
 _FCORE_INT(p, walk_)(_FCORE_OT(ot) *owner,                                   \
-                     int (*cb)(uint32_t entry_idx, void *arg),                \
+                     int (*cb)(u32 entry_idx, void *arg),                \
                      void *arg)                                               \
 {                                                                             \
     unsigned _nb_bk = owner->ht_head.rhh_mask + 1u;                           \
@@ -1154,7 +1154,7 @@ _FCORE_INT(p, walk_)(_FCORE_OT(ot) *owner,                                   \
             unsigned _nidx = _bk->idx[_s];                                    \
             if (_nidx == (unsigned)RIX_NIL)                                   \
                 continue;                                                     \
-            int _rc = cb((uint32_t)_nidx, arg);                               \
+            int _rc = cb((u32)_nidx, arg);                               \
             if (_rc != 0)                                                     \
                 return _rc;                                                   \
         }                                                                     \
@@ -1174,7 +1174,7 @@ _FCORE_INT(p, flush_)(_FCORE_OT(ot) *owner)                                  \
     /* Fill idx with RIX_NIL */                                               \
     for (unsigned _b = 0; _b < _nb_bk; _b++)                                  \
         for (unsigned _s = 0; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++)            \
-            owner->buckets[_b].idx[_s] = (uint32_t)RIX_NIL;                  \
+            owner->buckets[_b].idx[_s] = (u32)RIX_NIL;                  \
     owner->ht_head.rhh_nb = 0u;                                               \
     /* Rebuild free list */                                                   \
     _FCORE_INT(p, free_list_init_)(owner);                                    \

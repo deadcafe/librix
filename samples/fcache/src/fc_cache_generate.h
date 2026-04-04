@@ -16,7 +16,7 @@
  *                 const struct flow4_key *b) { ... }
  *   static inline union rix_hash_hash_u
  *   fc_flow4_hash_fn(const struct flow4_key *key,
- *                     uint32_t mask) { ... }
+ *                     u32 mask) { ... }
  *
  *   FC_CACHE_GENERATE(flow4, FC_FLOW4_DEFAULT_PRESSURE_EMPTY_SLOTS,
  *                      fc_flow4_hash_fn, fc_flow4_cmp)
@@ -251,7 +251,7 @@ _FCG_INT(p, prefetch_insert_hash)(const _FCG_CACHE_T(p) *fc,              \
                                   union rix_hash_hash_u h)                 \
 {                                                                          \
     unsigned bk0, bk1;                                                     \
-    uint32_t fp;                                                           \
+    u32 fp;                                                           \
     unsigned mask = fc->ht_head.rhh_mask;                                  \
     rix_hash_buckets(h, mask, &bk0, &bk1, &fp);                          \
     (void)fp;                                                              \
@@ -261,7 +261,7 @@ _FCG_INT(p, prefetch_insert_hash)(const _FCG_CACHE_T(p) *fc,              \
                                                                            \
 static inline void                                                         \
 _FCG_INT(p, result_set_hit)(_FCG_RESULT_T(p) *result,                     \
-                            uint32_t entry_idx)                            \
+                            u32 entry_idx)                            \
 {                                                                          \
     result->entry_idx = entry_idx;                                         \
 }                                                                          \
@@ -274,7 +274,7 @@ _FCG_INT(p, result_set_miss)(_FCG_RESULT_T(p) *result)                    \
                                                                            \
 static inline void                                                         \
 _FCG_INT(p, result_set_filled)(_FCG_RESULT_T(p) *result,                  \
-                               uint32_t entry_idx)                         \
+                               u32 entry_idx)                         \
 {                                                                          \
     result->entry_idx = entry_idx;                                         \
 }                                                                          \
@@ -283,7 +283,7 @@ static inline void                                                         \
 _FCG_INT(p, update_eff_timeout)(_FCG_CACHE_T(p) *fc)                      \
 {                                                                          \
     unsigned live = fc->ht_head.rhh_nb;                                    \
-    uint64_t max_tsc = fc->timeout_tsc;                                    \
+    u64 max_tsc = fc->timeout_tsc;                                    \
     unsigned lo = fc->timeout_lo_entries;                                  \
     unsigned hi = fc->timeout_hi_entries;                                  \
     if (fc->total_slots == 0u || max_tsc == 0u) {                          \
@@ -295,10 +295,10 @@ _FCG_INT(p, update_eff_timeout)(_FCG_CACHE_T(p) *fc)                      \
     } else if (live >= hi) {                                               \
         fc->eff_timeout_tsc = fc->timeout_min_tsc;                         \
     } else {                                                               \
-        uint64_t span_entries = (uint64_t)(hi - lo);                       \
-        uint64_t used_entries = (uint64_t)(live - lo);                     \
-        uint64_t span_tsc = max_tsc - fc->timeout_min_tsc;                \
-        uint64_t shrink = (used_entries * span_tsc) / span_entries;        \
+        u64 span_entries = (u64)(hi - lo);                       \
+        u64 used_entries = (u64)(live - lo);                     \
+        u64 span_tsc = max_tsc - fc->timeout_min_tsc;                \
+        u64 shrink = (used_entries * span_tsc) / span_entries;        \
         fc->eff_timeout_tsc = max_tsc - shrink;                            \
     }                                                                      \
     if (fc->eff_timeout_tsc == 0u)                                         \
@@ -308,7 +308,7 @@ _FCG_INT(p, update_eff_timeout)(_FCG_CACHE_T(p) *fc)                      \
 static inline unsigned                                                     \
 _FCG_INT(p, threshold64)(unsigned total_slots, unsigned parts64)          \
 {                                                                          \
-    return (unsigned)(((uint64_t)total_slots * parts64) >> 6);             \
+    return (unsigned)(((u64)total_slots * parts64) >> 6);             \
 }                                                                          \
                                                                            \
 static void                                                                \
@@ -370,15 +370,15 @@ _FCG_INT(p, free_entry)(_FCG_CACHE_T(p) *fc,                              \
 static unsigned                                                            \
 _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
                                unsigned bk_idx,                            \
-                               uint64_t now_tsc,                           \
-                               uint64_t timeout_tsc,                       \
+                               u64 now_tsc,                           \
+                               u64 timeout_tsc,                       \
                                unsigned *expired_slots,                    \
                                int *oldest_slot)                           \
 {                                                                          \
     struct rix_hash_bucket_s *bucket = fc->buckets + bk_idx;              \
-    uint64_t now_ts = _FCG_TS_NOW(fc, now_tsc);                            \
-    uint64_t timeout_ts = _FCG_TS_TIMEOUT(fc, timeout_tsc);                \
-    uint64_t oldest_ts = FLOW_TIMESTAMP_MASK;                              \
+    u64 now_ts = _FCG_TS_NOW(fc, now_tsc);                            \
+    u64 timeout_ts = _FCG_TS_TIMEOUT(fc, timeout_tsc);                \
+    u64 oldest_ts = FLOW_TIMESTAMP_MASK;                              \
     _FCG_ENTRY_T(p) *entries[RIX_HASH_BUCKET_ENTRY_SZ];                    \
     unsigned slots[RIX_HASH_BUCKET_ENTRY_SZ];                              \
     unsigned cur_base = 0u;                                                \
@@ -442,8 +442,8 @@ _FCG_INT(p, scan_bucket_slots)(_FCG_CACHE_T(p) *fc,                       \
 static int                                                                 \
 _FCG_INT(p, reclaim_bucket)(_FCG_CACHE_T(p) *fc,                          \
                             unsigned bk_idx,                               \
-                            uint64_t now_tsc,                              \
-                            uint64_t timeout_tsc,                          \
+                            u64 now_tsc,                              \
+                            u64 timeout_tsc,                          \
                             unsigned free_reason)                          \
 {                                                                          \
     _FCG_ENTRY_T(p) *victim;                                              \
@@ -467,11 +467,11 @@ _FCG_INT(p, reclaim_bucket)(_FCG_CACHE_T(p) *fc,                          \
                                                                            \
 static int                                                                 \
 _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
-                                   uint64_t now,                           \
+                                   u64 now,                           \
                                    unsigned free_reason)                   \
 {                                                                          \
-    uint64_t now_ts = _FCG_TS_NOW(fc, now);                                \
-    uint64_t best_ts = FLOW_TIMESTAMP_MASK;                                \
+    u64 now_ts = _FCG_TS_NOW(fc, now);                                \
+    u64 best_ts = FLOW_TIMESTAMP_MASK;                                \
     _FCG_ENTRY_T(p) *victim = NULL;                                        \
     unsigned max = fc->max_entries;                                        \
     unsigned scan_limit = max >> 3;                                        \
@@ -516,8 +516,8 @@ _FCG_INT(p, reclaim_oldest_global)(_FCG_CACHE_T(p) *fc,                   \
 static unsigned                                                            \
 _FCG_INT(p, reclaim_bucket_all)(_FCG_CACHE_T(p) *fc,                      \
                                 unsigned bk_idx,                           \
-                                uint64_t now_tsc,                          \
-                                uint64_t timeout_tsc,                      \
+                                u64 now_tsc,                          \
+                                u64 timeout_tsc,                      \
                                 unsigned free_reason)                      \
 {                                                                          \
     unsigned expired_slots[RIX_HASH_BUCKET_ENTRY_SZ];                      \
@@ -543,7 +543,7 @@ static unsigned                                                            \
 _FCG_INT(p, maintain_grouped)(_FCG_CACHE_T(p) *fc,                        \
                               unsigned start_bk,                           \
                               unsigned bucket_count,                       \
-                              uint64_t now_tsc)                            \
+                              u64 now_tsc)                            \
 {                                                                          \
     unsigned evicted = 0u;                                                 \
     unsigned cur_bk;                                                       \
@@ -572,7 +572,7 @@ _FCG_INT(p, maintain_grouped)(_FCG_CACHE_T(p) *fc,                        \
 static inline unsigned                                                     \
 _FCG_INT(p, bucket_used_slots)(const struct rix_hash_bucket_s *bucket)     \
 {                                                                          \
-    uint32_t zero_mask = rix_hash_arch->find_u32x16(bucket->idx, 0u);      \
+    u32 zero_mask = rix_hash_arch->find_u32x16(bucket->idx, 0u);      \
     return 16u - (unsigned)__builtin_popcount(zero_mask);                  \
 }                                                                          \
                                                                            \
@@ -581,8 +581,8 @@ _FCG_INT(p, maintain_step_filter_reclaim)(                                 \
     _FCG_CACHE_T(p) *fc,                                                   \
     unsigned start_bk,                                                     \
     unsigned bucket_count,                                                 \
-    uint64_t now_tsc,                                                      \
-    uint64_t timeout_tsc,                                                  \
+    u64 now_tsc,                                                      \
+    u64 timeout_tsc,                                                  \
     unsigned skip_threshold)                                               \
 {                                                                          \
     unsigned evicted = 0u;                                                 \
@@ -628,7 +628,7 @@ _FCG_INT(p, maintain_step_filter_reclaim)(                                 \
 static unsigned                                                            \
 _FCG_INT(p, maintain_step_grouped)(_FCG_CACHE_T(p) *fc,                   \
                                    unsigned bucket_count,                  \
-                                   uint64_t now_tsc,                       \
+                                   u64 now_tsc,                       \
                                    unsigned skip_threshold)                \
 {                                                                          \
     unsigned evicted = 0u;                                                 \
@@ -658,12 +658,12 @@ _FCG_INT(p, maintain_step_grouped)(_FCG_CACHE_T(p) *fc,                   \
 static void __attribute__((unused))                                        \
 _FCG_INT(p, insert_relief_hashed)(_FCG_CACHE_T(p) *fc,                    \
                                   union rix_hash_hash_u h,                 \
-                                  uint64_t now_tsc)                        \
+                                  u64 now_tsc)                        \
 {                                                                          \
     unsigned bk0, bk1;                                                     \
-    uint32_t fp;                                                           \
-    uint32_t hits_fp;                                                      \
-    uint32_t hits_zero;                                                    \
+    u32 fp;                                                           \
+    u32 hits_fp;                                                      \
+    u32 hits_zero;                                                    \
     unsigned pressure_empty_slots;                                         \
     if (fc->total_slots == 0u)                                             \
         return;                                                            \
@@ -712,28 +712,28 @@ static void _FCG_API(p, flush)(_FCG_CACHE_T(p) *);                         \
 static unsigned _FCG_API(p, nb_entries)(const _FCG_CACHE_T(p) *);          \
 static void _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *,                      \
                                    const _FCG_KEY_T(p) *, unsigned,        \
-                                   uint64_t, _FCG_RESULT_T(p) *);          \
+                                   u64, _FCG_RESULT_T(p) *);          \
 static void _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *,                   \
                                       const _FCG_KEY_T(p) *, unsigned,     \
-                                      uint64_t, _FCG_RESULT_T(p) *);       \
+                                      u64, _FCG_RESULT_T(p) *);       \
 static void _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *,                       \
                                   const _FCG_KEY_T(p) *, unsigned,         \
-                                  uint64_t, _FCG_RESULT_T(p) *);           \
+                                  u64, _FCG_RESULT_T(p) *);           \
 static void _FCG_API(p, del_bulk)(_FCG_CACHE_T(p) *,                       \
                                   const _FCG_KEY_T(p) *, unsigned);        \
 static void _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *,                   \
-                                      const uint32_t *, unsigned);         \
+                                      const u32 *, unsigned);         \
 static unsigned _FCG_API(p, maintain)(_FCG_CACHE_T(p) *,                   \
-                                      unsigned, unsigned, uint64_t);       \
+                                      unsigned, unsigned, u64);       \
 static unsigned _FCG_API(p, maintain_step_ex)(_FCG_CACHE_T(p) *,           \
                                               unsigned, unsigned,          \
-                                              unsigned, uint64_t);         \
+                                              unsigned, u64);         \
 static unsigned _FCG_API(p, maintain_step)(_FCG_CACHE_T(p) *,              \
-                                           uint64_t, int);                 \
-static int _FCG_API(p, remove_idx)(_FCG_CACHE_T(p) *, uint32_t);           \
+                                           u64, int);                 \
+static int _FCG_API(p, remove_idx)(_FCG_CACHE_T(p) *, u32);           \
 static void _FCG_API(p, stats)(const _FCG_CACHE_T(p) *, _FCG_STATS_T(p) *); \
 static int _FCG_API(p, walk)(_FCG_CACHE_T(p) *,                            \
-                             int (*)(uint32_t, void *), void *);
+                             int (*)(u32, void *), void *);
 #else
 #define _FC_GENERATE_API_DECLS(p) /* prototypes in variant header */
 #endif
@@ -760,10 +760,10 @@ do {                                                                        \
     unsigned _bk1i =                                                        \
         (unsigned)((ctx_ptr)->bk[1] - (fc)->buckets);                       \
     _FCG_ENTRY_T(p) *_entry;                                                \
-    uint32_t _hit_idx;                                                      \
+    u32 _hit_idx;                                                      \
     _hit_idx = _FCG_HT(p, cmp_key_empties)((ctx_ptr),                       \
                                            FCG_LAYOUT_HASH_BASE(fc), 0u);    \
-    if (RIX_LIKELY(_hit_idx != (uint32_t)RIX_NIL)) {                        \
+    if (RIX_LIKELY(_hit_idx != (u32)RIX_NIL)) {                        \
         /* --- HIT --- */                                                    \
         _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
         RIX_ASSUME_NONNULL(_entry);                                          \
@@ -777,7 +777,7 @@ do {                                                                        \
     _FCG_HT(p, scan_bk_empties)((ctx_ptr), 1u);                              \
     _hit_idx = _FCG_HT(p, cmp_key_empties)((ctx_ptr),                        \
                                            FCG_LAYOUT_HASH_BASE(fc), 1u);    \
-    if (RIX_LIKELY(_hit_idx != (uint32_t)RIX_NIL)) {                        \
+    if (RIX_LIKELY(_hit_idx != (u32)RIX_NIL)) {                        \
         /* --- HIT in bk1 --- */                                             \
         _entry = FCG_LAYOUT_ENTRY_PTR((fc), _hit_idx);                       \
         RIX_ASSUME_NONNULL(_entry);                                          \
@@ -927,7 +927,7 @@ do {                                                                        \
     (fc)->total_slots = (nb_bk) * RIX_HASH_BUCKET_ENTRY_SZ;                  \
     (fc)->timeout_tsc = _cfg->timeout_tsc;                                   \
     (fc)->eff_timeout_tsc = _cfg->timeout_tsc ? _cfg->timeout_tsc : 1u;      \
-    (fc)->ts_shift = (uint8_t)((_cfg->ts_shift != 0u)                        \
+    (fc)->ts_shift = (u8)((_cfg->ts_shift != 0u)                        \
         ? flow_timestamp_shift_clamp(_cfg->ts_shift)                         \
         : FLOW_TIMESTAMP_DEFAULT_SHIFT);                                     \
     (fc)->pressure_empty_slots = _cfg->pressure_empty_slots ?                \
@@ -961,8 +961,8 @@ do {                                                                        \
         ((fc)->bulk_ctx != NULL &&                                           \
          (fc)->bulk_ctx_count >= FC_CACHE_BULK_CTX_COUNT) ?                  \
         (fc)->bulk_ctx : _stack_ctx;                                         \
-    uint64_t _hit_count = 0u;                                                \
-    uint64_t _miss_count = 0u;                                               \
+    u64 _hit_count = 0u;                                                \
+    u64 _miss_count = 0u;                                               \
     unsigned _step_keys;                                                     \
     unsigned _ahead_keys;                                                    \
     unsigned _total;                                                         \
@@ -1070,7 +1070,7 @@ static void                                                                \
 _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *fc,                                \
                        const _FCG_KEY_T(p) *keys,                          \
                        unsigned nb_keys,                                   \
-                       uint64_t now,                                       \
+                       u64 now,                                       \
                        _FCG_RESULT_T(p) *results)                          \
 {                                                                          \
     struct rix_hash_find_ctx_s stack_ctx[FC_CACHE_BULK_CTX_COUNT];         \
@@ -1078,8 +1078,8 @@ _FCG_API(p, find_bulk)(_FCG_CACHE_T(p) *fc,                                \
         (fc->bulk_ctx != NULL &&                                           \
          fc->bulk_ctx_count >= FC_CACHE_BULK_CTX_COUNT) ?                  \
         fc->bulk_ctx : stack_ctx;                                          \
-    uint64_t hit_count = 0u;                                               \
-    uint64_t miss_count = 0u;                                              \
+    u64 hit_count = 0u;                                               \
+    u64 miss_count = 0u;                                              \
     const unsigned ahead_keys = FLOW_CACHE_LOOKUP_AHEAD_KEYS;              \
     const unsigned step_keys = FLOW_CACHE_LOOKUP_STEP_KEYS;                \
     const unsigned total = nb_keys + 3u * ahead_keys;                      \
@@ -1151,7 +1151,7 @@ static void                                                                \
 _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
                           const _FCG_KEY_T(p) *keys,                       \
                           unsigned nb_keys,                                \
-                          uint64_t now,                                    \
+                          u64 now,                                    \
                           _FCG_RESULT_T(p) *results)                       \
 {                                                                          \
     struct rix_hash_find_ctx_s stack_ctx[FC_CACHE_BULK_CTX_COUNT];         \
@@ -1159,8 +1159,8 @@ _FCG_API(p, findadd_bulk)(_FCG_CACHE_T(p) *fc,                             \
         (fc->bulk_ctx != NULL &&                                           \
          fc->bulk_ctx_count >= FC_CACHE_BULK_CTX_COUNT) ?                  \
         fc->bulk_ctx : stack_ctx;                                          \
-    uint64_t hit_count = 0u;                                               \
-    uint64_t miss_count = 0u;                                              \
+    u64 hit_count = 0u;                                               \
+    u64 miss_count = 0u;                                              \
     const unsigned ahead_keys = FLOW_CACHE_LOOKUP_AHEAD_KEYS;              \
     const unsigned step_keys = FLOW_CACHE_LOOKUP_STEP_KEYS;                \
     const unsigned total = nb_keys + 3u * ahead_keys;                      \
@@ -1226,7 +1226,7 @@ static unsigned                                                            \
 _FCG_API(p, maintain)(_FCG_CACHE_T(p) *fc,                              \
                        unsigned start_bk,                                  \
                        unsigned bucket_count,                              \
-                       uint64_t now)                                       \
+                       u64 now)                                       \
 {                                                                          \
     fc->stats.maint_calls++;                                               \
     _FCG_INT(p, update_eff_timeout)(fc);                                  \
@@ -1239,7 +1239,7 @@ _FCG_API(p, maintain_step_ex)(_FCG_CACHE_T(p) *fc,                       \
                                unsigned start_bk,                           \
                                unsigned bucket_count,                       \
                                unsigned skip_threshold,                     \
-                               uint64_t now)                                \
+                               u64 now)                                \
 {                                                                          \
     fc->stats.maint_step_calls++;                                          \
     fc->stats.maint_calls++;                                               \
@@ -1251,7 +1251,7 @@ _FCG_API(p, maintain_step_ex)(_FCG_CACHE_T(p) *fc,                       \
                                                                            \
 static unsigned                                                            \
 _FCG_API(p, maintain_step)(_FCG_CACHE_T(p) *fc,                          \
-                            uint64_t now,                                   \
+                            u64 now,                                   \
                             int idle)                                       \
 {                                                                          \
     unsigned sweep;                                                        \
@@ -1261,8 +1261,8 @@ _FCG_API(p, maintain_step)(_FCG_CACHE_T(p) *fc,                          \
         sweep = fc->nb_bk;                                                 \
         skip_threshold = 0u;                                               \
     } else {                                                               \
-        uint64_t elapsed = now - fc->last_maint_tsc;                       \
-        uint64_t added   = fc->stats.fills - fc->last_maint_fills;         \
+        u64 elapsed = now - fc->last_maint_tsc;                       \
+        u64 added   = fc->stats.fills - fc->last_maint_fills;         \
         unsigned time_scale = 0u;                                          \
         unsigned entry_scale = 0u;                                         \
         unsigned scale;                                                    \
@@ -1289,7 +1289,7 @@ _FCG_API(p, maintain_step)(_FCG_CACHE_T(p) *fc,                          \
 }                                                                          \
                                                                            \
 static int                                                                 \
-_FCG_API(p, remove_idx)(_FCG_CACHE_T(p) *fc, uint32_t entry_idx)        \
+_FCG_API(p, remove_idx)(_FCG_CACHE_T(p) *fc, u32 entry_idx)        \
 {                                                                          \
     _FCG_ENTRY_T(p) *entry;                                               \
     if (RIX_UNLIKELY(entry_idx == 0u || entry_idx > fc->max_entries))      \
@@ -1313,7 +1313,7 @@ _FCG_API(p, stats)(const _FCG_CACHE_T(p) *fc, _FCG_STATS_T(p) *out)   \
 /* ----- walk: iterate all live entries -------------------------------- */\
 static int                                                                 \
 _FCG_API(p, walk)(_FCG_CACHE_T(p) *fc,                                  \
-                   int (*cb)(uint32_t entry_idx, void *arg), void *arg)    \
+                   int (*cb)(u32 entry_idx, void *arg), void *arg)    \
 {                                                                          \
     for (unsigned i = 0; i < fc->max_entries; i++) {                       \
         if (!flow_timestamp_is_zero(&FCG_LAYOUT_ENTRY_AT(fc, i)->hdr.meta)) { \
@@ -1330,7 +1330,7 @@ static void                                                                \
 _FCG_API(p, add_bulk)(_FCG_CACHE_T(p) *fc,                              \
                        const _FCG_KEY_T(p) *keys,                         \
                        unsigned nb_keys,                                   \
-                       uint64_t now,                                       \
+                       u64 now,                                       \
                        _FCG_RESULT_T(p) *results)                         \
 {                                                                          \
     const unsigned ahead_keys = FLOW_CACHE_LOOKUP_AHEAD_KEYS;              \
@@ -1514,7 +1514,7 @@ _FCG_API(p, del_bulk)(_FCG_CACHE_T(p) *fc,                              \
 /* ----- del_idx_bulk: remove by pool index ---------------------------- */\
 static void                                                                \
 _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
-                           const uint32_t *idxs,                           \
+                           const u32 *idxs,                           \
                            unsigned nb_idxs)                               \
 {                                                                          \
     const unsigned ahead = FLOW_CACHE_LOOKUP_AHEAD_KEYS;                   \
@@ -1539,7 +1539,7 @@ _FCG_API(p, del_idx_bulk)(_FCG_CACHE_T(p) *fc,                          \
             unsigned n = (base + step <= nb_idxs) ?                        \
                 step : (nb_idxs - base);                                   \
             for (unsigned j = 0; j < n; j++) {                             \
-                uint32_t eidx = idxs[base + j];                            \
+                u32 eidx = idxs[base + j];                            \
                 _FCG_ENTRY_T(p) *entry;                                   \
                 if (eidx == 0u || eidx > fc->max_entries)                  \
                     continue;                                              \

@@ -158,9 +158,9 @@ struct rix_hash_arch_s {
 };
 
 /* Per-TU dispatch handle.  Defaults to Generic until init enables SIMD. */
-static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_GEN;
+static RIX_UNUSED const struct rix_hash_arch_s rix_hash_arch_GEN;
 static RIX_UNUSED const struct rix_hash_arch_s *rix_hash_arch =
-    &_rix_hash_arch_GEN;
+    &rix_hash_arch_GEN;
 
 /*===========================================================================
  * Generic (scalar) find implementations
@@ -288,7 +288,7 @@ rix_hash_bytes_GEN(const void *key,
 #    if defined(__x86_64__) && defined(__SSE4_2__)
 
 /*
- * _rix_hash_crc32_bytes - CRC32C over an arbitrary-length byte buffer.
+ * rix_crc32_bytes - CRC32C over an arbitrary-length byte buffer.
  *
  * Processes the buffer in 8->4->2->1-byte chunks using the CRC32C hardware
  * instruction (SSE4.2, -msse4.2).  key_bytes may be any value including
@@ -391,7 +391,7 @@ rix_hash_u64_CRC32(u64 key,
 }
 
 /* GEN find + CRC32 hash: for SIMD=gen (scalar scan, hardware hash) */
-static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_GEN = {
+static RIX_UNUSED const struct rix_hash_arch_s rix_hash_arch_GEN = {
     rix_hash_find_u32x16_GEN,
     rix_hash_find_u32x16_2_GEN,
     rix_hash_find_u64x16_GEN,
@@ -403,7 +403,7 @@ static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_GEN = {
 #    else /* !(__x86_64__ && __SSE4_2__) */
 
 /* GEN find + GEN hash: pure portable fallback */
-static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_GEN = {
+static RIX_UNUSED const struct rix_hash_arch_s rix_hash_arch_GEN = {
     rix_hash_find_u32x16_GEN,
     rix_hash_find_u32x16_2_GEN,
     rix_hash_find_u64x16_GEN,
@@ -512,7 +512,7 @@ rix_hash_find_u64x16_SSE(const u64 *arr,
 }
 
 /* SSE find + CRC32 hash (SSE4.2 is our baseline, so CRC32 always available) */
-static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_SSE = {
+static RIX_UNUSED const struct rix_hash_arch_s rix_hash_arch_SSE = {
     rix_hash_find_u32x16_SSE,
     rix_hash_find_u32x16_2_SSE,
     rix_hash_find_u64x16_SSE,
@@ -596,7 +596,7 @@ rix_hash_find_u64x16_AVX2(const u64 *arr,
 }
 
 /* AVX2 find + CRC32 hash (AVX2 always implies SSE4.2) */
-static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_AVX2 = {
+static RIX_UNUSED const struct rix_hash_arch_s rix_hash_arch_AVX2 = {
     rix_hash_find_u32x16_AVX2,
     rix_hash_find_u32x16_2_AVX2,
     rix_hash_find_u64x16_AVX2,
@@ -649,7 +649,7 @@ rix_hash_find_u64x16_AVX512(const u64 *arr,
 }
 
 /* AVX-512 find + CRC32 hash (AVX-512 always implies SSE4.2) */
-static RIX_UNUSED const struct rix_hash_arch_s _rix_hash_arch_AVX512 = {
+static RIX_UNUSED const struct rix_hash_arch_s rix_hash_arch_AVX512 = {
     rix_hash_find_u32x16_AVX512,
     rix_hash_find_u32x16_2_AVX512,
     rix_hash_find_u64x16_AVX512,
@@ -690,7 +690,7 @@ static RIX_FORCE_INLINE void
 rix_hash_arch_init(u32 enable)
 {
 #    if defined(__x86_64__)
-    rix_hash_arch = &_rix_hash_arch_GEN; /* per-TU fallback */
+    rix_hash_arch = &rix_hash_arch_GEN; /* per-TU fallback */
 
     if (!enable)
         return;
@@ -700,14 +700,14 @@ rix_hash_arch_init(u32 enable)
 #        if defined(__AVX512F__)
     if ((enable & RIX_HASH_ARCH_AVX512) &&
         __builtin_cpu_supports("avx512f")) {
-        rix_hash_arch = &_rix_hash_arch_AVX512;
+        rix_hash_arch = &rix_hash_arch_AVX512;
         return;
     }
 #        endif
 #        if defined(__AVX2__)
     if ((enable & (RIX_HASH_ARCH_AVX2 | RIX_HASH_ARCH_AVX512)) &&
         __builtin_cpu_supports("avx2")) {
-        rix_hash_arch = &_rix_hash_arch_AVX2;
+        rix_hash_arch = &rix_hash_arch_AVX2;
         return;
     }
 #        endif
@@ -715,19 +715,19 @@ rix_hash_arch_init(u32 enable)
     if ((enable & (RIX_HASH_ARCH_SSE | RIX_HASH_ARCH_AVX2 |
                    RIX_HASH_ARCH_AVX512)) &&
         __builtin_cpu_supports("sse4.2")) {
-        rix_hash_arch = &_rix_hash_arch_SSE;
+        rix_hash_arch = &rix_hash_arch_SSE;
         return;
     }
 #        endif
 #      elif defined(__SSE4_2__)
     if (enable & (RIX_HASH_ARCH_SSE | RIX_HASH_ARCH_AVX2 |
                   RIX_HASH_ARCH_AVX512))
-        rix_hash_arch = &_rix_hash_arch_SSE;
+        rix_hash_arch = &rix_hash_arch_SSE;
 #      endif
 
 #    else /* !__x86_64__ */
     (void)enable;
-    rix_hash_arch = &_rix_hash_arch_GEN;
+    rix_hash_arch = &rix_hash_arch_GEN;
 #    endif
 }
 

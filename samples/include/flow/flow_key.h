@@ -14,10 +14,10 @@
 #include <rix/rix_hash.h>
 
 struct flow_entry_meta {
-    uint32_t cur_hash;
-    uint16_t slot;
-    uint16_t reserved0;
-    uint32_t timestamp;
+    u32 cur_hash;
+    u16 slot;
+    u16 reserved0;
+    u32 timestamp;
 };
 
 #ifndef FLOW_TIMESTAMP_DEFAULT_SHIFT
@@ -31,23 +31,23 @@ struct flow_entry_meta {
 #define FLOW_TIMESTAMP_MASK       UINT64_C(0x00000000ffffffff)
 #define FLOW_TIMESTAMP_HALF_RANGE UINT64_C(0x0000000080000000)
 
-static inline uint8_t
+static inline u8
 flow_timestamp_shift_clamp(unsigned shift)
 {
-    return (uint8_t)((shift <= FLOW_TIMESTAMP_MAX_SHIFT)
+    return (u8)((shift <= FLOW_TIMESTAMP_MAX_SHIFT)
         ? shift : FLOW_TIMESTAMP_DEFAULT_SHIFT);
 }
 
-static inline uint64_t
-flow_timestamp_encode(uint64_t now, unsigned shift)
+static inline u64
+flow_timestamp_encode(u64 now, unsigned shift)
 {
     return (now >> flow_timestamp_shift_clamp(shift)) & FLOW_TIMESTAMP_MASK;
 }
 
-static inline uint64_t
-flow_timestamp_timeout_encode(uint64_t timeout, unsigned shift)
+static inline u64
+flow_timestamp_timeout_encode(u64 timeout, unsigned shift)
 {
-    uint64_t encoded = timeout >> flow_timestamp_shift_clamp(shift);
+    u64 encoded = timeout >> flow_timestamp_shift_clamp(shift);
 
     if (encoded > FLOW_TIMESTAMP_MASK)
         encoded = FLOW_TIMESTAMP_MASK;
@@ -56,28 +56,28 @@ flow_timestamp_timeout_encode(uint64_t timeout, unsigned shift)
     return encoded;
 }
 
-static inline uint64_t
+static inline u64
 flow_timestamp_get(const struct flow_entry_meta *meta)
 {
     return meta->timestamp;
 }
 
 static inline void
-flow_timestamp_set_raw(struct flow_entry_meta *meta, uint64_t encoded)
+flow_timestamp_set_raw(struct flow_entry_meta *meta, u64 encoded)
 {
     encoded &= FLOW_TIMESTAMP_MASK;
-    meta->timestamp = (uint32_t)encoded;
+    meta->timestamp = (u32)encoded;
 }
 
 static inline void
-flow_timestamp_store(struct flow_entry_meta *meta, uint64_t now,
+flow_timestamp_store(struct flow_entry_meta *meta, u64 now,
                      unsigned shift)
 {
     flow_timestamp_set_raw(meta, flow_timestamp_encode(now, shift));
 }
 
 static inline void
-flow_timestamp_touch(struct flow_entry_meta *meta, uint64_t now,
+flow_timestamp_touch(struct flow_entry_meta *meta, u64 now,
                      unsigned shift)
 {
     if (meta->timestamp == 0u)
@@ -103,15 +103,15 @@ flow_timestamp_is_zero(const struct flow_entry_meta *meta)
     return flow_timestamp_get(meta) == 0u;
 }
 
-static inline uint64_t
-flow_timestamp_elapsed(uint64_t now_encoded, uint64_t ts_encoded)
+static inline u64
+flow_timestamp_elapsed(u64 now_encoded, u64 ts_encoded)
 {
     return (now_encoded - ts_encoded) & FLOW_TIMESTAMP_MASK;
 }
 
 static inline int
-flow_timestamp_is_expired_raw(uint64_t ts_encoded, uint64_t now_encoded,
-                              uint64_t timeout_encoded)
+flow_timestamp_is_expired_raw(u64 ts_encoded, u64 now_encoded,
+                              u64 timeout_encoded)
 {
     if (ts_encoded == 0u)
         return 0;
@@ -119,8 +119,8 @@ flow_timestamp_is_expired_raw(uint64_t ts_encoded, uint64_t now_encoded,
 }
 
 static inline int
-flow_timestamp_is_expired(const struct flow_entry_meta *meta, uint64_t now,
-                          uint64_t timeout, unsigned shift)
+flow_timestamp_is_expired(const struct flow_entry_meta *meta, u64 now,
+                          u64 timeout, unsigned shift)
 {
     return flow_timestamp_is_expired_raw(flow_timestamp_get(meta),
         flow_timestamp_encode(now, shift),
@@ -128,15 +128,15 @@ flow_timestamp_is_expired(const struct flow_entry_meta *meta, uint64_t now,
 }
 
 struct flow4_key {
-    uint8_t  family;
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;
-    uint32_t vrfid;
-    uint32_t src_ip;
-    uint32_t dst_ip;
-    uint32_t zero;
+    u8  family;
+    u8  proto;
+    u16 src_port;
+    u16 dst_port;
+    u16 pad;
+    u32 vrfid;
+    u32 src_ip;
+    u32 dst_ip;
+    u32 zero;
 };
 
 struct flow4_entry {
@@ -145,14 +145,14 @@ struct flow4_entry {
 };
 
 struct flow6_key {
-    uint8_t  family;
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;
-    uint32_t vrfid;
-    uint8_t src_ip[16];
-    uint8_t dst_ip[16];
+    u8  family;
+    u8  proto;
+    u16 src_port;
+    u16 dst_port;
+    u16 pad;
+    u32 vrfid;
+    u8 src_ip[16];
+    u8 dst_ip[16];
 } __attribute__((packed));
 
 struct flow6_entry {
@@ -161,21 +161,21 @@ struct flow6_entry {
 };
 
 struct flowu_key {
-    uint8_t  family;
-    uint8_t  proto;
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t pad;
-    uint32_t vrfid;
+    u8  family;
+    u8  proto;
+    u16 src_port;
+    u16 dst_port;
+    u16 pad;
+    u32 vrfid;
     union {
         struct {
-            uint32_t src;
-            uint32_t dst;
-            uint8_t  _pad[24];
+            u32 src;
+            u32 dst;
+            u8  _pad[24];
         } v4;
         struct {
-            uint8_t src[16];
-            uint8_t dst[16];
+            u8 src[16];
+            u8 dst[16];
         } v6;
     } addr;
 } __attribute__((packed));
@@ -193,28 +193,28 @@ struct flowu_entry {
  *===========================================================================*/
 
 static inline union rix_hash_hash_u
-flow4_key_hash(const struct flow4_key *key, uint32_t mask)
+flow4_key_hash(const struct flow4_key *key, u32 mask)
 {
 #if defined(__x86_64__) && defined(__SSE4_2__)
     union rix_hash_hash_u r;
-    uint64_t w0, w1, w2;
-    uint32_t h0, bk0, seed, h1;
+    u64 w0, w1, w2;
+    u32 h0, bk0, seed, h1;
 
     memcpy(&w0, (const char *)key,      8u);
     memcpy(&w1, (const char *)key + 8u,  8u);
     memcpy(&w2, (const char *)key + 16u, 8u);
-    h0  = (uint32_t)__builtin_ia32_crc32di(0ULL,          w0);
-    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w1);
-    h0  = (uint32_t)__builtin_ia32_crc32di((uint64_t)h0,  w2);
+    h0  = (u32)__builtin_ia32_crc32di(0ULL,          w0);
+    h0  = (u32)__builtin_ia32_crc32di((u64)h0,  w1);
+    h0  = (u32)__builtin_ia32_crc32di((u64)h0,  w2);
     h0 |= !h0;
     bk0  = h0 & mask;
     seed = ~h0;
     do {
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, w0);
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w1);
-        h1   = (uint32_t)__builtin_ia32_crc32di((uint64_t)h1,   w2);
+        h1   = (u32)__builtin_ia32_crc32di((u64)seed, w0);
+        h1   = (u32)__builtin_ia32_crc32di((u64)h1,   w1);
+        h1   = (u32)__builtin_ia32_crc32di((u64)h1,   w2);
         h1 |= !h1;
-        seed = (uint32_t)__builtin_ia32_crc32di((uint64_t)seed, (uint64_t)h0);
+        seed = (u32)__builtin_ia32_crc32di((u64)seed, (u64)h0);
     } while ((h1 & mask) == bk0);
 
     r.val32[0] = h0;
@@ -227,12 +227,12 @@ flow4_key_hash(const struct flow4_key *key, uint32_t mask)
 
 /*
  * Inline 24B key comparison -- avoids function-pointer overhead.
- * 24B = 3 x uint64_t XOR-OR.
+ * 24B = 3 x u64 XOR-OR.
  */
 static inline int
 flow4_key_cmp(const struct flow4_key *a, const struct flow4_key *b)
 {
-    uint64_t a0, a1, a2, b0, b1, b2;
+    u64 a0, a1, a2, b0, b1, b2;
 
     memcpy(&a0, a,                            8u);
     memcpy(&a1, (const char *)a + 8u,         8u);
@@ -248,7 +248,7 @@ flow4_key_cmp(const struct flow4_key *a, const struct flow4_key *b)
  *===========================================================================*/
 
 static inline union rix_hash_hash_u
-flow6_key_hash(const struct flow6_key *key, uint32_t mask)
+flow6_key_hash(const struct flow6_key *key, u32 mask)
 {
     return rix_hash_bytes_fast(key, sizeof(*key), mask);
 }
@@ -264,7 +264,7 @@ flow6_key_cmp(const struct flow6_key *a, const struct flow6_key *b)
  *===========================================================================*/
 
 static inline union rix_hash_hash_u
-flowu_key_hash(const struct flowu_key *key, uint32_t mask)
+flowu_key_hash(const struct flowu_key *key, u32 mask)
 {
     return rix_hash_bytes_fast(key, sizeof(*key), mask);
 }

@@ -45,8 +45,8 @@
  *                           scanning idx[16].
  *     RIX_HASH (keyonly)  -- fp without hash_field/slot_field in node;
  *                           smaller node, remove requires re-hash.
- *     RIX_HASH32         -- cuckoo hash, uint32_t key stored in bucket
- *     RIX_HASH64         -- cuckoo hash, uint64_t key stored in bucket
+ *     RIX_HASH32         -- cuckoo hash, u32 key stored in bucket
+ *     RIX_HASH64         -- cuckoo hash, u64 key stored in bucket
  *
  *     All hash variants provide:
  *       - Runtime SIMD dispatch (Generic / AVX2 / AVX-512)
