@@ -16,8 +16,7 @@
 struct flow_hashtbl_elm {
     uint32_t cur_hash;
     uint16_t slot;
-    uint8_t  timestamp_hi;
-    uint8_t  reserved0;
+    uint16_t reserved0;
     uint32_t timestamp;
 };
 
@@ -29,8 +28,8 @@ struct flow_hashtbl_elm {
 #define FLOW_TIMESTAMP_MAX_SHIFT 24u
 #endif
 
-#define FLOW_TIMESTAMP_MASK       UINT64_C(0x000000ffffffffff)
-#define FLOW_TIMESTAMP_HALF_RANGE UINT64_C(0x0000008000000000)
+#define FLOW_TIMESTAMP_MASK       UINT64_C(0x00000000ffffffff)
+#define FLOW_TIMESTAMP_HALF_RANGE UINT64_C(0x0000000080000000)
 
 static inline uint8_t
 flow_timestamp_shift_clamp(unsigned shift)
@@ -50,6 +49,8 @@ flow_timestamp_timeout_encode(uint64_t timeout, unsigned shift)
 {
     uint64_t encoded = timeout >> flow_timestamp_shift_clamp(shift);
 
+    if (encoded > FLOW_TIMESTAMP_MASK)
+        encoded = FLOW_TIMESTAMP_MASK;
     if (timeout != 0u && encoded == 0u)
         encoded = 1u;
     return encoded;
@@ -58,7 +59,7 @@ flow_timestamp_timeout_encode(uint64_t timeout, unsigned shift)
 static inline uint64_t
 flow_timestamp_get(const struct flow_hashtbl_elm *elm)
 {
-    return ((uint64_t)elm->timestamp_hi << 32) | elm->timestamp;
+    return elm->timestamp;
 }
 
 static inline void
@@ -66,7 +67,6 @@ flow_timestamp_set_raw(struct flow_hashtbl_elm *elm, uint64_t encoded)
 {
     encoded &= FLOW_TIMESTAMP_MASK;
     elm->timestamp = (uint32_t)encoded;
-    elm->timestamp_hi = (uint8_t)(encoded >> 32);
 }
 
 static inline void
@@ -80,7 +80,6 @@ static inline void
 flow_timestamp_clear(struct flow_hashtbl_elm *elm)
 {
     elm->timestamp = 0u;
-    elm->timestamp_hi = 0u;
 }
 
 static inline int

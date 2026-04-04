@@ -25,11 +25,11 @@
 | A2 | `find_bulk` | key 配列 | 各 key を独立 lookup | `results[i].entry_idx` |
 | A3 | `add_idx` | idx | key が未登録なら追加 | `inserted idx` |
 | A4 | `add_idx` | idx | 同一 key が既登録なら ignore | `existing idx` |
-| A5 | `add_idx_bulk` | idx 配列 | 各 idx を独立 add | `results[i].entry_idx` |
-| A6 | `add_idx_bulk` | 同一 key, 別 idx | ignore | `results[i]=existing idx` |
-| A7 | `add_idx_bulk` | self duplicate | ignore | `results[i]=request idx` |
-| A8 | `add_idx_bulk(ignore)` | idx 配列 | duplicate を ignore | `results[i]=free すべき idx or NIL` |
-| A9 | `add_idx_bulk(update)` | idx 配列 | duplicate を置換 | `results[i]=free すべき old idx or NIL` |
+| A5 | `add_idx_bulk` | idx 配列 | 各 idx を独立 add | `idxv[i]=surviving idx`, return=`unused_n` |
+| A6 | `add_idx_bulk` | 同一 key, 別 idx + `IGNORE` | ignore | `idxv[i]=existing idx`, `unused=request idx` |
+| A7 | `add_idx_bulk` | self duplicate | ignore | `idxv[i]=request idx`, `unused` なし |
+| A8 | `add_idx_bulk(ignore)` | idx 配列 | duplicate を ignore | `unused_idxv[]` に free 対象 request idx を詰める |
+| A9 | `add_idx_bulk(update)` | idx 配列 | duplicate を置換 | `unused_idxv[]` に free 対象 old idx を詰める |
 | A10 | `del_entry_idx` | valid idx | 既登録 entry を削除 | `deleted idx` |
 | A11 | `del_entry_idx_bulk` | valid idx 配列 | 各 idx を独立 delete | return なし |
 | A12 | `del_key` | key | hit なら削除、miss なら 0 | `deleted idx or 0` |
@@ -61,16 +61,19 @@
 
 `add_idx_bulk` は duplicate policy を受け取る bulk add API である。
 
+- `idxv` は in/out であり、完了後は surviving idx に書き戻される
 - inserted:
-  - `results[i].entry_idx = RIX_NIL`
+  - `idxv[i] = request idx`
+  - `unused` なし
 - duplicate + `FT_ADD_IGNORE`:
-  - request idx を caller が free する
-  - `results[i].entry_idx = request idx`
+  - `idxv[i] = existing idx`
+  - `unused_idxv[] += request idx`
 - duplicate + `FT_ADD_UPDATE`:
-  - old idx を caller が free する
-  - `results[i].entry_idx = old idx`
+  - `idxv[i] = request idx`
+  - `unused_idxv[] += old idx`
 - return value:
-  - `results[i].entry_idx != RIX_NIL` の件数
+  - `unused_idxv[]` に積んだ個数
+- `FT_ADD_UPDATE` では、同一 batch 内 duplicate key は usage 上禁止
 
 ## 4. test 対応表
 

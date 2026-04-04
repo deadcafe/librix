@@ -152,7 +152,8 @@ All three variants use a 64-byte single-cache-line entry layout.
 ### 4.1 Design principles
 
 - One cache line per entry
-- `last_ts` and free-list metadata stay in the same cache line as the key
+- shifted 32-bit timestamp and free-list metadata stay in the same cache line
+  as the key
 - No built-in user payload
 - Entry aligned to 64 bytes (`__attribute__((aligned(64)))`)
 - Caller-owned per-flow state lives outside the entry and is referenced by
@@ -164,35 +165,37 @@ All three variants use a 64-byte single-cache-line entry layout.
 flow4 entry (64B):
   fc_flow4_key    24B   family/proto/ports/pad/vrfid/src_ip/dst_ip/zero
   cur_hash          4B   O(1) remove 用 hash_field
-  last_ts           8B   last access TSC (0 = free)
+  timestamp         4B   shifted 32-bit access timestamp (0 = free)
   free_link         4B   SLIST entry (free list index)
   slot              2B   slot in current bucket
   reserved1         2B
-  reserved0        20B   pad to 64B
+  reserved0        24B   pad to 64B
 
 flow6 entry (64B):
   fc_flow6_key    44B   family/proto/ports/pad/vrfid/src_ip[16]/dst_ip[16]
   cur_hash          4B
-  last_ts           8B
+  timestamp         4B
   free_link         4B
   slot              2B
-  reserved1         2B
+  reserved1         6B
 
 flowu entry (64B):
   fc_flowu_key    44B   family/proto/ports/vrfid/addr union
   cur_hash          4B
-  last_ts           8B
+  timestamp         4B
   free_link         4B
   slot              2B
-  reserved1         2B
+  reserved1         6B
 ```
 
 ### 4.3 Rationale
 
 - **Key + metadata in one line**: lookup, compare, timestamp update, and
   free-list transitions all stay within one cache line.
-- **`last_ts` in the hot line**: maintenance can decide expiry without any
-  extra indirection.
+- **Shifted timestamp in the hot line**: maintenance can decide expiry without
+  any extra indirection. The stored value is a 32-bit encoded timestamp
+  (`now >> ts_shift`), where `ts_shift` is selected at init time and defaults
+  to `FLOW_TIMESTAMP_DEFAULT_SHIFT`.
 - **External state by index**: no payload fields means the entry stays compact
   and relocatable.
 
@@ -323,7 +326,7 @@ The active hot path is `findadd_bulk`, and periodic aging is handled by
 
 ### 7.3 Per-entry state
 
-The current sample cache entries contain only key/hash/timestamp/free-list
+The current sample cache entries contain only key/hash/shifted-timestamp/free-list
 metadata.
 
 If the caller needs extra per-flow state, the usual pattern is to keep a side
@@ -331,7 +334,8 @@ array or external structure keyed by `entry_idx` (1-origin pool index).
 
 ## 8. Aging and Reclaim
 
-Entries age via `last_ts`. Hits and successful inserts update the timestamp.
+Entries age via the shifted 32-bit `timestamp`. Hits and successful inserts
+update the encoded value (`now >> ts_shift`).
 Removal of stale entries is explicit and uses the maintenance APIs:
 
 - `maintain(start_bk, bucket_count, now)`: scan an explicit bucket range
@@ -625,7 +629,8 @@ multi-process access is required.
 **Memory access pattern optimization**
 
 The active design keeps each entry to a single 64-byte cache line, with
-the key, `cur_hash`, `last_ts`, and free-list metadata colocated.
+the key, `cur_hash`, shifted 32-bit `timestamp`, and free-list metadata
+colocated.
 Lookup, hit resolution, timestamp refresh, and maintenance expiry checks
 therefore complete with minimum cache-line traffic.
 

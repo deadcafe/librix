@@ -706,22 +706,56 @@ test_##PREFIX##_find_bulk(void)                                                 
         if (results[i].entry_idx == 0u)                                                      \
             FAILF("find_bulk hit: result[%u] should be non-zero", i);                        \
     }                                                                                        \
-    /* Verify last_ts updated to 200 */                                                      \
+    /* Verify shifted timestamp updated to 200 */                                           \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
         if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
             != flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT))                     \
-            FAILF("find_bulk touch: last_ts=%" PRIu64 " expected %" PRIu64,                  \
+            FAILF("find_bulk touch: timestamp=%" PRIu64 " expected %" PRIu64,                \
                   flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),        \
                   flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT));                 \
     }                                                                                        \
-    /* now=0: no last_ts update */                                                           \
+    /* now=0: no timestamp update */                                                         \
     fc_##PREFIX##_cache_find_bulk(&fc, keys, NB_KEYS, 0u, results);                          \
     for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
         if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
             != flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT))                     \
-            FAILF("find_bulk now=0: last_ts=%" PRIu64 " should stay %" PRIu64,               \
+            FAILF("find_bulk now=0: timestamp=%" PRIu64 " should stay %" PRIu64,             \
                   flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),        \
                   flow_timestamp_encode(200u, FLOW_TIMESTAMP_DEFAULT_SHIFT));                 \
+    }                                                                                        \
+}                                                                                            \
+static void                                                                                  \
+test_##PREFIX##_timestamp_shift(void)                                                        \
+{                                                                                            \
+    enum { NB_BK = 8u, MAX_ENTRIES = 16u, NB_KEYS = 2u, TS_SHIFT = 1u };                    \
+    struct rix_hash_bucket_s buckets[NB_BK];                                                 \
+    ENTRY_T pool[MAX_ENTRIES];                                                               \
+    CACHE_T fc;                                                                              \
+    CONFIG_T cfg;                                                                            \
+    KEY_T keys[NB_KEYS];                                                                     \
+    RESULT_T results[NB_KEYS];                                                               \
+    printf("[T] fc " #PREFIX " timestamp shift\n");                                          \
+    memset(&cfg, 0, sizeof(cfg));                                                            \
+    cfg.timeout_tsc = UINT64_C(1) << 40;                                                     \
+    cfg.ts_shift = TS_SHIFT;                                                                 \
+    fc_##PREFIX##_cache_init(&fc, buckets, NB_BK, pool, MAX_ENTRIES, &cfg);                  \
+    for (unsigned i = 0; i < NB_KEYS; i++)                                                   \
+        keys[i] = MAKE_KEY(20500u + i);                                                      \
+    fc_##PREFIX##_cache_findadd_bulk(&fc, keys, NB_KEYS, 101u, results);                     \
+    for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+            != flow_timestamp_encode(101u, TS_SHIFT))                                        \
+            FAILF("findadd shift: ts=%" PRIu64 " expected %" PRIu64,                         \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),         \
+                  flow_timestamp_encode(101u, TS_SHIFT));                                    \
+    }                                                                                        \
+    fc_##PREFIX##_cache_find_bulk(&fc, keys, NB_KEYS, 111u, results);                        \
+    for (unsigned i = 0; i < NB_KEYS; i++) {                                                 \
+        if (flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm)                \
+            != flow_timestamp_encode(111u, TS_SHIFT))                                        \
+            FAILF("find shift: ts=%" PRIu64 " expected %" PRIu64,                            \
+                  flow_timestamp_get(&pool[results[i].entry_idx - 1u].hdr.htbl_elm),         \
+                  flow_timestamp_encode(111u, TS_SHIFT));                                    \
     }                                                                                        \
 }                                                                                            \
 static void                                                                                  \
@@ -1545,6 +1579,7 @@ test_flowu_v4_v6_coexist(void)
     test_##PREFIX##_maintain_step();                 \
     test_##PREFIX##_size_query();                    \
     test_##PREFIX##_find_bulk();                     \
+    test_##PREFIX##_timestamp_shift();               \
     test_##PREFIX##_find_single();                   \
     test_##PREFIX##_add_bulk();                      \
     test_##PREFIX##_add_single();                    \

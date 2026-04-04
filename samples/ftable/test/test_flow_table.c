@@ -1751,6 +1751,7 @@ static int
 testv_timestamp_update(const struct test_variant_ops *ops)
 {
     struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg_shift = test_cfg(0u, 0u, 60u);
     union test_any_table ft;
     void *pool = test_aligned_calloc(32u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -1764,6 +1765,7 @@ testv_timestamp_update(const struct test_variant_ops *ops)
     printf("[T] %s table timestamp update\n", ops->name);
     if (pool == NULL || keys == NULL)
         FAIL("alloc failed");
+    cfg_shift.ts_shift = 1u;
     if (ops->init(&ft, pool, 32u, &cfg) != 0)
         FAIL("init failed");
 
@@ -1809,6 +1811,26 @@ testv_timestamp_update(const struct test_variant_ops *ops)
     if (flow_timestamp_get(meta2) !=
         flow_timestamp_encode(TEST_NOW_ADD + 1u, FLOW_TIMESTAMP_DEFAULT_SHIFT))
         FAIL("updated-in entry timestamp mismatch");
+
+    ops->destroy(&ft);
+    memset(pool, 0, ops->record_size * 32u);
+    memset(keys, 0, ops->key_size * 4u);
+    if (ops->init(&ft, pool, 32u, &cfg_shift) != 0)
+        FAIL("shifted init failed");
+
+    ops->make_key(TEST_KEY_AT(keys, ops, 0), 9200u);
+    testv_bind_key(ops, &ft, 1u, TEST_KEY_AT(keys, ops, 0));
+    if (TEST_OPS_ADD_IDX(ops, &ft, 1u) != 1u)
+        FAIL("shifted insert failed");
+    meta1 = testv_meta_ptr(ops, &ft, 1u);
+    if (meta1 == NULL || flow_timestamp_get(meta1) !=
+        flow_timestamp_encode(TEST_NOW_ADD, cfg_shift.ts_shift))
+        FAIL("shifted insert timestamp mismatch");
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != 1u)
+        FAIL("shifted find hit failed");
+    if (flow_timestamp_get(meta1) !=
+        flow_timestamp_encode(TEST_NOW_FIND, cfg_shift.ts_shift))
+        FAIL("shifted find timestamp mismatch");
 
     ops->destroy(&ft);
     free(keys);
