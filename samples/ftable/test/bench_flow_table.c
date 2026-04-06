@@ -410,8 +410,9 @@ ftb_print_usage(FILE *out, const char *prog)
             "  -g, --grow               run grow benchmark instead of datapath\n"
             "  -m, --maint              run maintain benchmark instead of datapath\n"
             "  -p, --pin-core CORE      pin benchmark to a CPU core\n"
-            "  -o, --op OP              run only OP (find_hit,add_idx,add_ignore,\n"
-            "                           add_update,del_idx,del_key,find_del_idx)\n"
+            "  -o, --op OP              run only OP (find_hit,find_miss,add_idx,\n"
+            "                           add_ignore,add_update,del_idx,del_key,\n"
+            "                           find_del_idx)\n"
             "  -H, --hugepage           use 2 MiB hugepages for pool/buckets\n"
             "  -h, --help               show this help\n",
             prog, FTB_SAMPLE_MAX, FTB_SAMPLE_MAX, FTB_QUERY_MAX);
@@ -991,6 +992,7 @@ ftb_measure_add_dup_policy(const struct ftb_variant_ops *ops, void *ft,
 {
     void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
     u32 *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
+    u32 *dup_idxv = ftb_xcalloc(ftb_query_n, sizeof(*dup_idxv));
     u32 *unused_idxv = ftb_xcalloc(ftb_query_n, sizeof(*unused_idxv));
     u64 samples[FTB_UPDATE_REPEAT];
 
@@ -1000,13 +1002,21 @@ ftb_measure_add_dup_policy(const struct ftb_variant_ops *ops, void *ft,
 
         ftb_setup_cold_round(ops, ft, live, prefill_base,
                              keys, idxv, unused_idxv);
+        /* use different idx with same key for key-duplicate */
+        for (unsigned i = 0; i < ftb_query_n; i++) {
+            dup_idxv[i] = live + ftb_query_n + i + 1u;
+            ftb_bind_key(ops, ft, dup_idxv[i],
+                         FTB_KEY_AT(keys, ops, i));
+        }
+        ftb_cold_touch();
         t0 = ftb_rdtsc();
-        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, policy,
+        (void)ops->add_idx_bulk(ft, dup_idxv, ftb_query_n, policy,
                                 FTB_NOW_ADD, unused_idxv);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
     free(unused_idxv);
+    free(dup_idxv);
     free(idxv);
     free(keys);
     return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;
@@ -1066,6 +1076,55 @@ ftb_sample_find_hit(const struct ftb_variant_ops *ops, void *ft,
     for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
         samples[r] = ftb_measure_find_hit(ops, ft, live,
                                           key_base + r * (live + ftb_query_n * 2u + 1024u));
+    }
+    return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
+                                ftb_sample_keep_n);
+}
+
+static double
+ftb_measure_find_miss(const struct ftb_variant_ops *ops, void *ft,
+                      unsigned live, unsigned key_base)
+{
+    void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
+    void *miss_keys = ftb_xcalloc(ftb_query_n, ops->key_size);
+    u32 *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
+    u32 *unused_idxv = ftb_xcalloc(ftb_query_n, sizeof(*unused_idxv));
+    struct ft_table_result *results =
+        ftb_xcalloc(ftb_query_n, sizeof(*results));
+    u64 samples[FTB_UPDATE_REPEAT];
+
+    for (unsigned r = 0; r < FTB_UPDATE_REPEAT; r++) {
+        unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
+        u64 t0, t1;
+
+        ftb_setup_cold_round(ops, ft, live, prefill_base,
+                             keys, idxv, unused_idxv);
+        for (unsigned i = 0; i < ftb_query_n; i++)
+            ops->make_key(FTB_KEY_AT(miss_keys, ops, i),
+                          prefill_base + live + ftb_query_n + i);
+        ftb_cold_touch();
+        t0 = ftb_rdtsc();
+        ops->find_bulk(ft, miss_keys, ftb_query_n, FTB_NOW_FIND, results);
+        t1 = ftb_rdtsc();
+        samples[r] = t1 - t0;
+    }
+    free(results);
+    free(unused_idxv);
+    free(idxv);
+    free(miss_keys);
+    free(keys);
+    return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;
+}
+
+static double
+ftb_sample_find_miss(const struct ftb_variant_ops *ops, void *ft,
+                     unsigned live, unsigned key_base)
+{
+    double samples[FTB_SAMPLE_MAX];
+
+    for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
+        samples[r] = ftb_measure_find_miss(ops, ft, live,
+                                           key_base + r * (live + ftb_query_n * 2u + 1024u));
     }
     return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
                                 ftb_sample_keep_n);
@@ -1654,6 +1713,7 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
 } while (0)
 
     FTB_RUN_OP("find_hit",    ftb_sample_find_hit(ops, &ft, live, max_entries + 100000u));
+    FTB_RUN_OP("find_miss",   ftb_sample_find_miss(ops, &ft, live, max_entries + 150000u));
     FTB_RUN_OP("add_idx",     ftb_sample_add_idx(ops, &ft, live, max_entries + 200000u));
     FTB_RUN_OP("add_ignore",  ftb_sample_add_dup_policy(ops, &ft, live,
                                max_entries + 300000u, FT_ADD_IGNORE));

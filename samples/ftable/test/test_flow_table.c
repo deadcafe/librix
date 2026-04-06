@@ -539,10 +539,10 @@ test_basic_add_find_del(void)
         FAIL("find should return idx1");
     if (FT4_FIND(&ft, &k2) != idx2)
         FAIL("find should return idx2");
-    if (test_add_idx_key(&ft, 1u, &k1) != idx1)
-        FAIL("duplicate add should return existing idx");
+    if (test_add_idx_key(&ft, 3u, &k1) != idx1)
+        FAIL("duplicate key add should return existing idx");
     if (ft_flow4_table_nb_entries(&ft) != 2u)
-        FAIL("duplicate add should not increase count");
+        FAIL("duplicate key add should not increase count");
     if (ft_flow4_table_del_key_oneshot(&ft, &k1) != idx1)
         FAIL("del should return idx1");
     if (FT4_FIND(&ft, &k1) != 0u)
@@ -686,14 +686,6 @@ test_bulk_ops_and_stats(void)
             FAILF("find_bulk miss at %u", i);
     }
 
-    if (FT4_ADD_IDX_BULK(&ft, entry_idxv, 8u, FT_ADD_IGNORE,
-                         unused_idxv) != 0u)
-        FAIL("duplicate self add_bulk should not return unused idx");
-    for (unsigned i = 0; i < 8u; i++) {
-        if (entry_idxv[i] != i + 1u)
-            FAILF("duplicate add_bulk failed at %u", i);
-    }
-
     for (unsigned i = 0; i < 4u; i++) {
         if (ft_flow4_table_del_key_oneshot(&ft, &keys[i]) == 0u)
             FAILF("del_key failed at %u", i);
@@ -713,7 +705,7 @@ test_bulk_ops_and_stats(void)
     ft_flow4_table_stats(&ft, &stats);
     if (stats.core.adds != 8u)
         FAILF("adds=%llu", (unsigned long long)stats.core.adds);
-    if (stats.core.add_existing != 8u)
+    if (stats.core.add_existing != 0u)
         FAILF("add_existing=%llu", (unsigned long long)stats.core.add_existing);
     if (stats.core.lookups != 16u)
         FAILF("lookups=%llu", (unsigned long long)stats.core.lookups);
@@ -841,8 +833,8 @@ test_duplicate_and_delete_miss_stats(void)
     idx = test_add_idx_key(&ft, 1u, &key);
     if (idx != 1u)
         FAIL("initial add failed");
-    if (test_add_idx_key(&ft, 1u, &key) != idx)
-        FAIL("duplicate add should return existing idx");
+    if (test_add_idx_key(&ft, 2u, &key) != idx)
+        FAIL("duplicate key add should return existing idx");
     if (ft_flow4_table_del_key_oneshot(&ft, &miss) != 0u)
         FAIL("delete miss should return 0");
 
@@ -1686,10 +1678,10 @@ testv_basic_add_find_del(const struct test_variant_ops *ops)
         FAIL("find should return idx1");
     if (TEST_OPS_FIND(ops, &ft, &k2) != idx2)
         FAIL("find should return idx2");
-    if (testv_add_idx_key(ops, &ft, 1u, &k1) != idx1)
-        FAIL("duplicate add should return existing idx");
+    if (testv_add_idx_key(ops, &ft, 3u, &k1) != idx1)
+        FAIL("duplicate key add should return existing idx");
     if (ops->nb_entries(&ft) != 2u)
-        FAIL("duplicate add should not increase count");
+        FAIL("duplicate key add should not increase count");
     if (ops->del_key(&ft, &k1) != idx1)
         FAIL("del should return idx1");
     if (TEST_OPS_FIND(ops, &ft, &k1) != 0u)
@@ -1781,14 +1773,6 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
             FAILF("find_bulk miss at %u", i);
     }
 
-    if (TEST_OPS_ADD_IDX_BULK(ops, &ft, entry_idxv, 8u, FT_ADD_IGNORE,
-                              unused_idxv) != 0u)
-        FAIL("duplicate self add_bulk should not return unused idx");
-    for (unsigned i = 0; i < 8u; i++) {
-        if (entry_idxv[i] != i + 1u)
-            FAILF("duplicate add_bulk failed at %u", i);
-    }
-
     for (unsigned i = 0; i < 4u; i++) {
         if (ops->del_key(&ft, TEST_KEY_AT(keys, ops, i)) == 0u)
             FAILF("del_key failed at %u", i);
@@ -1806,7 +1790,7 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
     }
 
     ops->stats(&ft, &stats);
-    if (stats.core.adds != 8u || stats.core.add_existing != 8u
+    if (stats.core.adds != 8u || stats.core.add_existing != 0u
         || stats.core.lookups != 16u || stats.core.hits != 12u
         || stats.core.misses != 4u || stats.core.dels != 4u
         || stats.core.del_miss != 0u)
@@ -1887,7 +1871,7 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
                                      FT_TABLE_CACHE_LINE_SIZE);
     void *keys = calloc(4u, ops->key_size);
     u32 base_idxv[2] = { 1u, 2u };
-    u32 mix_idxv[5] = { 1u, 3u, 4u, 5u, 6u };
+    u32 mix_idxv[5] = { 7u, 3u, 4u, 5u, 6u };
     u32 unused_idxv[5];
     struct ft_table_stats stats;
     unsigned unused_n;
@@ -1909,7 +1893,7 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
 
     ops->make_key(TEST_KEY_AT(keys, ops, 2u), 6200u);
     ops->make_key(TEST_KEY_AT(keys, ops, 3u), 6201u);
-    testv_bind_key(ops, &ft, 1u, TEST_KEY_AT(keys, ops, 0));
+    testv_bind_key(ops, &ft, 7u, TEST_KEY_AT(keys, ops, 0));
     testv_bind_key(ops, &ft, 3u, TEST_KEY_AT(keys, ops, 1));
     testv_bind_key(ops, &ft, 4u, TEST_KEY_AT(keys, ops, 2u));
     testv_bind_key(ops, &ft, 5u, TEST_KEY_AT(keys, ops, 2u));
@@ -1918,10 +1902,10 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
     memset(unused_idxv, 0, sizeof(unused_idxv));
     unused_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, mix_idxv, 5u, FT_ADD_IGNORE,
                                      unused_idxv);
-    if (unused_n != 2u)
+    if (unused_n != 3u)
         FAIL("mixed batch unused count mismatch");
     if (mix_idxv[0] != 1u)
-        FAIL("mixed self-duplicate result mismatch");
+        FAIL("mixed key-duplicate result mismatch");
     if (mix_idxv[1] != 2u)
         FAIL("mixed existing-duplicate result mismatch");
     if (mix_idxv[2] != 4u)
@@ -1930,10 +1914,10 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
         FAIL("mixed batch-duplicate result mismatch");
     if (mix_idxv[4] != 6u)
         FAIL("mixed insert result mismatch at 4");
-    if (unused_idxv[0] != 3u || unused_idxv[1] != 5u)
+    if (unused_idxv[0] != 7u || unused_idxv[1] != 3u || unused_idxv[2] != 5u)
         FAIL("mixed batch unused idx mismatch");
     if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != 1u)
-        FAIL("mixed self-duplicate retained idx mismatch");
+        FAIL("mixed key-duplicate retained idx mismatch");
     if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 1)) != 2u)
         FAIL("mixed existing-duplicate retained idx mismatch");
     if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 2u)) != 4u)
@@ -1964,7 +1948,7 @@ testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
     u32 base_idxv[4] = { 1u, 2u, 3u, 4u };
     u32 dup_idxv[4] = { 5u, 6u, 7u, 8u };
     u32 ins_idxv[4] = { 9u, 10u, 11u, 12u };
-    u32 mix_idxv[4] = { 5u, 13u, 14u, 15u };
+    u32 mix_idxv[4] = { 20u, 13u, 14u, 15u };
     u32 unused_idxv[4];
     unsigned free_n;
 
@@ -2044,15 +2028,15 @@ testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
     memset(unused_idxv, 0xff, sizeof(unused_idxv));
     free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, mix_idxv, 4u, FT_ADD_IGNORE,
                                    unused_idxv);
-    if (free_n != 1u)
+    if (free_n != 2u)
         FAILF("mixed ignore free_n=%u", free_n);
     if (mix_idxv[0] != 5u)
-        FAIL("mixed ignore self result mismatch");
+        FAIL("mixed ignore key-dup result mismatch");
     if (mix_idxv[1] != dup_idxv[1])
         FAIL("mixed ignore dup result mismatch");
     if (mix_idxv[2] != 14u || mix_idxv[3] != 15u)
         FAIL("mixed ignore insert result mismatch");
-    if (unused_idxv[0] != 13u)
+    if (unused_idxv[0] != 20u || unused_idxv[1] != 13u)
         FAIL("mixed ignore unused mismatch");
     if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 1)) != dup_idxv[1])
         FAIL("mixed ignore retained idx mismatch");
@@ -2067,23 +2051,23 @@ testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
     testv_bind_key(ops, &ft, 18u, TEST_KEY_AT(keys, ops, 10u));
     testv_bind_key(ops, &ft, 19u, TEST_KEY_AT(keys, ops, 11u));
     {
-        u32 upd_mix_idxv[4] = { 5u, 17u, 18u, 19u };
+        u32 upd_mix_idxv[4] = { 16u, 17u, 18u, 19u };
 
         memset(unused_idxv, 0xff, sizeof(unused_idxv));
         free_n = TEST_OPS_ADD_IDX_BULK(ops, &ft, upd_mix_idxv, 4u,
                                        FT_ADD_UPDATE, unused_idxv);
-        if (free_n != 1u)
+        if (free_n != 2u)
             FAILF("mixed update free_n=%u", free_n);
-        if (upd_mix_idxv[0] != 5u)
-            FAIL("mixed update self result mismatch");
+        if (upd_mix_idxv[0] != 16u)
+            FAIL("mixed update key-dup result mismatch");
         if (upd_mix_idxv[1] != 17u)
             FAIL("mixed update replace result mismatch");
         if (upd_mix_idxv[2] != 18u || upd_mix_idxv[3] != 19u)
             FAIL("mixed update insert result mismatch");
-        if (unused_idxv[0] != dup_idxv[1])
+        if (unused_idxv[0] != 5u || unused_idxv[1] != dup_idxv[1])
             FAIL("mixed update unused mismatch");
-        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != 5u)
-            FAIL("mixed update self find mismatch");
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 0)) != 16u)
+            FAIL("mixed update key-dup find mismatch");
         if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 1)) != 17u)
             FAIL("mixed update replaced idx mismatch");
         if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 10u)) != 18u ||
