@@ -155,9 +155,6 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow6_ht, flow6_entry, key,
                                  meta.cur_hash, meta.slot,
                                  ft_flow6_cmp, ft_flow6_hash_fn)
 
-/* Enable FCORE-delegating bulk ops in FT_TABLE_GENERATE */
-#define FTG_USE_FCORE 1
-
 #include "ft_table_generate.h"
 
 FT_TABLE_GENERATE(flow6,
