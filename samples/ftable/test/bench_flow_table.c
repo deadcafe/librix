@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/mman.h>
 
 #include <bench/bench_scope.h>
 
@@ -42,6 +43,8 @@ static unsigned ftb_sample_raw_repeat = 11u;
 static unsigned ftb_sample_keep_n = 7u;
 static unsigned ftb_query_n = FTB_DEFAULT_QUERY;
 static int ftb_pin_core = -1;
+static int ftb_use_hugepage;
+static const char *ftb_op_filter;   /* NULL = run all */
 static unsigned char *ftb_cold_buf;
 static volatile u64 ftb_cold_sink;
 
@@ -121,33 +124,110 @@ struct ftb_variant_ops {
 
 static unsigned ftb_parse_arch_flag(const char *name);
 
+static size_t
+ftb_hugepage_size(void)
+{
+    return (size_t)2u * 1024u * 1024u; /* 2 MiB */
+}
+
+static size_t
+ftb_round_up(size_t n, size_t align)
+{
+    return (n + align - 1u) & ~(align - 1u);
+}
+
+static void *
+ftb_mmap_huge(size_t size)
+{
+    size_t hp = ftb_hugepage_size();
+    size_t rounded = ftb_round_up(size, hp);
+    void *ptr = mmap(NULL, rounded,
+                     PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
+                     -1, 0);
+
+    if (ptr == MAP_FAILED) {
+        /* Fall back to THP via madvise */
+        ptr = mmap(NULL, rounded,
+                   PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS,
+                   -1, 0);
+        if (ptr == MAP_FAILED) {
+            fprintf(stderr, "mmap(%zu): %s\n", rounded, strerror(errno));
+            return NULL;
+        }
+        if (madvise(ptr, rounded, MADV_HUGEPAGE) != 0)
+            fprintf(stderr, "madvise(MADV_HUGEPAGE, %zu): %s\n",
+                    rounded, strerror(errno));
+        /* Touch pages to trigger THP promotion */
+        for (size_t off = 0; off < rounded; off += 4096u)
+            ((volatile char *)ptr)[off] = 0;
+    }
+    return ptr;
+}
+
+static void
+ftb_munmap_huge(void *ptr, size_t size)
+{
+    size_t hp = ftb_hugepage_size();
+    size_t rounded = ftb_round_up(size, hp);
+
+    munmap(ptr, rounded);
+}
+
 static void *
 ftb_bucket_alloc(size_t size, size_t align, void *arg __attribute__((unused)))
 {
+    if (ftb_use_hugepage) {
+        (void)align;
+        return ftb_mmap_huge(size);
+    }
     return aligned_alloc(align, size);
 }
 
 static void
-ftb_bucket_free(void *ptr, size_t size __attribute__((unused)),
+ftb_bucket_free(void *ptr, size_t size,
                 size_t align __attribute__((unused)),
                 void *arg __attribute__((unused)))
 {
-    free(ptr);
+    if (ftb_use_hugepage)
+        ftb_munmap_huge(ptr, size);
+    else
+        free(ptr);
 }
 
 static void *
 ftb_alloc_zero(size_t count, size_t size)
 {
     size_t total = count * size;
-    size_t rounded = (total + (FTB_ALIGN - 1u)) & ~(size_t)(FTB_ALIGN - 1u);
-    void *ptr = aligned_alloc(FTB_ALIGN, rounded);
 
-    if (ptr == NULL) {
-        perror("aligned_alloc");
-        exit(1);
+    if (ftb_use_hugepage) {
+        void *ptr = ftb_mmap_huge(total);
+
+        if (ptr == NULL)
+            exit(1);
+        return ptr; /* mmap returns zeroed memory */
     }
-    memset(ptr, 0, rounded);
-    return ptr;
+    {
+        size_t rounded = ftb_round_up(total, FTB_ALIGN);
+        void *ptr = aligned_alloc(FTB_ALIGN, rounded);
+
+        if (ptr == NULL) {
+            perror("aligned_alloc");
+            exit(1);
+        }
+        memset(ptr, 0, rounded);
+        return ptr;
+    }
+}
+
+static void
+ftb_free_zero(void *ptr, size_t count, size_t size)
+{
+    if (ftb_use_hugepage)
+        ftb_munmap_huge(ptr, count * size);
+    else
+        free(ptr);
 }
 
 static void *
@@ -330,6 +410,9 @@ ftb_print_usage(FILE *out, const char *prog)
             "  -g, --grow               run grow benchmark instead of datapath\n"
             "  -m, --maint              run maintain benchmark instead of datapath\n"
             "  -p, --pin-core CORE      pin benchmark to a CPU core\n"
+            "  -o, --op OP              run only OP (find_hit,add_idx,add_ignore,\n"
+            "                           add_update,del_idx,del_key,find_del_idx)\n"
+            "  -H, --hugepage           use 2 MiB hugepages for pool/buckets\n"
             "  -h, --help               show this help\n",
             prog, FTB_SAMPLE_MAX, FTB_SAMPLE_MAX, FTB_QUERY_MAX);
 }
@@ -346,6 +429,8 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable,
         { "grow",       no_argument,       NULL, 'g' },
         { "maint",      no_argument,       NULL, 'm' },
         { "pin-core",   required_argument, NULL, 'p' },
+        { "op",         required_argument, NULL, 'o' },
+        { "hugepage",   no_argument,       NULL, 'H' },
         { "help",       no_argument,       NULL, 'h' },
         { NULL,         0,                 NULL,  0  }
     };
@@ -353,7 +438,7 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable,
     int opt;
 
     opterr = 0;
-    while ((opt = getopt_long(argc, argv, "a:r:k:q:gmp:h", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "a:r:k:q:gmo:p:Hh", long_opts, NULL)) != -1) {
         unsigned parsed = 0u;
 
         switch (opt) {
@@ -386,6 +471,12 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable,
             break;
         case 'm':
             *run_maint = 1;
+            break;
+        case 'o':
+            ftb_op_filter = optarg;
+            break;
+        case 'H':
+            ftb_use_hugepage = 1;
             break;
         case 'p':
             if (ftb_parse_u32_text(optarg, &parsed, 1) != 0 || parsed > (unsigned)INT_MAX) {
@@ -804,11 +895,11 @@ ftb_measure_find_lookup(const struct ftb_variant_ops *ops,
     ops->destroy(&ft);
     free(results);
     free(keys);
-    free(pool);
+    ftb_free_zero(pool, max_entries, ops->record_size);
     return ftb_median_u64(samples, FTB_COLD_REPEAT) / (double)ftb_query_n;
 }
 
-static double
+static double __attribute__((unused))
 ftb_sample_find_lookup(const struct ftb_variant_ops *ops,
                        unsigned entries, unsigned fill_pct,
                        enum ftb_find_mode mode)
@@ -821,6 +912,32 @@ ftb_sample_find_lookup(const struct ftb_variant_ops *ops,
     }
     return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
                                 ftb_sample_keep_n);
+}
+
+/*
+ * Common cold-state setup for all datapath benchmarks.
+ *
+ * flush → prefill(live) → make_key/bind_key(query) → add_idx_bulk → cold_touch
+ *
+ * After this call the table has live+query entries inserted,
+ * keys[] holds the query keys, idxv[] holds the query entry indices,
+ * and caches are cold.
+ */
+static void
+ftb_setup_cold_round(const struct ftb_variant_ops *ops, void *ft,
+                     unsigned live, unsigned prefill_base,
+                     void *keys, u32 *idxv, u32 *unused_idxv)
+{
+    ops->flush(ft);
+    ftb_prefill(ops, ft, live, prefill_base);
+    for (unsigned i = 0; i < ftb_query_n; i++) {
+        ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + live + i);
+        idxv[i] = live + i + 1u;
+        ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
+    }
+    (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
+                            FTB_NOW_ADD, unused_idxv);
+    ftb_cold_touch();
 }
 
 static double
@@ -836,13 +953,10 @@ ftb_measure_add_idx(const struct ftb_variant_ops *ops, void *ft,
         unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
         u64 t0, t1;
 
-        ops->flush(ft);
-        ftb_prefill(ops, ft, live, prefill_base);
-        for (unsigned i = 0; i < ftb_query_n; i++) {
-            ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + live + i);
-            idxv[i] = live + i + 1u;
-            ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
-        }
+        /* del first, then cold_touch, then measure add */
+        ftb_setup_cold_round(ops, ft, live, prefill_base,
+                             keys, idxv, unused_idxv);
+        ops->del_idx_bulk(ft, idxv, ftb_query_n, unused_idxv);
         ftb_cold_touch();
         t0 = ftb_rdtsc();
         (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
@@ -884,14 +998,8 @@ ftb_measure_add_dup_policy(const struct ftb_variant_ops *ops, void *ft,
         unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
         u64 t0, t1;
 
-        ops->flush(ft);
-        ftb_prefill(ops, ft, live, prefill_base);
-        for (unsigned i = 0; i < ftb_query_n; i++) {
-            ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + i);
-            idxv[i] = live + i + 1u;
-            ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
-        }
-        ftb_cold_touch();
+        ftb_setup_cold_round(ops, ft, live, prefill_base,
+                             keys, idxv, unused_idxv);
         t0 = ftb_rdtsc();
         (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, policy,
                                 FTB_NOW_ADD, unused_idxv);
@@ -921,6 +1029,49 @@ ftb_sample_add_dup_policy(const struct ftb_variant_ops *ops, void *ft,
 }
 
 static double
+ftb_measure_find_hit(const struct ftb_variant_ops *ops, void *ft,
+                     unsigned live, unsigned key_base)
+{
+    void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
+    u32 *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
+    u32 *unused_idxv = ftb_xcalloc(ftb_query_n, sizeof(*unused_idxv));
+    struct ft_table_result *results =
+        ftb_xcalloc(ftb_query_n, sizeof(*results));
+    u64 samples[FTB_UPDATE_REPEAT];
+
+    for (unsigned r = 0; r < FTB_UPDATE_REPEAT; r++) {
+        unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
+        u64 t0, t1;
+
+        ftb_setup_cold_round(ops, ft, live, prefill_base,
+                             keys, idxv, unused_idxv);
+        t0 = ftb_rdtsc();
+        ops->find_bulk(ft, keys, ftb_query_n, FTB_NOW_FIND, results);
+        t1 = ftb_rdtsc();
+        samples[r] = t1 - t0;
+    }
+    free(results);
+    free(unused_idxv);
+    free(idxv);
+    free(keys);
+    return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;
+}
+
+static double
+ftb_sample_find_hit(const struct ftb_variant_ops *ops, void *ft,
+                    unsigned live, unsigned key_base)
+{
+    double samples[FTB_SAMPLE_MAX];
+
+    for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
+        samples[r] = ftb_measure_find_hit(ops, ft, live,
+                                          key_base + r * (live + ftb_query_n * 2u + 1024u));
+    }
+    return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
+                                ftb_sample_keep_n);
+}
+
+static double
 ftb_measure_del_idx(const struct ftb_variant_ops *ops, void *ft,
                     unsigned live, unsigned key_base)
 {
@@ -933,16 +1084,8 @@ ftb_measure_del_idx(const struct ftb_variant_ops *ops, void *ft,
         unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
         u64 t0, t1;
 
-        ops->flush(ft);
-        ftb_prefill(ops, ft, live, prefill_base);
-        for (unsigned i = 0; i < ftb_query_n; i++) {
-            ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + live + i);
-            idxv[i] = live + i + 1u;
-            ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
-        }
-        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
-                                FTB_NOW_ADD, unused_idxv);
-        ftb_cold_touch();
+        ftb_setup_cold_round(ops, ft, live, prefill_base,
+                             keys, idxv, unused_idxv);
         t0 = ftb_rdtsc();
         ops->del_idx_bulk(ft, idxv, ftb_query_n, unused_idxv);
         t1 = ftb_rdtsc();
@@ -981,16 +1124,8 @@ ftb_measure_del_key(const struct ftb_variant_ops *ops, void *ft,
         unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
         u64 t0, t1;
 
-        ops->flush(ft);
-        ftb_prefill(ops, ft, live, prefill_base);
-        for (unsigned i = 0; i < ftb_query_n; i++) {
-            ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + live + i);
-            idxv[i] = live + i + 1u;
-            ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
-        }
-        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
-                                FTB_NOW_ADD, unused_idxv);
-        ftb_cold_touch();
+        ftb_setup_cold_round(ops, ft, live, prefill_base,
+                             keys, idxv, unused_idxv);
         t0 = ftb_rdtsc();
         ops->del_key_bulk(ft, keys, ftb_query_n, unused_idxv);
         t1 = ftb_rdtsc();
@@ -1031,16 +1166,8 @@ ftb_measure_find_del_idx(const struct ftb_variant_ops *ops, void *ft,
         unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
         u64 t0, t1;
 
-        ops->flush(ft);
-        ftb_prefill(ops, ft, live, prefill_base);
-        for (unsigned i = 0; i < ftb_query_n; i++) {
-            ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + live + i);
-            idxv[i] = live + i + 1u;
-            ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
-        }
-        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
-                                FTB_NOW_ADD, unused_idxv);
-        ftb_cold_touch();
+        ftb_setup_cold_round(ops, ft, live, prefill_base,
+                             keys, idxv, unused_idxv);
         t0 = ftb_rdtsc();
         ops->find_bulk(ft, keys, ftb_query_n, FTB_NOW_FIND, results);
         for (unsigned i = 0; i < ftb_query_n; i++)
@@ -1101,7 +1228,7 @@ ftb_measure_grow(const struct ftb_variant_ops *ops,
         ops->destroy(&ft);
     }
 
-    free(pool);
+    ftb_free_zero(pool, max_entries, ops->record_size);
     return ftb_median_u64(samples, FTB_GROW_REPEAT) / (double)live;
 }
 
@@ -1297,7 +1424,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         free(results);
         free(keys);
         free(expired_idxv);
-        free(pool);
+        ftb_free_zero(pool, max_entries, ops->record_size);
         return -1;
     }
     if (bench_scope_begin(&group) != 0) {
@@ -1307,7 +1434,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         free(results);
         free(keys);
         free(expired_idxv);
-        free(pool);
+        ftb_free_zero(pool, max_entries, ops->record_size);
         return -1;
     }
     if (mode == FTB_MAINT_HIT_IDX_EXPIRE) {
@@ -1341,7 +1468,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         free(results);
         free(keys);
         free(expired_idxv);
-        free(pool);
+        ftb_free_zero(pool, max_entries, ops->record_size);
         return -1;
     }
     bench_scope_close(&group);
@@ -1350,7 +1477,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
     free(results);
     free(keys);
     free(expired_idxv);
-    free(pool);
+    ftb_free_zero(pool, max_entries, ops->record_size);
     *evicted_out = total_evicted;
     return 0;
 }
@@ -1495,8 +1622,7 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     struct ft_table_config cfg;
     union ftb_any_table ft;
     void *pool;
-    double find_hit, find_miss, find_mix_50_50;
-    double add_idx, add_ignore, add_update, del_idx, del_key, find_del_idx;
+
 
     ftb_parse_entries_fill(argc, argv, base_arg, &desired, &fill_pct);
     max_entries = ftb_pool_count(desired);
@@ -1517,36 +1643,30 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     printf("\nftable cold bulk datapath (%s)\n\n", ops->name);
     ftb_print_sampling_config();
     printf("  cold datapath: reset/prefill/cold-touch per round\n");
-    find_hit = ftb_sample_find_lookup(ops, max_entries, fill_pct, FTB_FIND_HIT);
-    find_miss = ftb_sample_find_lookup(ops, max_entries, fill_pct, FTB_FIND_MISS);
-    find_mix_50_50 = ftb_sample_find_lookup(ops, max_entries, fill_pct,
-                                            FTB_FIND_MIX_50_50);
-    add_idx = ftb_sample_add_idx(ops, &ft, live, max_entries + 200000u);
-    add_ignore = ftb_sample_add_dup_policy(ops, &ft, live,
-                                           max_entries + 300000u,
-                                           FT_ADD_IGNORE);
-    add_update = ftb_sample_add_dup_policy(ops, &ft, live,
-                                           max_entries + 400000u,
-                                           FT_ADD_UPDATE);
-    del_idx = ftb_sample_del_idx(ops, &ft, live, max_entries + 500000u);
-    del_key = ftb_sample_del_key(ops, &ft, live, max_entries + 600000u);
-    find_del_idx = ftb_sample_find_del_idx(ops, &ft, live,
-                                           max_entries + 700000u);
-
     printf("[desired=%u entries=%u nb_bk=%u live=%u fill=%u%%]\n",
            desired, max_entries, ops->nb_bk(&ft), live, fill_pct);
-    printf("  find_hit   %8.2f cy/key\n", find_hit);
-    printf("  find_miss  %8.2f cy/key\n", find_miss);
-    printf("  find_mix_50_50 %7.2f cy/key\n", find_mix_50_50);
-    printf("  add_idx    %8.2f cy/key\n", add_idx);
-    printf("  add_ignore %8.2f cy/key\n", add_ignore);
-    printf("  add_update %8.2f cy/key\n", add_update);
-    printf("  del_idx    %8.2f cy/key\n", del_idx);
-    printf("  del_key    %8.2f cy/key\n", del_key);
-    printf("  find+del_idx %6.2f cy/key\n", find_del_idx);
+
+#define FTB_RUN_OP(tag, expr) do {                              \
+    if (!ftb_op_filter || strcmp(ftb_op_filter, tag) == 0) {    \
+        double _v = (expr);                                     \
+        printf("  %-12s %8.2f cy/key\n", tag, _v);             \
+    }                                                           \
+} while (0)
+
+    FTB_RUN_OP("find_hit",    ftb_sample_find_hit(ops, &ft, live, max_entries + 100000u));
+    FTB_RUN_OP("add_idx",     ftb_sample_add_idx(ops, &ft, live, max_entries + 200000u));
+    FTB_RUN_OP("add_ignore",  ftb_sample_add_dup_policy(ops, &ft, live,
+                               max_entries + 300000u, FT_ADD_IGNORE));
+    FTB_RUN_OP("add_update",  ftb_sample_add_dup_policy(ops, &ft, live,
+                               max_entries + 400000u, FT_ADD_UPDATE));
+    FTB_RUN_OP("del_idx",     ftb_sample_del_idx(ops, &ft, live, max_entries + 500000u));
+    FTB_RUN_OP("del_key",     ftb_sample_del_key(ops, &ft, live, max_entries + 600000u));
+    FTB_RUN_OP("find_del_idx", ftb_sample_find_del_idx(ops, &ft, live,
+                               max_entries + 700000u));
+#undef FTB_RUN_OP
 
     ops->destroy(&ft);
-    free(pool);
+    ftb_free_zero(pool, max_entries, ops->record_size);
 }
 
 static void
@@ -1646,7 +1766,8 @@ main(int argc, char **argv)
     if (rc != 0)
         return rc;
     ft_arch_init(arch_enable);
-    printf("[arch: %s]\n\n", ftb_arch_label(arch_enable));
+    printf("[arch: %s%s]\n\n", ftb_arch_label(arch_enable),
+           ftb_use_hugepage ? ", hugepage" : "");
 
     if (run_grow) {
         ftb_run_grow(ops, pos_argc, pos_argv, 0u);
