@@ -53,8 +53,10 @@ $(TARGET): $(SRC) $(LIBFT)
 $(BENCH): $(BENCH_SRC) $(LIBFT)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SRC) $(LIBFT)
 
-$(LIBFT):
+$(LIBFT): FORCE
 	$(MAKE) -C $(FTDIR) static
+
+FORCE:
 
 libft: $(LIBFT)
 
