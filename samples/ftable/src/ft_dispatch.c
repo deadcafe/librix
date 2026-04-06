@@ -148,7 +148,9 @@ ft_##prefix##_table_find(struct ft_##prefix##_table *ft,                       \
                          const struct prefix##_key *key,                       \
                          u64 now)                                              \
 {                                                                              \
-    return active_ptr->find(ft, key, now);                                     \
+    struct ft_table_result _r = { .entry_idx = 0u };                           \
+    active_ptr->find_bulk(ft, key, 1u, now, &_r);                              \
+    return _r.entry_idx;                                                       \
 }                                                                              \
                                                                                \
 void                                                                           \
@@ -166,7 +168,10 @@ ft_##prefix##_table_add_idx(struct ft_##prefix##_table *ft,                    \
                             u32 entry_idx,                                     \
                             u64 now)                                           \
 {                                                                              \
-    return active_ptr->add_idx(ft, entry_idx, now);                            \
+    u32 _unused;                                                               \
+    active_ptr->add_idx_bulk(ft, &entry_idx, 1u, FT_ADD_IGNORE, now,           \
+                             &_unused);                                        \
+    return entry_idx;                                                          \
 }                                                                              \
                                                                                \
 unsigned                                                                       \
@@ -194,7 +199,9 @@ u32                                                                            \
 ft_##prefix##_table_del_entry_idx(struct ft_##prefix##_table *ft,              \
                                   u32 entry_idx)                               \
 {                                                                              \
-    return active_ptr->del_idx(ft, entry_idx);                                 \
+    u64 _dels = ft->stats.core.dels;                                           \
+    active_ptr->del_idx_bulk(ft, &entry_idx, 1u);                              \
+    return (ft->stats.core.dels != _dels) ? entry_idx : 0u;                    \
 }                                                                              \
                                                                                \
 void                                                                           \

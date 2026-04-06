@@ -32,17 +32,11 @@ struct ft_##prefix##_ops {                                                     \
     int (*grow_2x)(struct ft_##prefix##_table *ft);                            \
     int (*reserve)(struct ft_##prefix##_table *ft, unsigned min_entries);       \
     /* hot-path */                                                             \
-    u32 (*find)(struct ft_##prefix##_table *ft,                                \
-                const struct prefix##_key *key,                                \
-                u64 now);                                                      \
     void (*find_bulk)(struct ft_##prefix##_table *ft,                          \
                       const struct prefix##_key *keys,                         \
                       unsigned nb_keys,                                        \
                       u64 now,                                                 \
                       struct ft_table_result *results);                        \
-    u32 (*add_idx)(struct ft_##prefix##_table *ft,                             \
-                   u32 entry_idx,                                              \
-                   u64 now);                                                   \
     unsigned (*add_idx_bulk)(struct ft_##prefix##_table *ft,                   \
                              u32 *entry_idxv,                                  \
                              unsigned nb_keys,                                 \
@@ -53,11 +47,9 @@ struct ft_##prefix##_ops {                                                     \
                             const struct prefix##_key *keys,                   \
                             unsigned nb_keys,                                  \
                             u32 *unused_idxv);                                 \
-    u32 (*del_idx)(struct ft_##prefix##_table *ft,                       \
-                         u32 entry_idx);                                       \
-    void (*del_idx_bulk)(struct ft_##prefix##_table *ft,                 \
-                               const u32 *entry_idxv,                          \
-                               unsigned nb_keys);                              \
+    void (*del_idx_bulk)(struct ft_##prefix##_table *ft,                       \
+                         const u32 *entry_idxv,                                \
+                         unsigned nb_keys);                                    \
 }
 
 FT_OPS_DEFINE(flow4);
