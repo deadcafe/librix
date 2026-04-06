@@ -194,7 +194,7 @@ struct test_variant_ops {
     u32 (*find)(void *ft, const void *key, u64 now);
     u32 (*add_idx)(void *ft, u32 entry_idx, u64 now);
     u32 (*del_key)(void *ft, const void *key); /* single-key convenience: calls del_key_bulk */
-    u32 (*del_entry_idx)(void *ft, u32 entry_idx);
+    u32 (*del_idx)(void *ft, u32 entry_idx);
     void (*find_bulk)(void *ft, const void *keys, unsigned nb_keys,
                       u64 now,
                       struct ft_table_result *results);
@@ -204,7 +204,7 @@ struct test_variant_ops {
                              u64 now,
                              u32 *unused_idxv);
     int (*set_permanent_idx)(void *ft, u32 entry_idx);
-    void (*del_entry_idx_bulk)(void *ft, const u32 *entry_idxv,
+    void (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
                                unsigned nb_keys);
     int (*walk)(void *ft, int (*cb)(u32 entry_idx, void *arg), void *arg);
     int (*grow_2x)(void *ft);
@@ -226,9 +226,9 @@ struct test_variant_ops {
 #define TEST_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, entry_t, init_ex_fn, \
                               destroy_fn, flush_fn, nb_entries_fn, nb_bk_fn,   \
                               stats_fn, status_fn, find_fn, add_idx_fn,        \
-                              del_key_fn, del_entry_idx_fn, find_bulk_fn,       \
+                              del_key_fn, del_idx_fn, find_bulk_fn,       \
                               add_idx_bulk_fn,                                 \
-                              del_entry_idx_bulk_fn,                           \
+                              del_idx_bulk_fn,                           \
                               walk_fn, grow_2x_fn,                              \
                               reserve_fn, maintain_idx_bulk_fn,                 \
                               record_ptr_fn, entry_ptr_fn,                      \
@@ -291,9 +291,9 @@ testv_del_key_##tag(void *ft, const void *key)                              \
     return n > 0u ? idx : 0u;                                              \
 }                                                                          \
 static u32                                                             \
-testv_del_entry_idx_##tag(void *ft, u32 entry_idx)                     \
+testv_del_idx_##tag(void *ft, u32 entry_idx)                     \
 {                                                                          \
-    return del_entry_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);  \
+    return del_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);  \
 }                                                                          \
 static void                                                                 \
 testv_find_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,         \
@@ -320,10 +320,10 @@ testv_set_permanent_idx_##tag(void *ft, u32 entry_idx)                 \
         (struct ft_##prefix##_table *)ft, entry_idx);                       \
 }                                                                          \
 static void                                                                 \
-testv_del_entry_idx_bulk_##tag(void *ft, const u32 *entry_idxv,        \
+testv_del_idx_bulk_##tag(void *ft, const u32 *entry_idxv,        \
                                unsigned nb_keys)                             \
 {                                                                          \
-    del_entry_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
+    del_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
                           entry_idxv, nb_keys);                             \
 }                                                                          \
 static int                                                                  \
@@ -390,11 +390,11 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .find = testv_find_##tag,                                               \
     .add_idx = testv_add_idx_##tag,                                         \
     .del_key = testv_del_key_##tag,                                         \
-    .del_entry_idx = testv_del_entry_idx_##tag,                             \
+    .del_idx = testv_del_idx_##tag,                             \
     .find_bulk = testv_find_bulk_##tag,                                     \
     .add_idx_bulk = testv_add_idx_bulk_##tag,                               \
     .set_permanent_idx = testv_set_permanent_idx_##tag,                     \
-    .del_entry_idx_bulk = testv_del_entry_idx_bulk_##tag,                   \
+    .del_idx_bulk = testv_del_idx_bulk_##tag,                   \
     .walk = testv_walk_##tag,                                               \
     .grow_2x = testv_grow_2x_##tag,                                         \
     .reserve = testv_reserve_##tag,                                         \
@@ -410,9 +410,9 @@ TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
                       ft_flow4_table_nb_entries, ft_flow4_table_nb_bk,
                       ft_flow4_table_stats, ft_flow4_table_status,
                       ft_flow4_table_find, ft_flow4_table_add_idx,
-                      ft_flow4_table_del_key_bulk, ft_flow4_table_del_entry_idx,
+                      ft_flow4_table_del_key_bulk, ft_flow4_table_del_idx,
                       ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
-                      ft_flow4_table_del_entry_idx_bulk, ft_flow4_table_walk,
+                      ft_flow4_table_del_idx_bulk, ft_flow4_table_walk,
                       ft_flow4_table_grow_2x, ft_flow4_table_reserve,
                       ft_flow4_table_maintain_idx_bulk,
                       ft_flow4_table_record_ptr, ft_flow4_table_entry_ptr,
@@ -424,9 +424,9 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       ft_flow6_table_nb_entries, ft_flow6_table_nb_bk,
                       ft_flow6_table_stats, ft_flow6_table_status,
                       ft_flow6_table_find, ft_flow6_table_add_idx,
-                      ft_flow6_table_del_key_bulk, ft_flow6_table_del_entry_idx,
+                      ft_flow6_table_del_key_bulk, ft_flow6_table_del_idx,
                       ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
-                      ft_flow6_table_del_entry_idx_bulk, ft_flow6_table_walk,
+                      ft_flow6_table_del_idx_bulk, ft_flow6_table_walk,
                       ft_flow6_table_grow_2x, ft_flow6_table_reserve,
                       ft_flow6_table_maintain_idx_bulk,
                       ft_flow6_table_record_ptr, ft_flow6_table_entry_ptr,
@@ -438,9 +438,9 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       ft_flowu_table_nb_entries, ft_flowu_table_nb_bk,
                       ft_flowu_table_stats, ft_flowu_table_status,
                       ft_flowu_table_find, ft_flowu_table_add_idx,
-                      ft_flowu_table_del_key_bulk, ft_flowu_table_del_entry_idx,
+                      ft_flowu_table_del_key_bulk, ft_flowu_table_del_idx,
                       ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
-                      ft_flowu_table_del_entry_idx_bulk, ft_flowu_table_walk,
+                      ft_flowu_table_del_idx_bulk, ft_flowu_table_walk,
                       ft_flowu_table_grow_2x, ft_flowu_table_reserve,
                       ft_flowu_table_maintain_idx_bulk,
                       ft_flowu_table_record_ptr, ft_flowu_table_entry_ptr,
@@ -1195,7 +1195,7 @@ test_del_idx(void)
 
     /* del_idx for even entries */
     for (unsigned i = 0; i < 8u; i += 2u) {
-        if (ft_flow4_table_del_entry_idx(&ft, idxs[i]) != idxs[i])
+        if (ft_flow4_table_del_idx(&ft, idxs[i]) != idxs[i])
             FAILF("del_idx failed at idx=%u", idxs[i]);
     }
     /* deleted entries miss, remaining entries hit */
@@ -1211,7 +1211,7 @@ test_del_idx(void)
         }
     }
     /* double del_idx should return 0 */
-    if (ft_flow4_table_del_entry_idx(&ft, idxs[0]) != 0u)
+    if (ft_flow4_table_del_idx(&ft, idxs[0]) != 0u)
         FAIL("double del_idx should return 0");
 
     ft_flow4_table_destroy(&ft);
@@ -2531,7 +2531,7 @@ testv_walk_flush_and_del_idx(const struct test_variant_ops *ops)
     memset(&ctx, 0, sizeof(ctx));
     if (ops->walk(&ft, walk_count_cb, &ctx) != 0 || ctx.count != 16u)
         FAIL("walk count mismatch");
-    if (ops->del_entry_idx(&ft, 2u) != 2u)
+    if (ops->del_idx(&ft, 2u) != 2u)
         FAIL("del_idx failed");
     ops->status(&ft, &status);
     if (status.entries != 15u)

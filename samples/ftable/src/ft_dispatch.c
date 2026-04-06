@@ -253,7 +253,7 @@ ft_##prefix##_table_del_key_bulk(struct ft_##prefix##_table *ft,               \
 }                                                                              \
                                                                                \
 u32                                                                            \
-ft_##prefix##_table_del_entry_idx(struct ft_##prefix##_table *ft,              \
+ft_##prefix##_table_del_idx(struct ft_##prefix##_table *ft,              \
                                   u32 entry_idx)                               \
 {                                                                              \
     u64 _dels = ft->stats.core.dels;                                           \
@@ -262,7 +262,7 @@ ft_##prefix##_table_del_entry_idx(struct ft_##prefix##_table *ft,              \
 }                                                                              \
                                                                                \
 void                                                                           \
-ft_##prefix##_table_del_entry_idx_bulk(struct ft_##prefix##_table *ft,         \
+ft_##prefix##_table_del_idx_bulk(struct ft_##prefix##_table *ft,         \
                                        const u32 *entry_idxv,                  \
                                        unsigned nb_keys)                       \
 {                                                                              \

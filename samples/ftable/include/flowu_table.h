@@ -113,10 +113,10 @@ unsigned ft_flowu_table_del_key_bulk(struct ft_flowu_table *ft,
                                     unsigned nb_keys,
                                     u32 *unused_idxv);
 
-u32 ft_flowu_table_del_entry_idx(struct ft_flowu_table *ft,
+u32 ft_flowu_table_del_idx(struct ft_flowu_table *ft,
                                       u32 entry_idx);
 
-void ft_flowu_table_del_entry_idx_bulk(struct ft_flowu_table *ft,
+void ft_flowu_table_del_idx_bulk(struct ft_flowu_table *ft,
                                        const u32 *entry_idxv,
                                        unsigned nb_keys);
 
@@ -220,12 +220,6 @@ static inline u32
 ft_flowu_table_add_entry_idx(struct ft_flowu_table *ft, u32 entry_idx)
 {
     return ft_flowu_table_add_idx(ft, entry_idx, 0u);
-}
-
-static inline u32
-ft_flowu_table_del_idx(struct ft_flowu_table *ft, u32 entry_idx)
-{
-    return ft_flowu_table_del_entry_idx(ft, entry_idx);
 }
 
 static inline u32

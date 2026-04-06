@@ -560,10 +560,10 @@ _FTG_API(p, del_key_bulk)(_FTG_TABLE_T(p) *ft,                                \
                             hash_fn, cmp_fn);                                 \
 }                                                                             \
                                                                                \
-/* --- del_entry_idx_bulk ------------------------------------------------ */ \
+/* --- del_idx_bulk ------------------------------------------------ */ \
                                                                                \
 static void                                                                   \
-_FTG_API(p, del_entry_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
+_FTG_API(p, del_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
                                 const u32 *entry_idxv,                   \
                                 unsigned nb_keys)                             \
 {                                                                             \
@@ -750,7 +750,7 @@ const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
     .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \
     .del_key_bulk    = _FT_OPS_FNAME(prefix, del_key_bulk),                    \
-    .del_idx_bulk    = _FT_OPS_FNAME(prefix, del_entry_idx_bulk),             \
+    .del_idx_bulk    = _FT_OPS_FNAME(prefix, del_idx_bulk),             \
 }
 
 #endif /* _FT_TABLE_GENERATE_H_ */

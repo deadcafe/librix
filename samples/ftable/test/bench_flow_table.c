@@ -99,7 +99,7 @@ struct ftb_variant_ops {
                              enum ft_add_policy policy,
                              u64 now,
                              u32 *unused_idxv);
-    void (*del_entry_idx_bulk)(void *ft, const u32 *entry_idxv,
+    void (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
                                unsigned nb_keys);
     unsigned (*del_key_bulk)(void *ft, const void *keys, unsigned nb_keys,
                              u32 *unused_idxv);
@@ -525,7 +525,7 @@ ftb_keyu(unsigned i)
                              destroy_fn, flush_fn, nb_bk_fn, reserve_fn,      \
                              entry_ptr_fn, add_idx_fn, find_bulk_fn,          \
                              add_idx_bulk_fn,                                 \
-                             del_entry_idx_bulk_fn,                           \
+                             del_idx_bulk_fn,                           \
                              del_key_bulk_fn,                                 \
                              grow_2x_fn, maintain_fn,                         \
                              maintain_idx_bulk_fn,                            \
@@ -592,10 +592,10 @@ ftb_add_idx_bulk_##tag(void *ft, u32 *entry_idxv,                        \
                            entry_idxv, nb_keys, policy, now, unused_idxv);    \
 }                                                                             \
 static void                                                                   \
-ftb_del_entry_idx_bulk_##tag(void *ft, const u32 *entry_idxv,            \
+ftb_del_idx_bulk_##tag(void *ft, const u32 *entry_idxv,            \
                              unsigned nb_keys)                                \
 {                                                                             \
-    del_entry_idx_bulk_fn((struct ft_##prefix##_table *)ft,                   \
+    del_idx_bulk_fn((struct ft_##prefix##_table *)ft,                   \
                           entry_idxv, nb_keys);                               \
 }                                                                             \
 static unsigned                                                               \
@@ -653,7 +653,7 @@ static const struct ftb_variant_ops ftb_ops_##tag = {                         \
     .add_idx = ftb_add_idx_##tag,                                             \
     .find_bulk = ftb_find_bulk_##tag,                                         \
     .add_idx_bulk = ftb_add_idx_bulk_##tag,                                   \
-    .del_entry_idx_bulk = ftb_del_entry_idx_bulk_##tag,                       \
+    .del_idx_bulk = ftb_del_idx_bulk_##tag,                       \
     .del_key_bulk = ftb_del_key_bulk_##tag,                                   \
     .grow_2x = ftb_grow_2x_##tag,                                             \
     .maintain = ftb_maintain_##tag,                                           \
@@ -668,7 +668,7 @@ FTB_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct ftb_user_record4,
                      ft_flow4_table_reserve, ft_flow4_table_entry_ptr,
                      ft_flow4_table_add_idx, ft_flow4_table_find_bulk,
                      ft_flow4_table_add_idx_bulk,
-                     ft_flow4_table_del_entry_idx_bulk,
+                     ft_flow4_table_del_idx_bulk,
                      ft_flow4_table_del_key_bulk,
                      ft_flow4_table_grow_2x, ft_flow4_table_maintain,
                      ft_flow4_table_maintain_idx_bulk,
@@ -680,7 +680,7 @@ FTB_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct ftb_user_record6,
                      ft_flow6_table_reserve, ft_flow6_table_entry_ptr,
                      ft_flow6_table_add_idx, ft_flow6_table_find_bulk,
                      ft_flow6_table_add_idx_bulk,
-                     ft_flow6_table_del_entry_idx_bulk,
+                     ft_flow6_table_del_idx_bulk,
                      ft_flow6_table_del_key_bulk,
                      ft_flow6_table_grow_2x, ft_flow6_table_maintain,
                      ft_flow6_table_maintain_idx_bulk,
@@ -692,7 +692,7 @@ FTB_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct ftb_user_recordu,
                      ft_flowu_table_reserve, ft_flowu_table_entry_ptr,
                      ft_flowu_table_add_idx, ft_flowu_table_find_bulk,
                      ft_flowu_table_add_idx_bulk,
-                     ft_flowu_table_del_entry_idx_bulk,
+                     ft_flowu_table_del_idx_bulk,
                      ft_flowu_table_del_key_bulk,
                      ft_flowu_table_grow_2x, ft_flowu_table_maintain,
                      ft_flowu_table_maintain_idx_bulk,
@@ -944,7 +944,7 @@ ftb_measure_del_idx(const struct ftb_variant_ops *ops, void *ft,
                                 FTB_NOW_ADD, unused_idxv);
         ftb_cold_touch();
         t0 = ftb_rdtsc();
-        ops->del_entry_idx_bulk(ft, idxv, ftb_query_n);
+        ops->del_idx_bulk(ft, idxv, ftb_query_n);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
