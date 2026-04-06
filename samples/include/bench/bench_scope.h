@@ -44,7 +44,7 @@ enum bench_scope_event_kind {
 
 struct bench_scope_value {
     enum bench_scope_event_kind kind;
-    u64 value;
+    uint64_t value;
 };
 
 struct bench_scope_sample {
@@ -56,7 +56,7 @@ struct bench_scope_group {
     unsigned count;
     int leader_fd;
     int fds[BENCH_SCOPE_MAX_EVENTS];
-    u64 ids[BENCH_SCOPE_MAX_EVENTS];
+    uint64_t ids[BENCH_SCOPE_MAX_EVENTS];
     enum bench_scope_event_kind kinds[BENCH_SCOPE_MAX_EVENTS];
 };
 
@@ -126,16 +126,16 @@ bench_scope_attr_init_(struct perf_event_attr *attr,
     case BENCH_SCOPE_EVT_L1D_LOADS:
         attr->type = PERF_TYPE_HW_CACHE;
         attr->config =
-            ((u64)PERF_COUNT_HW_CACHE_L1D) |
-            ((u64)PERF_COUNT_HW_CACHE_OP_READ << 8) |
-            ((u64)PERF_COUNT_HW_CACHE_RESULT_ACCESS << 16);
+            ((uint64_t)PERF_COUNT_HW_CACHE_L1D) |
+            ((uint64_t)PERF_COUNT_HW_CACHE_OP_READ << 8) |
+            ((uint64_t)PERF_COUNT_HW_CACHE_RESULT_ACCESS << 16);
         return 0;
     case BENCH_SCOPE_EVT_L1D_LOAD_MISSES:
         attr->type = PERF_TYPE_HW_CACHE;
         attr->config =
-            ((u64)PERF_COUNT_HW_CACHE_L1D) |
-            ((u64)PERF_COUNT_HW_CACHE_OP_READ << 8) |
-            ((u64)PERF_COUNT_HW_CACHE_RESULT_MISS << 16);
+            ((uint64_t)PERF_COUNT_HW_CACHE_L1D) |
+            ((uint64_t)PERF_COUNT_HW_CACHE_OP_READ << 8) |
+            ((uint64_t)PERF_COUNT_HW_CACHE_RESULT_MISS << 16);
         return 0;
     }
     errno = EINVAL;
@@ -237,10 +237,10 @@ bench_scope_end(struct bench_scope_group *group,
                 struct bench_scope_sample *sample)
 {
     struct {
-        u64 nr;
+        uint64_t nr;
         struct {
-            u64 value;
-            u64 id;
+            uint64_t value;
+            uint64_t id;
         } values[BENCH_SCOPE_MAX_EVENTS];
     } data;
     unsigned i, j;
@@ -255,7 +255,7 @@ bench_scope_end(struct bench_scope_group *group,
         return -1;
 
     memset(&data, 0, sizeof(data));
-    need = (ssize_t)(sizeof(u64) +
+    need = (ssize_t)(sizeof(uint64_t) +
         group->count * sizeof(data.values[0]));
     got = read(group->leader_fd, &data, (size_t)need);
     if (got != need) {
