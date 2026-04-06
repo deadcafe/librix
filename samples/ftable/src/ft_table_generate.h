@@ -174,12 +174,6 @@
     return _FTG_FCORE(p, add_idx_bulk_)((ft), (entry_idxv), (nb_keys),       \
                                          (policy), (now), (unused_idxv))
 
-#define _FTG_DEL_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)    \
-    do {                                                                      \
-    for (unsigned _i = 0; _i < (nb_keys); _i++)                               \
-        (results)[_i].entry_idx = _FTG_API(p, del_key)((ft), &(keys)[_i]);    \
-    } while (0)
-
 #define _FTG_WALK_BODY(p, ft, cb, arg)                                        \
     return _FTG_FCORE(p, walk_)((ft), (cb), (arg))
 
@@ -187,195 +181,195 @@
     _FTG_FCORE(p, flush_)(ft)
 
 #define _FTG_FIND_BODY(p, ft, key, now, hash_fn, cmp_fn)                      \
-    return _FTG_FCORE(p, find_key_oneshot_)((ft), (key), (now));
-
-#define _FTG_DEL_BODY(p, ft, key, hash_fn, cmp_fn)                            \
-    _FTG_ENTRY_T(p) *_entry;                                                  \
-    union rix_hash_hash_u _h;                                                 \
-    unsigned _idx;                                                            \
-    _h = hash_fn((key), (ft)->start_mask);                                    \
-    _entry = _FTG_INT(p, find_hashed_)((ft), (key), _h);                      \
-    if (_entry == NULL) {                                                     \
-        (ft)->stats.core.del_miss++;                                          \
-        return 0u;                                                            \
-    }                                                                         \
-    _idx = FTG_LAYOUT_ENTRY_INDEX((ft), _entry);                              \
-    if (_FTG_HT(p, remove)(&(ft)->ht_head, (ft)->buckets,                     \
-                           _FTG_INT(p, hash_base_)((ft)),                     \
-                           _entry) == NULL)                                   \
-        return 0u;                                                            \
-    (ft)->stats.core.dels++;                                                  \
-    RIX_ASSERT((ft)->status.entries != 0u);                                   \
-    (ft)->status.entries--;                                                   \
-    _FTG_INT(p, entry_meta_clear_)(_entry);                                   \
-    return _idx;
+    {                                                                         \
+        u32 _fcore_result_ = 0u;                                         \
+        _FTG_FCORE(p, find_key_bulk_)((ft), (key), 1u, (now),               \
+                                       &_fcore_result_);                     \
+        return _fcore_result_;                                                \
+    }
 
 #define _FTG_DEL_IDX_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                  \
-    return _FTG_FCORE(p, del_idx_oneshot_)((ft), (entry_idx));
+    {                                                                         \
+        u32 _didx = (entry_idx);                                         \
+        _FTG_ENTRY_T(p) *_de = FTG_LAYOUT_ENTRY_PTR((ft), _didx);           \
+        RIX_ASSUME_NONNULL(_de);                                              \
+        if (_de->meta.cur_hash == 0u)                                         \
+            return 0u;                                                        \
+        _FTG_FCORE(p, del_idx_bulk_)((ft), &_didx, 1u);                     \
+        return _didx;                                                         \
+    }
+
+#define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, now, hash_fn, cmp_fn)           \
+    {                                                                         \
+        u32 _aidx = (entry_idx);                                         \
+        u32 _unused;                                                     \
+        _FTG_FCORE(p, add_idx_bulk_)((ft), &_aidx, 1u,                      \
+                                      FT_ADD_IGNORE, (now), &_unused);       \
+        return _aidx;                                                         \
+    }
+
+#define _FTG_DEL_KEY_BULK_BODY(p, ft, keys, nb_keys, unused_idxv,             \
+                               hash_fn, cmp_fn)                              \
+    return _FTG_FCORE(p, del_key_bulk_)((ft), (keys), (nb_keys),             \
+                                         (unused_idxv))
 
 #define _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys)              \
     _FTG_FCORE(p, del_idx_bulk_)((ft), (entry_idxv), (nb_keys))
-
-#define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, now, hash_fn, cmp_fn)           \
-    return _FTG_FCORE(p, add_idx_oneshot_)((ft), (entry_idx), (now));
 
 #else /* !FTG_USE_FCORE — legacy 2-stage pipeline */
 
 #define _FTG_FIND_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)   \
     do {                                                                      \
-    const unsigned _step_keys = FT_TABLE_BULK_STEP_KEYS;                      \
-    const unsigned _ahead_keys = FT_TABLE_BULK_AHEAD_KEYS;                    \
-    const unsigned _total = (nb_keys) + _ahead_keys;                          \
-    union rix_hash_hash_u _hashes[FT_TABLE_BULK_CTX_RING];                    \
-    for (unsigned _i = 0; _i < _total; _i += _step_keys) {                    \
-        if (_i < (nb_keys)) {                                                 \
-            unsigned _n = (_i + _step_keys <= (nb_keys))                      \
-                       ? _step_keys : ((nb_keys) - _i);                       \
-            for (unsigned _j = 0; _j < _n; _j++) {                            \
-                unsigned _idx = _i + _j;                                      \
-                union rix_hash_hash_u _h =                                    \
-                    hash_fn(&(keys)[_idx], (ft)->start_mask);                 \
-                unsigned _bk0, _bk1;                                          \
-                _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)] = _h;           \
-                (void)rix_hash_fp(_h, (ft)->ht_head.rhh_mask,                \
-                                  &_bk0, &_bk1);                              \
-                rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk0]);            \
-                if (_bk1 != _bk0)                                             \
-                    rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk1]);        \
-            }                                                                 \
-        }                                                                     \
-        if (_i >= _ahead_keys && _i - _ahead_keys < (nb_keys)) {              \
-            unsigned _base = _i - _ahead_keys;                                \
-            unsigned _n = (_base + _step_keys <= (nb_keys))                   \
-                       ? _step_keys : ((nb_keys) - _base);                    \
-            for (unsigned _j = 0; _j < _n; _j++) {                            \
-                unsigned _idx = _base + _j;                                   \
-                _FTG_ENTRY_T(p) *_entry;                                      \
-                (ft)->stats.core.lookups++;                                   \
-                _entry = _FTG_INT(p, find_hashed_)(                           \
-                    (ft), &(keys)[_idx],                                      \
-                    _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)]);           \
-                if (_entry != NULL) {                                         \
-                    (ft)->stats.core.hits++;                                  \
-                    (results)[_idx].entry_idx =                               \
-                        FTG_LAYOUT_ENTRY_INDEX((ft), _entry);                 \
-                } else {                                                      \
-                    (ft)->stats.core.misses++;                                \
-                    (results)[_idx].entry_idx = 0u;                           \
+        const unsigned _step_keys = FT_TABLE_BULK_STEP_KEYS;                  \
+        const unsigned _ahead_keys = FT_TABLE_BULK_AHEAD_KEYS;                \
+        const unsigned _total = (nb_keys) + _ahead_keys;                      \
+        union rix_hash_hash_u _hashes[FT_TABLE_BULK_CTX_RING];                \
+        for (unsigned _i = 0; _i < _total; _i += _step_keys) {                \
+            if (_i < (nb_keys)) {                                             \
+                unsigned _n = (_i + _step_keys <= (nb_keys))                  \
+                           ? _step_keys : ((nb_keys) - _i);                   \
+                for (unsigned _j = 0; _j < _n; _j++) {                        \
+                    unsigned _idx = _i + _j;                                  \
+                    union rix_hash_hash_u _h =                                \
+                        hash_fn(&(keys)[_idx], (ft)->start_mask);             \
+                    unsigned _bk0, _bk1;                                      \
+                    _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)] = _h;       \
+                    (void)rix_hash_fp(_h, (ft)->ht_head.rhh_mask,             \
+                                      &_bk0, &_bk1);                          \
+                    rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk0]);        \
+                    if (_bk1 != _bk0)                                         \
+                        rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk1]);    \
                 }                                                             \
             }                                                                 \
-        }                                                                     \
-    }                                                                         \
-    } while (0)
-
-#define _FTG_ADD_ENTRY_BULK_BODY(p, ft, entry_idxv, nb_keys, results,         \
-                                 hash_fn, cmp_fn)                             \
-    do {                                                                      \
-    const unsigned _step_keys = FT_TABLE_BULK_STEP_KEYS;                      \
-    const unsigned _ahead_keys = FT_TABLE_BULK_AHEAD_KEYS;                    \
-    const unsigned _total = (nb_keys) + _ahead_keys;                          \
-    union rix_hash_hash_u _hashes[FT_TABLE_BULK_CTX_RING];                    \
-    for (unsigned _i = 0; _i < (nb_keys); _i++) {                             \
-        _FTG_ENTRY_T(p) *_entry;                                              \
-        (results)[_i].entry_idx = 0u;                                         \
-        if ((entry_idxv)[_i] == 0u || (entry_idxv)[_i] > (ft)->max_entries)   \
-            continue;                                                         \
-        _entry = FTG_LAYOUT_ENTRY_PTR((ft), (entry_idxv)[_i]);                \
-        RIX_ASSUME_NONNULL(_entry);                                           \
-        rix_hash_prefetch_key(&_entry->key);                                  \
-    }                                                                         \
-    for (unsigned _i = 0; _i < _total; _i += _step_keys) {                    \
-        if (_i < (nb_keys)) {                                                 \
-            unsigned _n = (_i + _step_keys <= (nb_keys))                      \
-                       ? _step_keys : ((nb_keys) - _i);                       \
-            for (unsigned _j = 0; _j < _n; _j++) {                            \
-                unsigned _idx = _i + _j;                                      \
-                u32 _eidx = (entry_idxv)[_idx];                          \
-                _FTG_ENTRY_T(p) *_entry; unsigned _bk0, _bk1;                 \
-                union rix_hash_hash_u _h;                                     \
-                if (_eidx == 0u || _eidx > (ft)->max_entries) continue;       \
-                _entry = FTG_LAYOUT_ENTRY_PTR((ft), _eidx);                   \
-                RIX_ASSUME_NONNULL(_entry);                                   \
-                _h = hash_fn(&_entry->key, (ft)->start_mask);                 \
-                _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)] = _h;           \
-                (void)rix_hash_fp(_h, (ft)->ht_head.rhh_mask,                \
-                                  &_bk0, &_bk1);                              \
-                rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk0]);            \
-                if (_bk1 != _bk0)                                             \
-                    rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk1]);        \
-            }                                                                 \
-        }                                                                     \
-        if (_i >= _ahead_keys && _i - _ahead_keys < (nb_keys)) {              \
-            unsigned _base = _i - _ahead_keys;                                \
-            unsigned _n = (_base + _step_keys <= (nb_keys))                   \
-                       ? _step_keys : ((nb_keys) - _base);                    \
-            for (unsigned _j = 0; _j < _n; _j++) {                            \
-                unsigned _idx = _base + _j;                                   \
-                u32 _eidx = (entry_idxv)[_idx];                          \
-                _FTG_ENTRY_T(p) *_entry; u32 _out_idx; int _rc;          \
-                if (_eidx == 0u || _eidx > (ft)->max_entries) continue;       \
-                _entry = FTG_LAYOUT_ENTRY_PTR((ft), _eidx);                   \
-                RIX_ASSUME_NONNULL(_entry);                                   \
-                if (_FTG_INT(p, entry_is_active_)(_entry)) {                  \
-                    (ft)->stats.core.add_existing++;                          \
-                    (results)[_idx].entry_idx = _eidx;                        \
-                    continue;                                                 \
-                }                                                             \
-                _FTG_INT(p, entry_meta_clear_)(_entry);                       \
-                _out_idx = _eidx;                                             \
-                _rc = _FTG_INT(p, insert_hashed_)(                            \
-                    (ft), _entry,                                             \
-                    _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)],            \
-                    &_out_idx);                                               \
-                if (_rc == 0) {                                               \
-                    (ft)->stats.core.adds++;                                  \
-                    (results)[_idx].entry_idx = _out_idx;                     \
-                } else {                                                      \
-                    _FTG_INT(p, entry_meta_clear_)(_entry);                   \
-                    if (_rc > 0) {                                            \
-                        (ft)->stats.core.add_existing++;                      \
-                        (results)[_idx].entry_idx = _out_idx;                 \
+            if (_i >= _ahead_keys && _i - _ahead_keys < (nb_keys)) {          \
+                unsigned _base = _i - _ahead_keys;                            \
+                unsigned _n = (_base + _step_keys <= (nb_keys))               \
+                           ? _step_keys : ((nb_keys) - _base);                \
+                for (unsigned _j = 0; _j < _n; _j++) {                        \
+                    unsigned _idx = _base + _j;                               \
+                    _FTG_ENTRY_T(p) *_entry;                                  \
+                    (ft)->stats.core.lookups++;                               \
+                    _entry = _FTG_INT(p, find_hashed_)(                       \
+                        (ft), &(keys)[_idx],                                  \
+                        _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)]);       \
+                    if (_entry != NULL) {                                     \
+                        (ft)->stats.core.hits++;                              \
+                        (results)[_idx].entry_idx =                           \
+                            FTG_LAYOUT_ENTRY_INDEX((ft), _entry);             \
                     } else {                                                  \
-                        (ft)->stats.core.add_failed++;                        \
+                        (ft)->stats.core.misses++;                            \
                         (results)[_idx].entry_idx = 0u;                       \
                     }                                                         \
                 }                                                             \
             }                                                                 \
         }                                                                     \
-    }                                                                         \
     } while (0)
 
-#define _FTG_DEL_BULK_BODY(p, ft, keys, nb_keys, results, hash_fn, cmp_fn)    \
+#define _FTG_ADD_ENTRY_BULK_BODY(p, ft, entry_idxv, nb_keys, results,         \
+                                 hash_fn, cmp_fn)                             \
     do {                                                                      \
-    for (unsigned _i = 0; _i < (nb_keys); _i++)                               \
-        (results)[_i].entry_idx = _FTG_API(p, del_key)((ft), &(keys)[_i]);    \
+        const unsigned _step_keys = FT_TABLE_BULK_STEP_KEYS;                  \
+        const unsigned _ahead_keys = FT_TABLE_BULK_AHEAD_KEYS;                \
+        const unsigned _total = (nb_keys) + _ahead_keys;                      \
+        union rix_hash_hash_u _hashes[FT_TABLE_BULK_CTX_RING];                \
+        for (unsigned _i = 0; _i < (nb_keys); _i++) {                         \
+            _FTG_ENTRY_T(p) *_entry;                                          \
+            (results)[_i].entry_idx = 0u;                                     \
+            if ((entry_idxv)[_i] == 0u                                        \
+                || (entry_idxv)[_i] > (ft)->max_entries)                      \
+                continue;                                                     \
+            _entry = FTG_LAYOUT_ENTRY_PTR((ft), (entry_idxv)[_i]);            \
+            RIX_ASSUME_NONNULL(_entry);                                       \
+            rix_hash_prefetch_key(&_entry->key);                              \
+        }                                                                     \
+        for (unsigned _i = 0; _i < _total; _i += _step_keys) {                \
+            if (_i < (nb_keys)) {                                             \
+                unsigned _n = (_i + _step_keys <= (nb_keys))                  \
+                           ? _step_keys : ((nb_keys) - _i);                   \
+                for (unsigned _j = 0; _j < _n; _j++) {                        \
+                    unsigned _idx = _i + _j;                                  \
+                    u32 _eidx = (entry_idxv)[_idx];                           \
+                    _FTG_ENTRY_T(p) *_entry; unsigned _bk0, _bk1;             \
+                    union rix_hash_hash_u _h;                                 \
+                    if (_eidx == 0u || _eidx > (ft)->max_entries) continue;   \
+                    _entry = FTG_LAYOUT_ENTRY_PTR((ft), _eidx);               \
+                    RIX_ASSUME_NONNULL(_entry);                               \
+                    _h = hash_fn(&_entry->key, (ft)->start_mask);             \
+                    _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)] = _h;       \
+                    (void)rix_hash_fp(_h, (ft)->ht_head.rhh_mask,             \
+                                      &_bk0, &_bk1);                          \
+                    rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk0]);        \
+                    if (_bk1 != _bk0)                                         \
+                        rix_hash_prefetch_bucket_of(&(ft)->buckets[_bk1]);    \
+                }                                                             \
+            }                                                                 \
+            if (_i >= _ahead_keys && _i - _ahead_keys < (nb_keys)) {          \
+                unsigned _base = _i - _ahead_keys;                            \
+                unsigned _n = (_base + _step_keys <= (nb_keys))               \
+                           ? _step_keys : ((nb_keys) - _base);                \
+                for (unsigned _j = 0; _j < _n; _j++) {                        \
+                    unsigned _idx = _base + _j;                               \
+                    u32 _eidx = (entry_idxv)[_idx];                           \
+                    _FTG_ENTRY_T(p) *_entry; u32 _out_idx; int _rc;           \
+                    if (_eidx == 0u || _eidx > (ft)->max_entries) continue;   \
+                    _entry = FTG_LAYOUT_ENTRY_PTR((ft), _eidx);               \
+                    RIX_ASSUME_NONNULL(_entry);                               \
+                    if (_FTG_INT(p, entry_is_active_)(_entry)) {              \
+                        (ft)->stats.core.add_existing++;                      \
+                        (results)[_idx].entry_idx = _eidx;                    \
+                        continue;                                             \
+                    }                                                         \
+                    _FTG_INT(p, entry_meta_clear_)(_entry);                   \
+                    _out_idx = _eidx;                                         \
+                    _rc = _FTG_INT(p, insert_hashed_)(                        \
+                        (ft), _entry,                                         \
+                        _hashes[_idx & (FT_TABLE_BULK_CTX_RING - 1u)],        \
+                        &_out_idx);                                           \
+                    if (_rc == 0) {                                           \
+                        (ft)->stats.core.adds++;                              \
+                        (results)[_idx].entry_idx = _out_idx;                 \
+                    } else {                                                  \
+                        _FTG_INT(p, entry_meta_clear_)(_entry);               \
+                        if (_rc > 0) {                                        \
+                            (ft)->stats.core.add_existing++;                  \
+                            (results)[_idx].entry_idx = _out_idx;             \
+                        } else {                                              \
+                            (ft)->stats.core.add_failed++;                    \
+                            (results)[_idx].entry_idx = 0u;                   \
+                        }                                                     \
+                    }                                                         \
+                }                                                             \
+            }                                                                 \
+        }                                                                     \
     } while (0)
 
 #define _FTG_WALK_BODY(p, ft, cb, arg)                                        \
     do {                                                                      \
-    for (unsigned _i = 1u; _i <= (ft)->max_entries; _i++) {                   \
-        const _FTG_ENTRY_T(p) *_entry = FTG_LAYOUT_ENTRY_PTR((ft), _i);       \
-        if (_entry == NULL) continue;                                         \
-        RIX_ASSUME_NONNULL(_entry);                                           \
-        if (!_FTG_INT(p, entry_is_active_)(_entry)) continue;                 \
-        if ((cb)(_i, (arg)) != 0) return 1;                                   \
-    }                                                                         \
+        for (unsigned _i = 1u; _i <= (ft)->max_entries; _i++) {               \
+            const _FTG_ENTRY_T(p) *_entry =                                   \
+                FTG_LAYOUT_ENTRY_PTR((ft), _i);                               \
+            if (_entry == NULL) continue;                                     \
+            RIX_ASSUME_NONNULL(_entry);                                       \
+            if (!_FTG_INT(p, entry_is_active_)(_entry)) continue;             \
+            if ((cb)(_i, (arg)) != 0) return 1;                               \
+        }                                                                     \
     } while (0)
 
 #define _FTG_FLUSH_BODY(p, ft)                                                \
     do {                                                                      \
-    memset((ft)->buckets, 0,                                                  \
-           _FTG_INT(p, bucket_bytes_)((ft)->nb_bk));                          \
-    _FTG_HT(p, init)(&(ft)->ht_head, (ft)->nb_bk);                            \
-    for (unsigned _i = 1u; _i <= (ft)->max_entries; _i++) {                   \
-        _FTG_ENTRY_T(p) *_entry = FTG_LAYOUT_ENTRY_PTR((ft), _i);             \
-        if (_entry != NULL) _FTG_INT(p, entry_meta_clear_)(_entry);           \
-    }                                                                         \
+        memset((ft)->buckets, 0,                                              \
+               _FTG_INT(p, bucket_bytes_)((ft)->nb_bk));                      \
+        _FTG_HT(p, init)(&(ft)->ht_head, (ft)->nb_bk);                        \
+        for (unsigned _i = 1u; _i <= (ft)->max_entries; _i++) {               \
+            _FTG_ENTRY_T(p) *_entry = FTG_LAYOUT_ENTRY_PTR((ft), _i);         \
+            if (_entry != NULL) _FTG_INT(p, entry_meta_clear_)(_entry);       \
+        }                                                                     \
     } while (0)
 
-#define _FTG_FIND_BODY(p, ft, key, hash_fn, cmp_fn)                           \
+#define _FTG_FIND_BODY(p, ft, key, now, hash_fn, cmp_fn)                      \
     _FTG_ENTRY_T(p) *_entry;                                                  \
     union rix_hash_hash_u _h;                                                 \
+    (void)(now);                                                              \
     (ft)->stats.core.lookups++;                                               \
     _h = hash_fn((key), (ft)->start_mask);                                    \
     _entry = _FTG_INT(p, find_hashed_)((ft), (key), _h);                      \
@@ -385,25 +379,6 @@
     }                                                                         \
     (ft)->stats.core.hits++;                                                  \
     return FTG_LAYOUT_ENTRY_INDEX((ft), _entry);
-
-#define _FTG_DEL_BODY(p, ft, key, hash_fn, cmp_fn)                            \
-    _FTG_ENTRY_T(p) *_entry;                                                  \
-    union rix_hash_hash_u _h;                                                 \
-    unsigned _idx;                                                            \
-    _h = hash_fn((key), (ft)->start_mask);                                    \
-    _entry = _FTG_INT(p, find_hashed_)((ft), (key), _h);                      \
-    if (_entry == NULL) {                                                     \
-        (ft)->stats.core.del_miss++;                                          \
-        return 0u;                                                            \
-    }                                                                         \
-    _idx = FTG_LAYOUT_ENTRY_INDEX((ft), _entry);                              \
-    if (_FTG_HT(p, remove)(&(ft)->ht_head, (ft)->buckets,                     \
-                           _FTG_INT(p, hash_base_)((ft)),                     \
-                           _entry) == NULL)                                   \
-        return 0u;                                                            \
-    (ft)->stats.core.dels++;                                                  \
-    _FTG_INT(p, entry_meta_clear_)(_entry);                                   \
-    return _idx;
 
 #define _FTG_DEL_IDX_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                  \
     _FTG_ENTRY_T(p) *_entry;                                                  \
@@ -425,11 +400,12 @@
             (void)_FTG_API(p, del_entry_idx)((ft), (entry_idxv)[_i]);         \
     } while (0)
 
-#define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, hash_fn, cmp_fn)                \
+#define _FTG_ADD_ENTRY_BODY(p, ft, entry_idx, now, hash_fn, cmp_fn)           \
     _FTG_ENTRY_T(p) *_entry;                                                  \
     union rix_hash_hash_u _h;                                                 \
     u32 _out_idx = (entry_idx);                                          \
     int _rc;                                                                  \
+    (void)(now);                                                              \
     _entry = FTG_LAYOUT_ENTRY_PTR((ft), (entry_idx));                         \
     RIX_ASSUME_NONNULL(_entry);                                               \
     if (_FTG_INT(p, entry_is_active_)(_entry)) {                              \
@@ -450,6 +426,32 @@
     }                                                                         \
     (ft)->stats.core.add_failed++;                                            \
     return 0u;
+
+#define _FTG_DEL_KEY_BULK_BODY(p, ft, keys, nb_keys, unused_idxv,             \
+                               hash_fn, cmp_fn)                               \
+    do {                                                                      \
+        unsigned _count = 0u;                                                 \
+        for (unsigned _i = 0u; _i < (nb_keys); _i++) {                        \
+            _FTG_ENTRY_T(p) *_entry;                                          \
+            union rix_hash_hash_u _h;                                         \
+            unsigned _idx;                                                    \
+            _h = hash_fn(&(keys)[_i], (ft)->start_mask);                     \
+            _entry = _FTG_INT(p, find_hashed_)((ft), &(keys)[_i], _h);       \
+            if (_entry == NULL) {                                             \
+                (ft)->stats.core.del_miss++;                                  \
+                continue;                                                     \
+            }                                                                 \
+            _idx = FTG_LAYOUT_ENTRY_INDEX((ft), _entry);                     \
+            if (_FTG_HT(p, remove)(&(ft)->ht_head, (ft)->buckets,            \
+                                   _FTG_INT(p, hash_base_)((ft)),            \
+                                   _entry) == NULL)                          \
+                continue;                                                     \
+            (ft)->stats.core.dels++;                                          \
+            _FTG_INT(p, entry_meta_clear_)(_entry);                           \
+            (unused_idxv)[_count++] = _idx;                                   \
+        }                                                                     \
+        return _count;                                                        \
+    } while (0)
 
 #endif /* FTG_USE_FCORE */
 
@@ -669,7 +671,7 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
                                                                                \
 /* --- init_ex ----------------------------------------------------------- */ \
                                                                                \
-int                                                                           \
+static int                                                                           \
 _FTG_API(p, init_ex)(_FTG_TABLE_T(p) *ft,                                     \
                      void *array,                                             \
                      unsigned max_entries,                                    \
@@ -727,21 +729,9 @@ _FTG_API(p, init_ex)(_FTG_TABLE_T(p) *ft,                                     \
     return 0;                                                                 \
 }                                                                             \
                                                                                \
-/* --- init -------------------------------------------------------------- */ \
-                                                                               \
-int                                                                           \
-_FTG_API(p, init)(_FTG_TABLE_T(p) *ft,                                        \
-                  _FTG_ENTRY_T(p) *pool,                                      \
-                  unsigned max_entries,                                       \
-                  const _FTG_CONFIG_T(p) *cfg)                                \
-{                                                                             \
-    return _FTG_API(p, init_ex)(ft, pool, max_entries,                        \
-                                sizeof(*pool), 0u, cfg);                      \
-}                                                                             \
-                                                                               \
 /* --- destroy ----------------------------------------------------------- */ \
                                                                                \
-void                                                                          \
+static void                                                                          \
 _FTG_API(p, destroy)(_FTG_TABLE_T(p) *ft)                                     \
 {                                                                             \
     if (ft == NULL)                                                           \
@@ -757,7 +747,7 @@ _FTG_API(p, destroy)(_FTG_TABLE_T(p) *ft)                                     \
                                                                                \
 /* --- flush ------------------------------------------------------------- */ \
                                                                                \
-void                                                                          \
+static void                                                                          \
 _FTG_API(p, flush)(_FTG_TABLE_T(p) *ft)                                       \
 {                                                                             \
     if (ft == NULL || ft->buckets == NULL)                                    \
@@ -768,19 +758,19 @@ _FTG_API(p, flush)(_FTG_TABLE_T(p) *ft)                                       \
                                                                                \
 /* --- nb_entries -------------------------------------------------------- */ \
                                                                                \
-unsigned                                                                      \
+static unsigned                                                                      \
 _FTG_API(p, nb_entries)(const _FTG_TABLE_T(p) *ft)                            \
 {                                                                             \
     return ft == NULL ? 0u : ft->ht_head.rhh_nb;                              \
 }                                                                             \
                                                                                \
-unsigned                                                                      \
+static unsigned                                                                      \
 _FTG_API(p, nb_bk)(const _FTG_TABLE_T(p) *ft)                                 \
 {                                                                             \
     return ft == NULL ? 0u : ft->nb_bk;                                       \
 }                                                                             \
                                                                                \
-void                                                                          \
+static void                                                                          \
 _FTG_API(p, stats)(const _FTG_TABLE_T(p) *ft,                                 \
                    _FTG_STATS_T(p) *out)                                      \
 {                                                                             \
@@ -793,7 +783,7 @@ _FTG_API(p, stats)(const _FTG_TABLE_T(p) *ft,                                 \
     *out = ft->stats;                                                         \
 }                                                                             \
                                                                                \
-void                                                                          \
+static void                                                                          \
 _FTG_API(p, status)(const _FTG_TABLE_T(p) *ft,                                \
                     struct fcore_status *out)                                 \
 {                                                                             \
@@ -808,7 +798,7 @@ _FTG_API(p, status)(const _FTG_TABLE_T(p) *ft,                                \
                                                                                \
 /* --- find (single) ----------------------------------------------------- */ \
                                                                                \
-u32                                                                      \
+static u32                                                                      \
 _FTG_API(p, find)(_FTG_TABLE_T(p) *ft,                                        \
                   const _FTG_KEY_T(p) *key,                                   \
                   u64 now)                                               \
@@ -820,7 +810,7 @@ _FTG_API(p, find)(_FTG_TABLE_T(p) *ft,                                        \
                                                                                \
 /* --- find_bulk --------------------------------------------------------- */ \
                                                                                \
-void                                                                          \
+static void                                                                          \
 _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
                        const _FTG_KEY_T(p) *keys,                             \
                        unsigned nb_keys,                                      \
@@ -839,7 +829,7 @@ _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
                                                                                \
 /* --- add_idx (single, by index) ---------------------------------------- */ \
                                                                                \
-u32                                                                      \
+static u32                                                                      \
 _FTG_API(p, add_idx)(_FTG_TABLE_T(p) *ft,                                     \
                      u32 entry_idx,                                      \
                      u64 now)                                            \
@@ -852,7 +842,7 @@ _FTG_API(p, add_idx)(_FTG_TABLE_T(p) *ft,                                     \
                                                                                \
 /* --- add_idx_bulk ------------------------------------------------------ */ \
                                                                                \
-unsigned                                                                      \
+static unsigned                                                                      \
 _FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
                            u32 *entry_idxv,                              \
                            unsigned nb_keys,                                  \
@@ -869,20 +859,24 @@ _FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
                               hash_fn, cmp_fn);                               \
 }                                                                             \
                                                                                \
-/* --- del_key (single, by key) ------------------------------------------ */ \
+/* --- del_key_bulk ------------------------------------------------------ */ \
                                                                                \
-u32                                                                      \
-_FTG_API(p, del_key)(_FTG_TABLE_T(p) *ft,                                     \
-                     const _FTG_KEY_T(p) *key)                                \
+static unsigned                                                               \
+_FTG_API(p, del_key_bulk)(_FTG_TABLE_T(p) *ft,                                \
+                          const _FTG_KEY_T(p) *keys,                          \
+                          unsigned nb_keys,                                   \
+                          u32 *unused_idxv)                                   \
 {                                                                             \
-    if (ft == NULL || key == NULL || ft->buckets == NULL)                     \
+    if (ft == NULL || keys == NULL || ft->buckets == NULL ||                  \
+        unused_idxv == NULL)                                                  \
         return 0u;                                                            \
-    _FTG_DEL_BODY(p, ft, key, hash_fn, cmp_fn)                                \
+    _FTG_DEL_KEY_BULK_BODY(p, ft, keys, nb_keys, unused_idxv,                \
+                            hash_fn, cmp_fn);                                 \
 }                                                                             \
                                                                                \
 /* --- del_entry_idx (single, by index) ---------------------------------- */ \
                                                                                \
-u32                                                                      \
+static u32                                                                      \
 _FTG_API(p, del_entry_idx)(_FTG_TABLE_T(p) *ft,                               \
                            u32 entry_idx)                                \
 {                                                                             \
@@ -894,7 +888,7 @@ _FTG_API(p, del_entry_idx)(_FTG_TABLE_T(p) *ft,                               \
                                                                                \
 /* --- del_entry_idx_bulk ------------------------------------------------ */ \
                                                                                \
-void                                                                          \
+static void                                                                   \
 _FTG_API(p, del_entry_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
                                 const u32 *entry_idxv,                   \
                                 unsigned nb_keys)                             \
@@ -906,7 +900,7 @@ _FTG_API(p, del_entry_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
                                                                                \
 /* --- walk -------------------------------------------------------------- */ \
                                                                                \
-int                                                                           \
+static int                                                                           \
 _FTG_API(p, walk)(_FTG_TABLE_T(p) *ft,                                        \
                   int (*cb)(u32 entry_idx, void *arg),                   \
                   void *arg)                                                  \
@@ -919,7 +913,7 @@ _FTG_API(p, walk)(_FTG_TABLE_T(p) *ft,                                        \
                                                                                \
 /* --- grow_2x ----------------------------------------------------------- */ \
                                                                                \
-int                                                                           \
+static int                                                                           \
 _FTG_API(p, grow_2x)(_FTG_TABLE_T(p) *ft)                                     \
 {                                                                             \
     struct rix_hash_bucket_s *new_buckets;                                    \
@@ -1036,7 +1030,7 @@ _FTG_API(p, grow_2x)(_FTG_TABLE_T(p) *ft)                                     \
                                                                                \
 /* --- reserve ----------------------------------------------------------- */ \
                                                                                \
-int                                                                           \
+static int                                                                           \
 _FTG_API(p, reserve)(_FTG_TABLE_T(p) *ft,                                     \
                      unsigned min_entries)                                    \
 {                                                                             \
@@ -1067,20 +1061,25 @@ _FTG_API(p, reserve)(_FTG_TABLE_T(p) *ft,                                     \
 
 #define FT_OPS_TABLE(prefix, suffix)                                          \
 const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
+    /* cold-path */                                                            \
+    .init_ex         = _FT_OPS_FNAME(prefix, init_ex),                        \
+    .destroy         = _FT_OPS_FNAME(prefix, destroy),                        \
+    .flush           = _FT_OPS_FNAME(prefix, flush),                          \
+    .nb_entries      = _FT_OPS_FNAME(prefix, nb_entries),                     \
+    .nb_bk           = _FT_OPS_FNAME(prefix, nb_bk),                         \
+    .stats           = _FT_OPS_FNAME(prefix, stats),                          \
+    .status          = _FT_OPS_FNAME(prefix, status),                         \
+    .walk            = _FT_OPS_FNAME(prefix, walk),                           \
+    .grow_2x         = _FT_OPS_FNAME(prefix, grow_2x),                       \
+    .reserve         = _FT_OPS_FNAME(prefix, reserve),                        \
+    /* hot-path */                                                             \
     .find            = _FT_OPS_FNAME(prefix, find),                           \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
     .add_idx         = _FT_OPS_FNAME(prefix, add_idx),                        \
     .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \
-    .del_key         = _FT_OPS_FNAME(prefix, del_key),                        \
-    .del_entry_idx   = _FT_OPS_FNAME(prefix, del_entry_idx),                  \
-    .del_entry_idx_bulk = _FT_OPS_FNAME(prefix, del_entry_idx_bulk),          \
+    .del_key_bulk    = _FT_OPS_FNAME(prefix, del_key_bulk),                    \
+    .del_idx         = _FT_OPS_FNAME(prefix, del_entry_idx),                   \
+    .del_idx_bulk    = _FT_OPS_FNAME(prefix, del_entry_idx_bulk),             \
 }
-
-/*===========================================================================
- * Init-ex body macro (for dispatch layer)
- *===========================================================================*/
-#define _FTG_INIT_EX_BODY(p, ft, array, max_entries, stride, entry_offset, cfg) \
-    _FTG_API(p, init_ex)((ft), (array), (max_entries),                        \
-                          (stride), (entry_offset), (cfg))
 
 #endif /* _FT_TABLE_GENERATE_H_ */

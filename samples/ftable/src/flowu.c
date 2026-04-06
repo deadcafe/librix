@@ -160,55 +160,6 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flowu_ht, flowu_entry, key,
 
 #include "ft_table_generate.h"
 
-#ifdef FT_ARCH_SUFFIX
-int _FTG_API(flowu, init_ex)(struct ft_flowu_table *ft,
-                             void *array, unsigned max_entries,
-                             size_t stride, size_t entry_offset,
-                             const struct ft_table_config *cfg);
-int _FTG_API(flowu, init)(struct ft_flowu_table *ft,
-                          struct flowu_entry *pool,
-                          unsigned max_entries,
-                          const struct ft_table_config *cfg);
-void _FTG_API(flowu, destroy)(struct ft_flowu_table *ft);
-void _FTG_API(flowu, flush)(struct ft_flowu_table *ft);
-unsigned _FTG_API(flowu, nb_entries)(const struct ft_flowu_table *ft);
-unsigned _FTG_API(flowu, nb_bk)(const struct ft_flowu_table *ft);
-void _FTG_API(flowu, stats)(const struct ft_flowu_table *ft,
-                            struct ft_table_stats *out);
-void _FTG_API(flowu, status)(const struct ft_flowu_table *ft,
-                             struct fcore_status *out);
-u32 _FTG_API(flowu, find)(struct ft_flowu_table *ft,
-                               const struct flowu_key *key,
-                               u64 now);
-void _FTG_API(flowu, find_bulk)(struct ft_flowu_table *ft,
-                                const struct flowu_key *keys,
-                                unsigned nb_keys,
-                                u64 now,
-                                struct ft_table_result *results);
-u32 _FTG_API(flowu, add_idx)(struct ft_flowu_table *ft,
-                                  u32 entry_idx,
-                                  u64 now);
-unsigned _FTG_API(flowu, add_idx_bulk)(struct ft_flowu_table *ft,
-                                       u32 *entry_idxv,
-                                       unsigned nb_keys,
-                                       enum ft_add_policy policy,
-                                       u64 now,
-                                       u32 *unused_idxv);
-u32 _FTG_API(flowu, del_key)(struct ft_flowu_table *ft,
-                                  const struct flowu_key *key);
-u32 _FTG_API(flowu, del_entry_idx)(struct ft_flowu_table *ft,
-                                        u32 entry_idx);
-void _FTG_API(flowu, del_entry_idx_bulk)(struct ft_flowu_table *ft,
-                                         const u32 *entry_idxv,
-                                         unsigned nb_keys);
-int _FTG_API(flowu, walk)(struct ft_flowu_table *ft,
-                          int (*cb)(u32 entry_idx, void *arg),
-                          void *arg);
-int _FTG_API(flowu, grow_2x)(struct ft_flowu_table *ft);
-int _FTG_API(flowu, reserve)(struct ft_flowu_table *ft,
-                             unsigned min_entries);
-#endif
-
 FT_TABLE_GENERATE(flowu,
                   FT_FLOWU_DEFAULT_MIN_NB_BK,
                   FT_FLOWU_DEFAULT_MAX_NB_BK,

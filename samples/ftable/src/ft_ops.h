@@ -15,29 +15,48 @@
  *===========================================================================*/
 #define FT_OPS_DEFINE(prefix)                                                  \
 struct ft_##prefix##_ops {                                                     \
-    u32 (*find)(struct ft_##prefix##_table *ft,                           \
-                     const struct prefix##_key *key,                           \
-                     u64 now);                                            \
+    /* cold-path */                                                            \
+    int (*init_ex)(struct ft_##prefix##_table *ft, void *array,                \
+                   unsigned max_entries, size_t stride, size_t entry_offset,    \
+                   const struct ft_table_config *cfg);                         \
+    void (*destroy)(struct ft_##prefix##_table *ft);                           \
+    void (*flush)(struct ft_##prefix##_table *ft);                             \
+    unsigned (*nb_entries)(const struct ft_##prefix##_table *ft);               \
+    unsigned (*nb_bk)(const struct ft_##prefix##_table *ft);                    \
+    void (*stats)(const struct ft_##prefix##_table *ft,                        \
+                  struct ft_table_stats *out);                                  \
+    void (*status)(const struct ft_##prefix##_table *ft,                       \
+                   struct fcore_status *out);                                   \
+    int (*walk)(struct ft_##prefix##_table *ft,                                \
+                int (*cb)(u32 entry_idx, void *arg), void *arg);               \
+    int (*grow_2x)(struct ft_##prefix##_table *ft);                            \
+    int (*reserve)(struct ft_##prefix##_table *ft, unsigned min_entries);       \
+    /* hot-path */                                                             \
+    u32 (*find)(struct ft_##prefix##_table *ft,                                \
+                const struct prefix##_key *key,                                \
+                u64 now);                                                      \
     void (*find_bulk)(struct ft_##prefix##_table *ft,                          \
                       const struct prefix##_key *keys,                         \
                       unsigned nb_keys,                                        \
-                      u64 now,                                            \
-                      struct ft_table_result *results);                   \
-    u32 (*add_idx)(struct ft_##prefix##_table *ft,                        \
-                        u32 entry_idx,                                    \
-                        u64 now);                                         \
+                      u64 now,                                                 \
+                      struct ft_table_result *results);                        \
+    u32 (*add_idx)(struct ft_##prefix##_table *ft,                             \
+                   u32 entry_idx,                                              \
+                   u64 now);                                                   \
     unsigned (*add_idx_bulk)(struct ft_##prefix##_table *ft,                   \
-                             u32 *entry_idxv,                             \
+                             u32 *entry_idxv,                                  \
                              unsigned nb_keys,                                 \
                              enum ft_add_policy policy,                        \
-                             u64 now,                                     \
-                             u32 *unused_idxv);                           \
-    u32 (*del_key)(struct ft_##prefix##_table *ft,                        \
-                        const struct prefix##_key *key);                       \
-    u32 (*del_entry_idx)(struct ft_##prefix##_table *ft,                  \
-                              u32 entry_idx);                             \
-    void (*del_entry_idx_bulk)(struct ft_##prefix##_table *ft,                 \
-                               const u32 *entry_idxv,                     \
+                             u64 now,                                          \
+                             u32 *unused_idxv);                                \
+    unsigned (*del_key_bulk)(struct ft_##prefix##_table *ft,                    \
+                            const struct prefix##_key *keys,                   \
+                            unsigned nb_keys,                                  \
+                            u32 *unused_idxv);                                 \
+    u32 (*del_idx)(struct ft_##prefix##_table *ft,                       \
+                         u32 entry_idx);                                       \
+    void (*del_idx_bulk)(struct ft_##prefix##_table *ft,                 \
+                               const u32 *entry_idxv,                          \
                                unsigned nb_keys);                              \
 }
 

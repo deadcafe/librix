@@ -93,6 +93,7 @@ struct test_user_recordu {
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
+
 union test_any_table {
     struct ft_flow4_table flow4;
     struct ft_flow6_table flow6;
@@ -192,7 +193,7 @@ struct test_variant_ops {
     void (*status)(const void *ft, struct fcore_status *out);
     u32 (*find)(void *ft, const void *key, u64 now);
     u32 (*add_idx)(void *ft, u32 entry_idx, u64 now);
-    u32 (*del_key)(void *ft, const void *key);
+    u32 (*del_key)(void *ft, const void *key); /* single-key convenience: calls del_key_bulk */
     u32 (*del_entry_idx)(void *ft, u32 entry_idx);
     void (*find_bulk)(void *ft, const void *keys, unsigned nb_keys,
                       u64 now,
@@ -284,8 +285,10 @@ testv_add_idx_##tag(void *ft, u32 entry_idx, u64 now)              \
 static u32                                                             \
 testv_del_key_##tag(void *ft, const void *key)                              \
 {                                                                          \
-    return del_key_fn((struct ft_##prefix##_table *)ft,                     \
-                      (const key_t *)key);                                  \
+    u32 idx;                                                               \
+    unsigned n = del_key_fn((struct ft_##prefix##_table *)ft,              \
+                            (const key_t *)key, 1u, &idx);                  \
+    return n > 0u ? idx : 0u;                                              \
 }                                                                          \
 static u32                                                             \
 testv_del_entry_idx_##tag(void *ft, u32 entry_idx)                     \
@@ -407,7 +410,7 @@ TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
                       ft_flow4_table_nb_entries, ft_flow4_table_nb_bk,
                       ft_flow4_table_stats, ft_flow4_table_status,
                       ft_flow4_table_find, ft_flow4_table_add_idx,
-                      ft_flow4_table_del_key, ft_flow4_table_del_entry_idx,
+                      ft_flow4_table_del_key_bulk, ft_flow4_table_del_entry_idx,
                       ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
                       ft_flow4_table_del_entry_idx_bulk, ft_flow4_table_walk,
                       ft_flow4_table_grow_2x, ft_flow4_table_reserve,
@@ -421,7 +424,7 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       ft_flow6_table_nb_entries, ft_flow6_table_nb_bk,
                       ft_flow6_table_stats, ft_flow6_table_status,
                       ft_flow6_table_find, ft_flow6_table_add_idx,
-                      ft_flow6_table_del_key, ft_flow6_table_del_entry_idx,
+                      ft_flow6_table_del_key_bulk, ft_flow6_table_del_entry_idx,
                       ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
                       ft_flow6_table_del_entry_idx_bulk, ft_flow6_table_walk,
                       ft_flow6_table_grow_2x, ft_flow6_table_reserve,
@@ -435,7 +438,7 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       ft_flowu_table_nb_entries, ft_flowu_table_nb_bk,
                       ft_flowu_table_stats, ft_flowu_table_status,
                       ft_flowu_table_find, ft_flowu_table_add_idx,
-                      ft_flowu_table_del_key, ft_flowu_table_del_entry_idx,
+                      ft_flowu_table_del_key_bulk, ft_flowu_table_del_entry_idx,
                       ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
                       ft_flowu_table_del_entry_idx_bulk, ft_flowu_table_walk,
                       ft_flowu_table_grow_2x, ft_flowu_table_reserve,
@@ -540,7 +543,7 @@ test_basic_add_find_del(void)
         FAIL("duplicate add should return existing idx");
     if (ft_flow4_table_nb_entries(&ft) != 2u)
         FAIL("duplicate add should not increase count");
-    if (ft_flow4_table_del_key(&ft, &k1) != idx1)
+    if (ft_flow4_table_del_key_oneshot(&ft, &k1) != idx1)
         FAIL("del should return idx1");
     if (FT4_FIND(&ft, &k1) != 0u)
         FAIL("deleted key should miss");
@@ -692,7 +695,7 @@ test_bulk_ops_and_stats(void)
     }
 
     for (unsigned i = 0; i < 4u; i++) {
-        if (ft_flow4_table_del_key(&ft, &keys[i]) == 0u)
+        if (ft_flow4_table_del_key_oneshot(&ft, &keys[i]) == 0u)
             FAILF("del_key failed at %u", i);
     }
 
@@ -840,7 +843,7 @@ test_duplicate_and_delete_miss_stats(void)
         FAIL("initial add failed");
     if (test_add_idx_key(&ft, 1u, &key) != idx)
         FAIL("duplicate add should return existing idx");
-    if (ft_flow4_table_del_key(&ft, &miss) != 0u)
+    if (ft_flow4_table_del_key_oneshot(&ft, &miss) != 0u)
         FAIL("delete miss should return 0");
 
     ft_flow4_table_stats(&ft, &stats);
@@ -1016,7 +1019,7 @@ test_high_fill(void)
     for (unsigned i = 0; i < inserted; i += 2u) {
         struct flow4_key key = test_key(i + 10000u);
 
-        if (ft_flow4_table_del_key(&ft, &key) != i + 1u)
+        if (ft_flow4_table_del_key_oneshot(&ft, &key) != i + 1u)
             FAILF("del at high fill failed i=%u", i);
     }
     for (unsigned i = 1u; i < inserted; i += 2u) {
@@ -1580,7 +1583,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
         }
         case 2: /* delete */
             if (in_table[idx0]) {
-                u32 ret = ft_flow4_table_del_key(&ft, &key);
+                u32 ret = ft_flow4_table_del_key_oneshot(&ft, &key);
 
                 if (ret != entry_idx)
                     FAILF("fuzz del mismatch: op=%u idx0=%u ret=%u",

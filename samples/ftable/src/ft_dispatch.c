@@ -9,43 +9,6 @@
 
 #include "ft_ops.h"
 
-#define FT_ENTRY_T_flow4 struct flow4_entry
-#define FT_ENTRY_T_flow6 struct flow6_entry
-#define FT_ENTRY_T_flowu struct flowu_entry
-#define FT_ENTRY_T(prefix) FT_ENTRY_T_##prefix
-
-/*===========================================================================
- * Extern declarations for _gen init/destroy/flush/query/walk/grow
- *===========================================================================*/
-#define FT_DISPATCH_DECLARE_GEN(prefix)                                        \
-extern int ft_##prefix##_table_init_ex_gen(                                    \
-    struct ft_##prefix##_table *ft, void *array, unsigned max_entries,          \
-    size_t stride, size_t entry_offset,                                        \
-    const struct ft_table_config *cfg);                                   \
-extern int ft_##prefix##_table_init_gen(                                       \
-    struct ft_##prefix##_table *ft, FT_ENTRY_T(prefix) *pool,                  \
-    unsigned max_entries, const struct ft_table_config *cfg);             \
-extern void ft_##prefix##_table_destroy_gen(struct ft_##prefix##_table *ft);   \
-extern void ft_##prefix##_table_flush_gen(struct ft_##prefix##_table *ft);     \
-extern unsigned ft_##prefix##_table_nb_entries_gen(                            \
-    const struct ft_##prefix##_table *ft);                                     \
-extern unsigned ft_##prefix##_table_nb_bk_gen(                                 \
-    const struct ft_##prefix##_table *ft);                                     \
-extern void ft_##prefix##_table_stats_gen(                                     \
-    const struct ft_##prefix##_table *ft, struct ft_table_stats *out);    \
-extern void ft_##prefix##_table_status_gen(                                    \
-    const struct ft_##prefix##_table *ft, struct fcore_status *out);      \
-extern int ft_##prefix##_table_walk_gen(                                       \
-    struct ft_##prefix##_table *ft,                                            \
-    int (*cb)(u32 entry_idx, void *arg), void *arg);                     \
-extern int ft_##prefix##_table_grow_2x_gen(struct ft_##prefix##_table *ft);    \
-extern int ft_##prefix##_table_reserve_gen(                                    \
-    struct ft_##prefix##_table *ft, unsigned min_entries)
-
-FT_DISPATCH_DECLARE_GEN(flow4);
-FT_DISPATCH_DECLARE_GEN(flow6);
-FT_DISPATCH_DECLARE_GEN(flowu);
-
 /*===========================================================================
  * Active ops pointers (default to _gen)
  *===========================================================================*/
@@ -82,17 +45,18 @@ ft_arch_init(unsigned arch_enable)
 }
 
 /*===========================================================================
- * Dispatch: per-variant cold-path forwarding (always via _gen)
+ * Dispatch: cold-path forwarding (always via _gen ops)
  *===========================================================================*/
 #define FT_DISPATCH_COLD(prefix)                                               \
                                                                                \
 int                                                                            \
 ft_##prefix##_table_init(struct ft_##prefix##_table *ft,                       \
-                         FT_ENTRY_T(prefix) *pool,                             \
+                         struct prefix##_entry *pool,                          \
                          unsigned max_entries,                                  \
-                         const struct ft_table_config *cfg)               \
+                         const struct ft_table_config *cfg)                    \
 {                                                                              \
-    return ft_##prefix##_table_init_gen(ft, pool, max_entries, cfg);            \
+    return ft_##prefix##_ops_gen.init_ex(ft, pool, max_entries,                \
+                                         sizeof(*pool), 0u, cfg);              \
 }                                                                              \
                                                                                \
 int                                                                            \
@@ -101,73 +65,73 @@ ft_##prefix##_table_init_ex(struct ft_##prefix##_table *ft,                    \
                             unsigned max_entries,                               \
                             size_t stride,                                      \
                             size_t entry_offset,                                \
-                            const struct ft_table_config *cfg)            \
+                            const struct ft_table_config *cfg)                 \
 {                                                                              \
-    RIX_ASSERT(stride >= sizeof(FT_ENTRY_T(prefix)));                          \
-    RIX_ASSERT(entry_offset + sizeof(FT_ENTRY_T(prefix)) <= stride);           \
+    RIX_ASSERT(stride >= sizeof(struct prefix##_entry));                        \
+    RIX_ASSERT(entry_offset + sizeof(struct prefix##_entry) <= stride);         \
     RIX_ASSERT(FT_PTR_IS_ALIGNED(FT_BYTE_PTR_ADD(array, entry_offset),        \
-                                 _Alignof(FT_ENTRY_T(prefix))));               \
-    return ft_##prefix##_table_init_ex_gen(ft, array, max_entries,             \
-                                           stride, entry_offset, cfg);         \
+                                 _Alignof(struct prefix##_entry)));             \
+    return ft_##prefix##_ops_gen.init_ex(ft, array, max_entries,               \
+                                          stride, entry_offset, cfg);           \
 }                                                                              \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_destroy(struct ft_##prefix##_table *ft)                    \
 {                                                                              \
-    ft_##prefix##_table_destroy_gen(ft);                                        \
+    ft_##prefix##_ops_gen.destroy(ft);                                          \
 }                                                                              \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_flush(struct ft_##prefix##_table *ft)                      \
 {                                                                              \
-    ft_##prefix##_table_flush_gen(ft);                                          \
+    ft_##prefix##_ops_gen.flush(ft);                                            \
 }                                                                              \
                                                                                \
 unsigned                                                                       \
 ft_##prefix##_table_nb_entries(const struct ft_##prefix##_table *ft)            \
 {                                                                              \
-    return ft_##prefix##_table_nb_entries_gen(ft);                              \
+    return ft_##prefix##_ops_gen.nb_entries(ft);                                \
 }                                                                              \
                                                                                \
 unsigned                                                                       \
 ft_##prefix##_table_nb_bk(const struct ft_##prefix##_table *ft)                \
 {                                                                              \
-    return ft_##prefix##_table_nb_bk_gen(ft);                                  \
+    return ft_##prefix##_ops_gen.nb_bk(ft);                                    \
 }                                                                              \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_stats(const struct ft_##prefix##_table *ft,                \
-                          struct ft_table_stats *out)                     \
+                          struct ft_table_stats *out)                           \
 {                                                                              \
-    ft_##prefix##_table_stats_gen(ft, out);                                     \
+    ft_##prefix##_ops_gen.stats(ft, out);                                      \
 }                                                                              \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_status(const struct ft_##prefix##_table *ft,               \
                            struct fcore_status *out)                           \
 {                                                                              \
-    ft_##prefix##_table_status_gen(ft, out);                                   \
+    ft_##prefix##_ops_gen.status(ft, out);                                     \
 }                                                                              \
                                                                                \
 int                                                                            \
 ft_##prefix##_table_walk(struct ft_##prefix##_table *ft,                       \
-                         int (*cb)(u32 entry_idx, void *arg),             \
+                         int (*cb)(u32 entry_idx, void *arg),                  \
                          void *arg)                                            \
 {                                                                              \
-    return ft_##prefix##_table_walk_gen(ft, cb, arg);                           \
+    return ft_##prefix##_ops_gen.walk(ft, cb, arg);                            \
 }                                                                              \
                                                                                \
 int                                                                            \
 ft_##prefix##_table_grow_2x(struct ft_##prefix##_table *ft)                    \
 {                                                                              \
-    return ft_##prefix##_table_grow_2x_gen(ft);                                \
+    return ft_##prefix##_ops_gen.grow_2x(ft);                                  \
 }                                                                              \
                                                                                \
 int                                                                            \
 ft_##prefix##_table_reserve(struct ft_##prefix##_table *ft,                    \
                             unsigned min_entries)                               \
 {                                                                              \
-    return ft_##prefix##_table_reserve_gen(ft, min_entries);                    \
+    return ft_##prefix##_ops_gen.reserve(ft, min_entries);                      \
 }
 
 FT_DISPATCH_COLD(flow4)
@@ -175,14 +139,14 @@ FT_DISPATCH_COLD(flow6)
 FT_DISPATCH_COLD(flowu)
 
 /*===========================================================================
- * Dispatch: per-variant hot-path forwarding (via active ops pointer)
+ * Dispatch: hot-path forwarding (via active ops pointer)
  *===========================================================================*/
 #define FT_DISPATCH_HOT(prefix, active_ptr)                                    \
                                                                                \
-u32                                                                       \
+u32                                                                            \
 ft_##prefix##_table_find(struct ft_##prefix##_table *ft,                       \
                          const struct prefix##_key *key,                       \
-                         u64 now)                                         \
+                         u64 now)                                              \
 {                                                                              \
     return active_ptr->find(ft, key, now);                                     \
 }                                                                              \
@@ -191,52 +155,54 @@ void                                                                           \
 ft_##prefix##_table_find_bulk(struct ft_##prefix##_table *ft,                  \
                               const struct prefix##_key *keys,                 \
                               unsigned nb_keys,                                \
-                              u64 now,                                    \
-                              struct ft_table_result *results)            \
+                              u64 now,                                         \
+                              struct ft_table_result *results)                 \
 {                                                                              \
     active_ptr->find_bulk(ft, keys, nb_keys, now, results);                    \
 }                                                                              \
                                                                                \
-u32                                                                       \
+u32                                                                            \
 ft_##prefix##_table_add_idx(struct ft_##prefix##_table *ft,                    \
-                            u32 entry_idx,                                \
-                            u64 now)                                      \
+                            u32 entry_idx,                                     \
+                            u64 now)                                           \
 {                                                                              \
     return active_ptr->add_idx(ft, entry_idx, now);                            \
 }                                                                              \
                                                                                \
 unsigned                                                                       \
 ft_##prefix##_table_add_idx_bulk(struct ft_##prefix##_table *ft,               \
-                                 u32 *entry_idxv,                         \
+                                 u32 *entry_idxv,                              \
                                  unsigned nb_keys,                             \
                                  enum ft_add_policy policy,                    \
-                                 u64 now,                                 \
-                                 u32 *unused_idxv)                        \
+                                 u64 now,                                      \
+                                 u32 *unused_idxv)                             \
 {                                                                              \
     return active_ptr->add_idx_bulk(ft, entry_idxv, nb_keys, policy,          \
                                     now, unused_idxv);                        \
 }                                                                              \
                                                                                \
-u32                                                                       \
-ft_##prefix##_table_del_key(struct ft_##prefix##_table *ft,                    \
-                            const struct prefix##_key *key)                    \
+unsigned                                                                       \
+ft_##prefix##_table_del_key_bulk(struct ft_##prefix##_table *ft,               \
+                                 const struct prefix##_key *keys,              \
+                                 unsigned nb_keys,                             \
+                                 u32 *unused_idxv)                             \
 {                                                                              \
-    return active_ptr->del_key(ft, key);                                       \
+    return active_ptr->del_key_bulk(ft, keys, nb_keys, unused_idxv);           \
 }                                                                              \
                                                                                \
-u32                                                                       \
+u32                                                                            \
 ft_##prefix##_table_del_entry_idx(struct ft_##prefix##_table *ft,              \
-                                  u32 entry_idx)                          \
+                                  u32 entry_idx)                               \
 {                                                                              \
-    return active_ptr->del_entry_idx(ft, entry_idx);                           \
+    return active_ptr->del_idx(ft, entry_idx);                                 \
 }                                                                              \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_del_entry_idx_bulk(struct ft_##prefix##_table *ft,         \
-                                       const u32 *entry_idxv,             \
+                                       const u32 *entry_idxv,                  \
                                        unsigned nb_keys)                       \
 {                                                                              \
-    active_ptr->del_entry_idx_bulk(ft, entry_idxv, nb_keys);                   \
+    active_ptr->del_idx_bulk(ft, entry_idxv, nb_keys);                         \
 }
 
 FT_DISPATCH_HOT(flow4, ft_flow4_active)
