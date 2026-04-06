@@ -47,9 +47,10 @@ struct ft_##prefix##_ops {                                                     \
                             const struct prefix##_key *keys,                   \
                             unsigned nb_keys,                                  \
                             u32 *unused_idxv);                                 \
-    void (*del_idx_bulk)(struct ft_##prefix##_table *ft,                       \
+    unsigned (*del_idx_bulk)(struct ft_##prefix##_table *ft,                    \
                          const u32 *entry_idxv,                                \
-                         unsigned nb_keys);                                    \
+                         unsigned nb_keys,                                     \
+                         u32 *unused_idxv);                                    \
 }
 
 FT_OPS_DEFINE(flow4);

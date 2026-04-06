@@ -111,18 +111,6 @@ fcore_status_reset(struct fcore_status *status, u32 entries)
 /*===========================================================================
  * Pipeline tuning defaults
  *===========================================================================*/
-#ifndef FCORE_BULK_CTX_COUNT
-#define FCORE_BULK_CTX_COUNT  128u
-#endif
-
-#ifndef FCORE_BULK_AHEAD_KEYS
-#define FCORE_BULK_AHEAD_KEYS 16u
-#endif
-
-#ifndef FCORE_BULK_STEP_KEYS
-#define FCORE_BULK_STEP_KEYS  4u
-#endif
-
 /*===========================================================================
  * Token-paste helpers for FCORE_GENERATE
  *===========================================================================*/
@@ -353,7 +341,6 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
             u32 _eidx = entry_idxv[_i];                                  \
             _FCORE_ENTRY_T(p) *entry =                                        \
                 FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                         \
-            RIX_ASSERT(_eidx != 0u);                                          \
             RIX_ASSERT(_eidx <= owner->max_entries);                          \
             RIX_ASSUME_NONNULL(entry);                                        \
             rix_hash_prefetch_key(&entry->key);                               \
@@ -370,7 +357,6 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 struct rix_hash_find_ctx_s *_ctxp =                           \
                     &ctx[_idx & ctx_mask];                                    \
                 unsigned _bk0, _bk1;                                          \
-                RIX_ASSERT(_eidx != 0u);                                      \
                 RIX_ASSERT(_eidx <= owner->max_entries);                      \
                 entry = FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                 \
                 RIX_ASSUME_NONNULL(entry);                                    \
@@ -404,7 +390,6 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 _FCORE_ENTRY_T(p) *entry =                                    \
                     (_FCORE_ENTRY_T(p) *)(uintptr_t)_ctxp->key;               \
                 u32 _ret_idx = (u32)RIX_NIL;                        \
-                RIX_ASSERT(_eidx != 0u);                                      \
                 RIX_ASSERT(_eidx <= owner->max_entries);                      \
                 RIX_ASSUME_NONNULL(entry);                                    \
                 if (RIX_UNLIKELY(entry->meta.cur_hash != 0u)) {               \
@@ -563,58 +548,78 @@ _fcore_add_idx_next_: ;                                                      \
     return free_count;                                                        \
 }                                                                             \
                                                                               \
-/*=== del_idx_bulk (2-stage pipeline) ======================================*/\
+/*=== del_idx_bulk (3-stage: entry-prefetch → bucket-prefetch → remove) ====*/\
                                                                               \
-static RIX_UNUSED void                                                        \
+static RIX_UNUSED unsigned                                                    \
 _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                              const u32 *idxs,                            \
-                             unsigned nb_idxs)                                 \
+                             unsigned nb_idxs,                                \
+                             u32 *unused_idxv)                           \
 {                                                                             \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
     _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
-    const unsigned ahead = FCORE_BULK_AHEAD_KEYS;                             \
-    const unsigned step  = FCORE_BULK_STEP_KEYS;                              \
-    const unsigned total = nb_idxs + ahead;                                   \
+    unsigned _count = 0u;                                                     \
+    const unsigned ahead = 8u;                                                \
+    const unsigned step  = 8u;                                                \
+    const unsigned total = nb_idxs + 2u * ahead;                              \
                                                                               \
     for (unsigned _i = 0; _i < total; _i += step) {                           \
+        /* Stage 1: prefetch entry node */                                    \
         if (_i < nb_idxs) {                                                   \
             unsigned _n = (_i + step <= nb_idxs) ? step : (nb_idxs - _i);    \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
                 u32 _eidx = idxs[_i + _j];                              \
-                RIX_ASSERT(_eidx != 0u);                                      \
-                RIX_ASSERT(_eidx <= owner->max_entries);                      \
+                if (_eidx == 0u || _eidx > owner->max_entries)               \
+                    continue;                                                 \
                 rix_hash_prefetch_entry_of(                                   \
                     FCORE_LAYOUT_ENTRY_PTR(owner, _eidx));                    \
             }                                                                 \
         }                                                                     \
+        /* Stage 2: read entry hash → prefetch target bucket */               \
         if (_i >= ahead && _i - ahead < nb_idxs) {                            \
             unsigned _base = _i - ahead;                                      \
             unsigned _n = (_base + step <= nb_idxs) ? step                    \
                                                     : (nb_idxs - _base);      \
             for (unsigned _j = 0; _j < _n; _j++) {                           \
                 u32 _eidx = idxs[_base + _j];                           \
-                _FCORE_ENTRY_T(p) *entry;                                     \
-                RIX_ASSERT(_eidx != 0u);                                      \
-                RIX_ASSERT(_eidx <= owner->max_entries);                      \
-                entry = FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                \
-                RIX_ASSUME_NONNULL(entry);                                    \
-                if (entry->meta.cur_hash == 0u)                               \
+                if (_eidx == 0u || _eidx > owner->max_entries)               \
                     continue;                                                 \
+                _FCORE_ENTRY_T(p) *_e =                                       \
+                    FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                    \
+                RIX_ASSUME_NONNULL(_e);                                       \
+                unsigned _bk =                                                \
+                    (unsigned)(_e->meta.cur_hash & head->rhh_mask);          \
+                rix_hash_prefetch_bucket_of(buckets + _bk);                  \
+            }                                                                 \
+        }                                                                     \
+        /* Stage 3: remove from bucket */                                     \
+        if (_i >= 2u * ahead && _i - 2u * ahead < nb_idxs) {                  \
+            unsigned _base = _i - 2u * ahead;                                 \
+            unsigned _n = (_base + step <= nb_idxs) ? step                    \
+                                                    : (nb_idxs - _base);      \
+            for (unsigned _j = 0; _j < _n; _j++) {                           \
+                u32 _eidx = idxs[_base + _j];                           \
+                if (_eidx == 0u || _eidx > owner->max_entries)               \
+                    continue;                                                 \
+                _FCORE_ENTRY_T(p) *entry =                                    \
+                    FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                    \
+                RIX_ASSUME_NONNULL(entry);                                    \
                 if (_FCORE_HT(ht, remove)(                                     \
                         head, buckets, hash_base, entry) != NULL) {           \
                     entry->meta.cur_hash = 0u;                                \
-                    FCORE_CLEAR_TIMESTAMP(entry);                             \
                     FCORE_STATS(owner).dels++;                                \
                     RIX_ASSERT(FCORE_STATUS(owner).entries != 0u);            \
                     FCORE_STATUS(owner).entries--;                            \
+                    unused_idxv[_count++] = _eidx;                            \
                 }                                                             \
             }                                                                 \
         }                                                                     \
     }                                                                         \
+    return _count;                                                            \
 }                                                                             \
                                                                               \
-/*=== del_key_bulk (find by key + remove) ==================================*/\
+/*=== del_key_bulk (3-stage prefetch pipeline: hash → scan → cmp+remove) ===*/\
                                                                               \
 static RIX_UNUSED unsigned                                                    \
 _FCORE_INT(p, del_key_bulk_)(_FCORE_OT(ot) *owner,                           \
@@ -622,27 +627,67 @@ _FCORE_INT(p, del_key_bulk_)(_FCORE_OT(ot) *owner,                           \
                              unsigned nb_keys,                                \
                              u32 *unused_idxv)                           \
 {                                                                             \
+    enum { _FCORE_DEL_CTX_COUNT = 32u };                                      \
     _FCORE_HT_T(ht) *head = _FCORE_HT_HEAD(ht, owner);                        \
     struct rix_hash_bucket_s *buckets = owner->buckets;                       \
     _FCORE_ENTRY_T(p) *hash_base = FCORE_LAYOUT_HASH_BASE(owner);             \
+    const u32 hash_mask = FCORE_HASH_MASK(owner, ht);                    \
+    struct rix_hash_find_ctx_s ctx[_FCORE_DEL_CTX_COUNT];                     \
     unsigned _count = 0u;                                                     \
-    for (unsigned _i = 0u; _i < nb_keys; _i++) {                              \
-        _FCORE_ENTRY_T(p) *entry;                                             \
-        entry = _FCORE_HT(ht, find)(head, buckets, hash_base, &keys[_i]);     \
-        if (entry == NULL) {                                                  \
-            FCORE_STATS(owner).del_miss++;                                    \
-            continue;                                                         \
+    u64 del_miss = 0u;                                                   \
+    u64 dels = 0u;                                                       \
+    const unsigned ctx_mask = _FCORE_DEL_CTX_COUNT - 1u;                      \
+    const unsigned ahead = 8u;                                                \
+    const unsigned step  = 8u;                                                \
+    const unsigned total = nb_keys + 2u * ahead;                              \
+    for (unsigned _i = 0; _i < total; _i += step) {                           \
+        /* Stage 1: hash + prefetch buckets */                                \
+        if (_i < nb_keys) {                                                   \
+            unsigned _n = (_i + step <= nb_keys) ? step : (nb_keys - _i);     \
+            for (unsigned _j = 0; _j < _n; _j++)                              \
+                _FCORE_HT(ht, hash_key_2bk_masked)(                           \
+                    &ctx[(_i + _j) & ctx_mask], buckets,                     \
+                    &keys[_i + _j], hash_mask, head->rhh_mask);              \
         }                                                                     \
-        u32 _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);             \
-        if (_FCORE_HT(ht, remove)(head, buckets, hash_base, entry) == NULL)   \
-            continue;                                                         \
-        entry->meta.cur_hash = 0u;                                            \
-        FCORE_CLEAR_TIMESTAMP(entry);                                         \
-        FCORE_STATS(owner).dels++;                                            \
-        RIX_ASSERT(FCORE_STATUS(owner).entries != 0u);                        \
-        FCORE_STATUS(owner).entries--;                                        \
-        unused_idxv[_count++] = _eidx;                                        \
+        /* Stage 2: scan bucket + prefetch entry node */                      \
+        if (_i >= ahead && _i - ahead < nb_keys) {                            \
+            unsigned _base = _i - ahead;                                      \
+            unsigned _n = (_base + step <= nb_keys) ? step                    \
+                                                    : (nb_keys - _base);      \
+            for (unsigned _j = 0; _j < _n; _j++) {                            \
+                struct rix_hash_find_ctx_s *_ctxp =                           \
+                    &ctx[(_base + _j) & ctx_mask];                            \
+                _FCORE_HT(ht, scan_bk)(_ctxp, head, buckets);                \
+                _FCORE_HT(ht, prefetch_node)(_ctxp, hash_base);              \
+            }                                                                 \
+        }                                                                     \
+        /* Stage 3: compare key + remove on hit */                            \
+        if (_i >= 2u * ahead && _i - 2u * ahead < nb_keys) {                  \
+            unsigned _base = _i - 2u * ahead;                                 \
+            unsigned _n = (_base + step <= nb_keys) ? step                    \
+                                                    : (nb_keys - _base);      \
+            for (unsigned _j = 0; _j < _n; _j++) {                            \
+                unsigned _idx = _base + _j;                                   \
+                _FCORE_ENTRY_T(p) *entry = _FCORE_HT(ht, cmp_key)(            \
+                    &ctx[_idx & ctx_mask], hash_base);                        \
+                if (RIX_LIKELY(entry != NULL)) {                              \
+                    u32 _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
+                    if (_FCORE_HT(ht, remove)(                                \
+                            head, buckets, hash_base, entry) != NULL) {      \
+                        entry->meta.cur_hash = 0u;                            \
+                        dels++;                                               \
+                        RIX_ASSERT(FCORE_STATUS(owner).entries != 0u);        \
+                        FCORE_STATUS(owner).entries--;                        \
+                        unused_idxv[_count++] = _eidx;                        \
+                    }                                                         \
+                } else {                                                      \
+                    del_miss++;                                               \
+                }                                                             \
+            }                                                                 \
+        }                                                                     \
     }                                                                         \
+    FCORE_STATS(owner).dels += dels;                                          \
+    FCORE_STATS(owner).del_miss += del_miss;                                  \
     return _count;                                                            \
 }                                                                             \
                                                                               \
@@ -674,6 +719,18 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, flush_)(_FCORE_OT(ot) *owner)                                  \
 {                                                                             \
     unsigned _nb_bk = owner->ht_head.rhh_mask + 1u;                           \
+    for (unsigned _b = 0; _b < _nb_bk; _b++) {                                \
+        struct rix_hash_bucket_s *_bk = &owner->buckets[_b];                  \
+        for (unsigned _s = 0; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) {          \
+            unsigned _nidx = _bk->idx[_s];                                    \
+            if (_nidx == (unsigned)RIX_NIL)                                   \
+                continue;                                                     \
+            _FCORE_ENTRY_T(p) *entry =                                        \
+                FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);                         \
+            RIX_ASSUME_NONNULL(entry);                                        \
+            entry->meta.cur_hash = 0u;                                        \
+        }                                                                     \
+    }                                                                         \
     /* Clear all buckets */                                                   \
     memset(owner->buckets, 0,                                                 \
            (size_t)_nb_bk * sizeof(struct rix_hash_bucket_s));                \

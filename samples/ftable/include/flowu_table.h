@@ -116,9 +116,10 @@ unsigned ft_flowu_table_del_key_bulk(struct ft_flowu_table *ft,
 u32 ft_flowu_table_del_idx(struct ft_flowu_table *ft,
                                       u32 entry_idx);
 
-void ft_flowu_table_del_idx_bulk(struct ft_flowu_table *ft,
+unsigned ft_flowu_table_del_idx_bulk(struct ft_flowu_table *ft,
                                        const u32 *entry_idxv,
-                                       unsigned nb_keys);
+                                       unsigned nb_keys,
+                                       u32 *unused_idxv);
 
 /*===========================================================================
  * Walk / grow

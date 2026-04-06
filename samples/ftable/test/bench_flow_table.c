@@ -99,8 +99,8 @@ struct ftb_variant_ops {
                              enum ft_add_policy policy,
                              u64 now,
                              u32 *unused_idxv);
-    void (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
-                               unsigned nb_keys);
+    unsigned (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
+                               unsigned nb_keys, u32 *unused_idxv);
     unsigned (*del_key_bulk)(void *ft, const void *keys, unsigned nb_keys,
                              u32 *unused_idxv);
     int (*grow_2x)(void *ft);
@@ -591,12 +591,12 @@ ftb_add_idx_bulk_##tag(void *ft, u32 *entry_idxv,                        \
     return add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                  \
                            entry_idxv, nb_keys, policy, now, unused_idxv);    \
 }                                                                             \
-static void                                                                   \
+static unsigned                                                               \
 ftb_del_idx_bulk_##tag(void *ft, const u32 *entry_idxv,            \
-                             unsigned nb_keys)                                \
+                             unsigned nb_keys, u32 *unused_idxv)             \
 {                                                                             \
-    del_idx_bulk_fn((struct ft_##prefix##_table *)ft,                   \
-                          entry_idxv, nb_keys);                               \
+    return del_idx_bulk_fn((struct ft_##prefix##_table *)ft,                   \
+                          entry_idxv, nb_keys, unused_idxv);                  \
 }                                                                             \
 static unsigned                                                               \
 ftb_del_key_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,          \
@@ -944,7 +944,7 @@ ftb_measure_del_idx(const struct ftb_variant_ops *ops, void *ft,
                                 FTB_NOW_ADD, unused_idxv);
         ftb_cold_touch();
         t0 = ftb_rdtsc();
-        ops->del_idx_bulk(ft, idxv, ftb_query_n);
+        ops->del_idx_bulk(ft, idxv, ftb_query_n, unused_idxv);
         t1 = ftb_rdtsc();
         samples[r] = t1 - t0;
     }
@@ -1011,6 +1011,60 @@ ftb_sample_del_key(const struct ftb_variant_ops *ops, void *ft,
     for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
         samples[r] = ftb_measure_del_key(ops, ft, live,
                                          key_base + r * (live + ftb_query_n * 2u + 1024u));
+    }
+    return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
+                                ftb_sample_keep_n);
+}
+
+static double
+ftb_measure_find_del_idx(const struct ftb_variant_ops *ops, void *ft,
+                         unsigned live, unsigned key_base)
+{
+    void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
+    u32 *idxv = ftb_xcalloc(ftb_query_n, sizeof(*idxv));
+    u32 *unused_idxv = ftb_xcalloc(ftb_query_n, sizeof(*unused_idxv));
+    struct ft_table_result *results =
+        ftb_xcalloc(ftb_query_n, sizeof(*results));
+    u64 samples[FTB_UPDATE_REPEAT];
+
+    for (unsigned r = 0; r < FTB_UPDATE_REPEAT; r++) {
+        unsigned prefill_base = key_base + r * (live + ftb_query_n * 2u + 1024u);
+        u64 t0, t1;
+
+        ops->flush(ft);
+        ftb_prefill(ops, ft, live, prefill_base);
+        for (unsigned i = 0; i < ftb_query_n; i++) {
+            ops->make_key(FTB_KEY_AT(keys, ops, i), prefill_base + live + i);
+            idxv[i] = live + i + 1u;
+            ftb_bind_key(ops, ft, idxv[i], FTB_KEY_AT(keys, ops, i));
+        }
+        (void)ops->add_idx_bulk(ft, idxv, ftb_query_n, FT_ADD_IGNORE,
+                                FTB_NOW_ADD, unused_idxv);
+        ftb_cold_touch();
+        t0 = ftb_rdtsc();
+        ops->find_bulk(ft, keys, ftb_query_n, FTB_NOW_FIND, results);
+        for (unsigned i = 0; i < ftb_query_n; i++)
+            idxv[i] = results[i].entry_idx;
+        ops->del_idx_bulk(ft, idxv, ftb_query_n, unused_idxv);
+        t1 = ftb_rdtsc();
+        samples[r] = t1 - t0;
+    }
+    free(results);
+    free(unused_idxv);
+    free(idxv);
+    free(keys);
+    return ftb_median_u64(samples, FTB_UPDATE_REPEAT) / (double)ftb_query_n;
+}
+
+static double
+ftb_sample_find_del_idx(const struct ftb_variant_ops *ops, void *ft,
+                        unsigned live, unsigned key_base)
+{
+    double samples[FTB_SAMPLE_MAX];
+
+    for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
+        samples[r] = ftb_measure_find_del_idx(ops, ft, live,
+                                              key_base + r * (live + ftb_query_n * 2u + 1024u));
     }
     return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
                                 ftb_sample_keep_n);
@@ -1442,7 +1496,7 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     union ftb_any_table ft;
     void *pool;
     double find_hit, find_miss, find_mix_50_50;
-    double add_idx, add_ignore, add_update, del_idx, del_key;
+    double add_idx, add_ignore, add_update, del_idx, del_key, find_del_idx;
 
     ftb_parse_entries_fill(argc, argv, base_arg, &desired, &fill_pct);
     max_entries = ftb_pool_count(desired);
@@ -1476,6 +1530,8 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
                                            FT_ADD_UPDATE);
     del_idx = ftb_sample_del_idx(ops, &ft, live, max_entries + 500000u);
     del_key = ftb_sample_del_key(ops, &ft, live, max_entries + 600000u);
+    find_del_idx = ftb_sample_find_del_idx(ops, &ft, live,
+                                           max_entries + 700000u);
 
     printf("[desired=%u entries=%u nb_bk=%u live=%u fill=%u%%]\n",
            desired, max_entries, ops->nb_bk(&ft), live, fill_pct);
@@ -1487,6 +1543,7 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     printf("  add_update %8.2f cy/key\n", add_update);
     printf("  del_idx    %8.2f cy/key\n", del_idx);
     printf("  del_key    %8.2f cy/key\n", del_key);
+    printf("  find+del_idx %6.2f cy/key\n", find_del_idx);
 
     ops->destroy(&ft);
     free(pool);

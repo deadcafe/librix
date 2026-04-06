@@ -256,17 +256,18 @@ u32                                                                            \
 ft_##prefix##_table_del_idx(struct ft_##prefix##_table *ft,              \
                                   u32 entry_idx)                               \
 {                                                                              \
-    u64 _dels = ft->stats.core.dels;                                           \
-    active_ptr->del_idx_bulk(ft, &entry_idx, 1u);                              \
-    return (ft->stats.core.dels != _dels) ? entry_idx : 0u;                    \
+    u32 unused;                                                                \
+    return active_ptr->del_idx_bulk(ft, &entry_idx, 1u, &unused)              \
+        ? entry_idx : 0u;                                                      \
 }                                                                              \
                                                                                \
-void                                                                           \
+unsigned                                                                       \
 ft_##prefix##_table_del_idx_bulk(struct ft_##prefix##_table *ft,         \
                                        const u32 *entry_idxv,                  \
-                                       unsigned nb_keys)                       \
+                                       unsigned nb_keys,                       \
+                                       u32 *unused_idxv)                       \
 {                                                                              \
-    active_ptr->del_idx_bulk(ft, entry_idxv, nb_keys);                         \
+    return active_ptr->del_idx_bulk(ft, entry_idxv, nb_keys, unused_idxv);     \
 }
 
 FT_DISPATCH_HOT(flow4, ft_flow4_active)

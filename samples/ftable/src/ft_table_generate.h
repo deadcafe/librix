@@ -161,10 +161,11 @@
 #define _FTG_DEL_KEY_BULK_BODY(p, ft, keys, nb_keys, unused_idxv,             \
                                hash_fn, cmp_fn)                              \
     return _FTG_FCORE(p, del_key_bulk_)((ft), (keys), (nb_keys),             \
-                                         (unused_idxv))
+                                        (unused_idxv))
 
-#define _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys)              \
-    _FTG_FCORE(p, del_idx_bulk_)((ft), (entry_idxv), (nb_keys))
+#define _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys, unused_idxv) \
+    return _FTG_FCORE(p, del_idx_bulk_)((ft), (entry_idxv), (nb_keys),       \
+                                         (unused_idxv))
 
 /*===========================================================================
  * FT_TABLE_GENERATE(prefix, default_min_nb_bk, default_max_nb_bk,
@@ -562,14 +563,15 @@ _FTG_API(p, del_key_bulk)(_FTG_TABLE_T(p) *ft,                                \
                                                                                \
 /* --- del_idx_bulk ------------------------------------------------ */ \
                                                                                \
-static void                                                                   \
+static unsigned                                                               \
 _FTG_API(p, del_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
                                 const u32 *entry_idxv,                   \
-                                unsigned nb_keys)                             \
+                                unsigned nb_keys,                             \
+                                u32 *unused_idxv)                        \
 {                                                                             \
     if (ft == NULL || ft->buckets == NULL || entry_idxv == NULL)              \
-        return;                                                               \
-    _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys);                 \
+        return 0u;                                                            \
+    _FTG_DEL_ENTRY_IDX_BULK_BODY(p, ft, entry_idxv, nb_keys, unused_idxv);   \
 }                                                                             \
                                                                                \
 /* --- walk -------------------------------------------------------------- */ \

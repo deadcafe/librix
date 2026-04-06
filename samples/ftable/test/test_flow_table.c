@@ -204,8 +204,8 @@ struct test_variant_ops {
                              u64 now,
                              u32 *unused_idxv);
     int (*set_permanent_idx)(void *ft, u32 entry_idx);
-    void (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
-                               unsigned nb_keys);
+    unsigned (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
+                               unsigned nb_keys, u32 *unused_idxv);
     int (*walk)(void *ft, int (*cb)(u32 entry_idx, void *arg), void *arg);
     int (*grow_2x)(void *ft);
     int (*reserve)(void *ft, unsigned min_entries);
@@ -319,12 +319,12 @@ testv_set_permanent_idx_##tag(void *ft, u32 entry_idx)                 \
     return ft_##prefix##_table_set_permanent_idx(                           \
         (struct ft_##prefix##_table *)ft, entry_idx);                       \
 }                                                                          \
-static void                                                                 \
+static unsigned                                                             \
 testv_del_idx_bulk_##tag(void *ft, const u32 *entry_idxv,        \
-                               unsigned nb_keys)                             \
+                               unsigned nb_keys, u32 *unused_idxv)           \
 {                                                                          \
-    del_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
-                          entry_idxv, nb_keys);                             \
+    return del_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
+                          entry_idxv, nb_keys, unused_idxv);               \
 }                                                                          \
 static int                                                                  \
 testv_walk_##tag(void *ft, int (*cb)(u32 entry_idx, void *arg),        \
@@ -2546,6 +2546,13 @@ testv_walk_flush_and_del_idx(const struct test_variant_ops *ops)
     if (status.entries != 0u || status.kickouts != 0u
         || status.add_bk0 != 0u || status.add_bk1 != 0u)
         FAIL("status should reset on flush");
+    for (unsigned i = 0; i < 4u; i++) {
+        ops->make_key(&key, i + 5000u);
+        if (testv_add_idx_key(ops, &ft, i + 1u, &key) != i + 1u)
+            FAILF("re-add after flush failed at %u", i);
+        if (TEST_OPS_FIND(ops, &ft, &key) != i + 1u)
+            FAILF("re-add after flush miss at %u", i);
+    }
     ops->destroy(&ft);
     free(pool);
     return 0;
