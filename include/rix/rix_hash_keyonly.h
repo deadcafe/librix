@@ -465,8 +465,7 @@ name##_remove(struct name *head,                                              \
         hash_fn((const RIX_HASH_KEY_TYPE(type, key_field) *)&elm->key_field, \
                 mask);                                                        \
     unsigned _bk0, _bk1;                                                      \
-    u32 _fp;                                                                  \
-    _fp = rix_hash_fp(_h, mask, &_bk0, &_bk1);                          \
+    (void)rix_hash_fp(_h, mask, &_bk0, &_bk1);                               \
     for (int _i = 0; _i < 2; _i++) {                                          \
         unsigned _bki = (_i == 0) ? _bk0 : _bk1;                              \
         struct rix_hash_bucket_s *_b = buckets + _bki;                        \
