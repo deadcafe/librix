@@ -57,7 +57,10 @@ OBJS         = $(LIBDIR)/flow4_gen.o \
                $(LIBDIR)/flowu_avx2.o \
                $(LIBDIR)/flowu_avx512.o \
                $(LIBDIR)/ft_dispatch.o \
-               $(LIBDIR)/ft_maintain.o
+               $(LIBDIR)/ft_maintain_gen.o \
+               $(LIBDIR)/ft_maintain_sse.o \
+               $(LIBDIR)/ft_maintain_avx2.o \
+               $(LIBDIR)/ft_maintain_avx512.o
 LIB_STATIC   = $(LIBDIR)/libftable.a
 DEPS         = $(OBJS:.o=.d)
 
@@ -112,9 +115,18 @@ $(LIBDIR)/flowu_avx512.o: $(SRCDIR)/flowu.c | $(LIBDIR)
 $(LIBDIR)/ft_dispatch.o: $(DISPATCH_SRC) | $(LIBDIR)
 	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
 
-# maintain (protocol-free)
-$(LIBDIR)/ft_maintain.o: $(SRCDIR)/ft_maintain.c | $(LIBDIR)
-	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
+# maintain (protocol-free, per-arch)
+$(LIBDIR)/ft_maintain_gen.o: $(SRCDIR)/ft_maintain.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -DFT_ARCH_SUFFIX=_gen -c -o $@ $<
+
+$(LIBDIR)/ft_maintain_sse.o: $(SRCDIR)/ft_maintain.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -msse4.2 -DFT_ARCH_SUFFIX=_sse -c -o $@ $<
+
+$(LIBDIR)/ft_maintain_avx2.o: $(SRCDIR)/ft_maintain.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx2 -c -o $@ $<
+
+$(LIBDIR)/ft_maintain_avx512.o: $(SRCDIR)/ft_maintain.c | $(LIBDIR)
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -mavx512f -mavx2 -msse4.2 -DFT_ARCH_SUFFIX=_avx512 -c -o $@ $<
 
 $(LIB_STATIC): $(OBJS)
 	$(AR) rcs $@ $^

@@ -5,6 +5,8 @@
  * All rights reserved.
  *
  * ft_maintain.c - Protocol-free bucket maintenance (timeout expiry).
+ *
+ * Compiled once per arch variant (gen/sse/avx2/avx512) with FT_ARCH_SUFFIX.
  */
 
 #include <rix/rix_hash.h>
@@ -12,6 +14,29 @@
 
 #include "ft_table_common.h"
 #include <flow/flow_key.h>
+
+/*===========================================================================
+ * Arch-suffix name mangling
+ *===========================================================================*/
+#define _FTM_CAT2(a, b) a##b
+#define _FTM_CAT(a, b)  _FTM_CAT2(a, b)
+
+#ifdef FT_ARCH_SUFFIX
+#define _FTM_FN(name) _FTM_CAT(name, FT_ARCH_SUFFIX)
+#else
+#define _FTM_FN(name) name
+#endif
+
+/* Forward declarations for -Wmissing-prototypes */
+unsigned _FTM_FN(ft_table_maintain)(const struct ft_maint_ctx *,
+                                     unsigned, u64, u64,
+                                     u32 *, unsigned, unsigned,
+                                     unsigned *);
+unsigned _FTM_FN(ft_table_maintain_idx_bulk)(const struct ft_maint_ctx *,
+                                              const u32 *, unsigned,
+                                              u64, u64,
+                                              u32 *, unsigned, unsigned,
+                                              int);
 
 /*
  * Get flow_entry_meta pointer for a given entry index.
@@ -126,7 +151,7 @@ ft_maint_scan_bucket_(const struct ft_maint_ctx *ctx,
 }
 
 unsigned
-ft_table_maintain(const struct ft_maint_ctx *ctx,
+_FTM_FN(ft_table_maintain)(const struct ft_maint_ctx *ctx,
                   unsigned start_bk,
                   u64 now,
                   u64 expire_tsc,
@@ -288,7 +313,7 @@ ft_maint_idx_bulk_loop_(const struct ft_maint_ctx *ctx,
 }
 
 unsigned
-ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
+_FTM_FN(ft_table_maintain_idx_bulk)(const struct ft_maint_ctx *ctx,
                            const u32 *entry_idxv,
                            unsigned nb_idx,
                            u64 now,

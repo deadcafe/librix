@@ -10,11 +10,41 @@
 #include "ft_ops.h"
 
 /*===========================================================================
+ * Maintain arch-variant declarations
+ *===========================================================================*/
+typedef unsigned (*ft_maintain_fn_t)(const struct ft_maint_ctx *,
+                                     unsigned, u64, u64,
+                                     u32 *, unsigned, unsigned,
+                                     unsigned *);
+typedef unsigned (*ft_maintain_idx_bulk_fn_t)(const struct ft_maint_ctx *,
+                                              const u32 *, unsigned,
+                                              u64, u64,
+                                              u32 *, unsigned, unsigned,
+                                              int);
+
+#define FT_MAINT_DECLARE(suffix)                                               \
+    extern unsigned ft_table_maintain##suffix(                                  \
+        const struct ft_maint_ctx *, unsigned, u64, u64,                       \
+        u32 *, unsigned, unsigned, unsigned *);                                \
+    extern unsigned ft_table_maintain_idx_bulk##suffix(                         \
+        const struct ft_maint_ctx *, const u32 *, unsigned,                    \
+        u64, u64, u32 *, unsigned, unsigned, int)
+
+FT_MAINT_DECLARE(_gen);
+FT_MAINT_DECLARE(_sse);
+FT_MAINT_DECLARE(_avx2);
+FT_MAINT_DECLARE(_avx512);
+
+/*===========================================================================
  * Active ops pointers (default to _gen)
  *===========================================================================*/
 static const struct ft_flow4_ops *ft_flow4_active = &ft_flow4_ops_gen;
 static const struct ft_flow6_ops *ft_flow6_active = &ft_flow6_ops_gen;
 static const struct ft_flowu_ops *ft_flowu_active = &ft_flowu_ops_gen;
+
+static ft_maintain_fn_t ft_maintain_active = ft_table_maintain_gen;
+static ft_maintain_idx_bulk_fn_t ft_maintain_idx_bulk_active =
+    ft_table_maintain_idx_bulk_gen;
 
 /*===========================================================================
  * Arch init
@@ -35,6 +65,32 @@ ft_rix_hash_arch_enable_(unsigned arch_enable)
     return enable;
 }
 
+static void
+ft_maint_select_(unsigned arch_enable)
+{
+    ft_maintain_active = ft_table_maintain_gen;
+    ft_maintain_idx_bulk_active = ft_table_maintain_idx_bulk_gen;
+#if defined(__x86_64__)
+    __builtin_cpu_init();
+    if ((arch_enable & FT_ARCH_AVX512) &&
+        __builtin_cpu_supports("avx512f")) {
+        ft_maintain_active = ft_table_maintain_avx512;
+        ft_maintain_idx_bulk_active = ft_table_maintain_idx_bulk_avx512;
+    } else if ((arch_enable & (FT_ARCH_AVX2 | FT_ARCH_AVX512)) &&
+               __builtin_cpu_supports("avx2")) {
+        ft_maintain_active = ft_table_maintain_avx2;
+        ft_maintain_idx_bulk_active = ft_table_maintain_idx_bulk_avx2;
+    } else if ((arch_enable & (FT_ARCH_SSE | FT_ARCH_AVX2 |
+                                FT_ARCH_AVX512)) &&
+               __builtin_cpu_supports("sse4.2")) {
+        ft_maintain_active = ft_table_maintain_sse;
+        ft_maintain_idx_bulk_active = ft_table_maintain_idx_bulk_sse;
+    }
+#else
+    (void)arch_enable;
+#endif
+}
+
 void
 ft_arch_init(unsigned arch_enable)
 {
@@ -42,6 +98,7 @@ ft_arch_init(unsigned arch_enable)
     FT_OPS_SELECT(flow4, arch_enable, &ft_flow4_active);
     FT_OPS_SELECT(flow6, arch_enable, &ft_flow6_active);
     FT_OPS_SELECT(flowu, arch_enable, &ft_flowu_active);
+    ft_maint_select_(arch_enable);
 }
 
 /*===========================================================================
@@ -215,3 +272,38 @@ ft_##prefix##_table_del_entry_idx_bulk(struct ft_##prefix##_table *ft,         \
 FT_DISPATCH_HOT(flow4, ft_flow4_active)
 FT_DISPATCH_HOT(flow6, ft_flow6_active)
 FT_DISPATCH_HOT(flowu, ft_flowu_active)
+
+/*===========================================================================
+ * Dispatch: maintain (variant-agnostic, arch-dispatched)
+ *===========================================================================*/
+unsigned
+ft_table_maintain(const struct ft_maint_ctx *ctx,
+                  unsigned start_bk,
+                  u64 now,
+                  u64 expire_tsc,
+                  u32 *expired_idxv,
+                  unsigned max_expired,
+                  unsigned min_bk_entries,
+                  unsigned *next_bk)
+{
+    return ft_maintain_active(ctx, start_bk, now, expire_tsc,
+                              expired_idxv, max_expired,
+                              min_bk_entries, next_bk);
+}
+
+unsigned
+ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
+                           const u32 *entry_idxv,
+                           unsigned nb_idx,
+                           u64 now,
+                           u64 expire_tsc,
+                           u32 *expired_idxv,
+                           unsigned max_expired,
+                           unsigned min_bk_entries,
+                           int enable_filter)
+{
+    return ft_maintain_idx_bulk_active(ctx, entry_idxv, nb_idx,
+                                       now, expire_tsc,
+                                       expired_idxv, max_expired,
+                                       min_bk_entries, enable_filter);
+}
