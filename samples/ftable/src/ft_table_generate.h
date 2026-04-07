@@ -12,7 +12,7 @@
  *   // define layout hooks, hash_fn, cmp ...
  *   #include "ft_table_generate.h"
  *
- *   FT_TABLE_GENERATE(flow4, ft_flow4_hash_fn, ft_flow4_cmp)
+ *   FT_TABLE_GENERATE(flow4, 0u, ft_flow4_hash_fn, ft_flow4_cmp)
  */
 
 #ifndef _FT_TABLE_GENERATE_H_
@@ -74,15 +74,6 @@
 /*===========================================================================
  * Layout hooks (overridable per-variant before #include)
  *===========================================================================*/
-#ifndef FTG_LAYOUT_INIT_STORAGE
-#define FTG_LAYOUT_INIT_STORAGE(ft, array, stride, entry_offset)              \
-    do {                                                                      \
-        (void)(stride);                                                       \
-        (void)(entry_offset);                                                 \
-        (ft)->pool = (array);                                                 \
-    } while (0)
-#endif
-
 #ifndef FTG_LAYOUT_HASH_BASE
 #define FTG_LAYOUT_HASH_BASE(ft) ((ft)->pool)
 #endif
@@ -168,15 +159,13 @@
                                          (unused_idxv))
 
 /*===========================================================================
- * FT_TABLE_GENERATE(prefix, default_min_nb_bk, default_max_nb_bk,
- *                   default_grow_fill_pct, flag_active, hash_fn, cmp_fn)
+ * FT_TABLE_GENERATE(prefix, flag_active, hash_fn, cmp_fn)
  *
  * flag_active is unused (kept for signature compatibility).
  * Bulk operations delegate to the FCORE_GENERATE functions (_fcore_<p>_*).
  * Entry validity is determined by cur_hash != 0 (bucket linkage).
  *===========================================================================*/
-#define FT_TABLE_GENERATE(p, default_min_nb_bk, default_max_nb_bk,            \
-                          default_grow_fill_pct, flag_active, hash_fn, cmp_fn) \
+#define FT_TABLE_GENERATE(p, flag_active, hash_fn, cmp_fn)                        \
                                                                                \
 /* --- Internal helpers -------------------------------------------------- */ \
                                                                                \
@@ -201,62 +190,10 @@ _FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
     FTG_ENTRY_META_CLEAR_TAIL(entry);                                         \
 }                                                                             \
                                                                                \
-static inline unsigned                                                        \
-_FTG_INT(p, default_start_nb_bk_)(unsigned max_entries)                       \
-{                                                                             \
-    unsigned hinted;                                                          \
-    hinted = (max_entries + (RIX_HASH_BUCKET_ENTRY_SZ - 1u))                  \
-           / RIX_HASH_BUCKET_ENTRY_SZ;                                        \
-    if (hinted < (default_min_nb_bk))                                         \
-        hinted = (default_min_nb_bk);                                         \
-    return ft_roundup_pow2_u32(hinted);                                       \
-}                                                                             \
-                                                                               \
-static inline unsigned                                                        \
-_FTG_INT(p, required_nb_bk_)(unsigned entries, unsigned fill_pct)             \
-{                                                                             \
-    u64 need_slots;                                                      \
-    unsigned need_bk;                                                         \
-    if (entries == 0u)                                                        \
-        return (default_min_nb_bk);                                           \
-    need_slots = ((u64)entries * 100u + (u64)fill_pct - 1u)         \
-               / (u64)fill_pct;                                          \
-    need_bk = (unsigned)((need_slots                                          \
-               + (u64)RIX_HASH_BUCKET_ENTRY_SZ - 1u)                     \
-               / (u64)RIX_HASH_BUCKET_ENTRY_SZ);                         \
-    if (need_bk < (default_min_nb_bk))                                        \
-        need_bk = (default_min_nb_bk);                                        \
-    return ft_roundup_pow2_u32(need_bk);                                      \
-}                                                                             \
-                                                                               \
 static inline size_t                                                          \
 _FTG_INT(p, bucket_bytes_)(unsigned nb_bk)                                    \
 {                                                                             \
     return (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);                  \
-}                                                                             \
-                                                                               \
-static int                                                                    \
-_FTG_INT(p, alloc_buckets_)(_FTG_TABLE_T(p) *ft,                              \
-                            unsigned nb_bk,                                   \
-                            struct rix_hash_bucket_s **out)                   \
-{                                                                             \
-    size_t bytes = _FTG_INT(p, bucket_bytes_)(nb_bk);                         \
-    void *ptr;                                                                \
-    ptr = ft->bucket_alloc.alloc(bytes,                                       \
-                                 _Alignof(struct rix_hash_bucket_s),          \
-                                 ft->bucket_alloc.arg);                       \
-    if (ptr == NULL)                                                          \
-        return -1;                                                            \
-    memset(ptr, 0, bytes);                                                    \
-    *out = (struct rix_hash_bucket_s *)ptr;                                   \
-    return 0;                                                                 \
-}                                                                             \
-                                                                               \
-static inline void                                                            \
-_FTG_INT(p, init_storage_)(_FTG_TABLE_T(p) *ft, void *array,                  \
-                           size_t stride, size_t entry_offset)                \
-{                                                                             \
-    FTG_LAYOUT_INIT_STORAGE(ft, array, stride, entry_offset);                 \
 }                                                                             \
                                                                                \
 /* find_hashed_: single-key lookup using precomputed hash */                  \
@@ -381,66 +318,6 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
     }                                                                         \
 }                                                                             \
                                                                                \
-/* --- init_ex ----------------------------------------------------------- */ \
-                                                                               \
-static int                                                                           \
-_FTG_API(p, init_ex)(_FTG_TABLE_T(p) *ft,                                     \
-                     void *array,                                             \
-                     unsigned max_entries,                                    \
-                     size_t stride,                                           \
-                     size_t entry_offset,                                     \
-                     const _FTG_CONFIG_T(p) *cfg)                             \
-{                                                                             \
-    _FTG_CONFIG_T(p) defcfg;                                                  \
-    struct rix_hash_bucket_s *buckets;                                        \
-    unsigned start_nb_bk, max_nb_bk;                                          \
-                                                                               \
-    if (ft == NULL || array == NULL || max_entries == 0u)                     \
-        return -1;                                                            \
-    memset(&defcfg, 0, sizeof(defcfg));                                       \
-    if (cfg == NULL)                                                          \
-        cfg = &defcfg;                                                        \
-    if (cfg->bucket_alloc.alloc == NULL ||                                    \
-        cfg->bucket_alloc.free == NULL)                                       \
-        return -1;                                                            \
-                                                                               \
-    RIX_ASSERT(stride >= sizeof(_FTG_ENTRY_T(p)));                            \
-    RIX_ASSERT(entry_offset + sizeof(_FTG_ENTRY_T(p)) <= stride);             \
-    RIX_ASSERT(FT_PTR_IS_ALIGNED(FT_BYTE_PTR_ADD(array, entry_offset),        \
-                                 _Alignof(_FTG_ENTRY_T(p))));                 \
-                                                                               \
-    start_nb_bk = cfg->start_nb_bk                                            \
-        ? ft_roundup_pow2_u32(cfg->start_nb_bk)                               \
-        : _FTG_INT(p, default_start_nb_bk_)(max_entries);                     \
-    max_nb_bk = cfg->max_nb_bk                                                \
-        ? ft_roundup_pow2_u32(cfg->max_nb_bk)                                 \
-        : (default_max_nb_bk);                                                \
-    if (start_nb_bk < _FTG_INT(p, default_start_nb_bk_)(max_entries))         \
-        start_nb_bk = _FTG_INT(p, default_start_nb_bk_)(max_entries);         \
-    if (max_nb_bk < start_nb_bk)                                              \
-        max_nb_bk = start_nb_bk;                                              \
-                                                                               \
-    memset(ft, 0, sizeof(*ft));                                               \
-    ft->bucket_alloc = cfg->bucket_alloc;                                     \
-    ft->grow_fill_pct = cfg->grow_fill_pct                                    \
-        ? cfg->grow_fill_pct                                                  \
-        : (default_grow_fill_pct);                                            \
-    ft->ts_shift = (u8)((cfg->ts_shift != 0u)                            \
-        ? flow_timestamp_shift_clamp(cfg->ts_shift)                          \
-        : FLOW_TIMESTAMP_DEFAULT_SHIFT);                                      \
-    ft->max_entries = max_entries;                                            \
-    ft->max_nb_bk = max_nb_bk;                                                \
-    ft->start_mask = start_nb_bk - 1u;                                        \
-    _FTG_INT(p, init_storage_)(ft, array, stride, entry_offset);              \
-                                                                               \
-    if (_FTG_INT(p, alloc_buckets_)(ft, start_nb_bk, &buckets) != 0)          \
-        return -1;                                                            \
-    ft->buckets = buckets;                                                    \
-    ft->nb_bk = start_nb_bk;                                                  \
-    _FTG_HT(p, init)(&ft->ht_head, start_nb_bk);                              \
-    return 0;                                                                 \
-}                                                                             \
-                                                                               \
 /* --- destroy ----------------------------------------------------------- */ \
                                                                                \
 static void                                                                          \
@@ -448,12 +325,6 @@ _FTG_API(p, destroy)(_FTG_TABLE_T(p) *ft)                                     \
 {                                                                             \
     if (ft == NULL)                                                           \
         return;                                                               \
-    if (ft->buckets != NULL && ft->bucket_alloc.free != NULL) {               \
-        ft->bucket_alloc.free(ft->buckets,                                    \
-                              _FTG_INT(p, bucket_bytes_)(ft->nb_bk),          \
-                              _Alignof(struct rix_hash_bucket_s),             \
-                              ft->bucket_alloc.arg);                          \
-    }                                                                         \
     memset(ft, 0, sizeof(*ft));                                               \
 }                                                                             \
                                                                                \
@@ -587,47 +458,56 @@ _FTG_API(p, walk)(_FTG_TABLE_T(p) *ft,                                        \
     return 0;                                                                 \
 }                                                                             \
                                                                                \
-/* --- grow_2x ----------------------------------------------------------- */ \
+/* --- migrate: move entries to user-provided new buckets ----------------*/ \
                                                                                \
-static int                                                                           \
-_FTG_API(p, grow_2x)(_FTG_TABLE_T(p) *ft)                                     \
+static int                                                                     \
+_FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
+                     void *new_buckets_raw,                                   \
+                     size_t new_bucket_size)                                  \
 {                                                                             \
     struct rix_hash_bucket_s *new_buckets;                                    \
     _FTG_HT_T(p) new_head;                                                    \
-    struct { _FTG_ENTRY_T(p) *entry; union rix_hash_hash_u hash; }            \
-        ctx[FT_TABLE_GROW_CTX_RING];                                          \
-    unsigned new_nb_bk, new_mask, old_mask;                                   \
-    unsigned produced = 0u, consumed = 0u;                                    \
+    unsigned new_nb_bk;                                                       \
+    enum {                                                                    \
+        _GROW_RING_SZ      = 128u,                                            \
+        _GROW_RING_MASK    = _GROW_RING_SZ - 1u,                              \
+        _GROW_BATCH        = 8u,                                              \
+        _GROW_ENTRY_AHEAD  = 48u,                                             \
+        _GROW_INSERT_AHEAD = 32u,                                             \
+        _GROW_OLD_BK_AHEAD = 8u                                               \
+    };                                                                        \
+    struct {                                                                  \
+        _FTG_ENTRY_T(p) *entry;                                               \
+        u32 old_fp;                                                           \
+        union rix_hash_hash_u h;                                              \
+    } ring[_GROW_RING_SZ];                                                    \
+    unsigned new_mask, old_mask;                                              \
+    unsigned scanned = 0u, hashed = 0u, inserted = 0u;                       \
                                                                                \
     if (ft == NULL || ft->buckets == NULL)                                    \
         return -1;                                                            \
-    if (ft->nb_bk >= ft->max_nb_bk) {                                         \
-        ft->stats.grow_failures++;                                            \
+    if (new_buckets_raw == NULL || new_bucket_size == 0u)                     \
         return -1;                                                            \
-    }                                                                         \
-    new_nb_bk = ft->nb_bk << 1;                                               \
-    if (new_nb_bk == 0u || new_nb_bk > ft->max_nb_bk) {                       \
-        ft->stats.grow_failures++;                                            \
+    new_buckets = ft_table_bucket_carve(new_buckets_raw,                      \
+                                       new_bucket_size, &new_nb_bk);         \
+    if (new_nb_bk <= ft->start_mask)                                          \
         return -1;                                                            \
-    }                                                                         \
-    if (_FTG_INT(p, alloc_buckets_)(ft, new_nb_bk, &new_buckets) != 0) {      \
-        ft->stats.grow_failures++;                                            \
-        return -1;                                                            \
-    }                                                                         \
+    memset(new_buckets, 0, (size_t)new_nb_bk * sizeof(*new_buckets));         \
+                                                                               \
     _FTG_HT(p, init)(&new_head, new_nb_bk);                                   \
     new_mask = new_head.rhh_mask;                                             \
     old_mask = ft->ht_head.rhh_mask;                                          \
                                                                                \
     for (unsigned bk = 0u;                                                    \
-         bk < FT_TABLE_GROW_OLD_BK_AHEAD && bk <= old_mask;                   \
+         bk < _GROW_OLD_BK_AHEAD && bk <= old_mask;                           \
          bk++)                                                                \
-        rix_hash_prefetch_bucket_indices_of(&ft->buckets[bk]);                \
+        rix_hash_prefetch_bucket_of(&ft->buckets[bk]);                        \
                                                                                \
     for (unsigned bk = 0u; bk <= old_mask; bk++) {                            \
         const struct rix_hash_bucket_s *old_bk = &ft->buckets[bk];            \
-        unsigned pfbk = bk + FT_TABLE_GROW_OLD_BK_AHEAD;                      \
+        unsigned pfbk = bk + _GROW_OLD_BK_AHEAD;                              \
         if (pfbk <= old_mask)                                                 \
-            rix_hash_prefetch_bucket_indices_of(&ft->buckets[pfbk]);          \
+            rix_hash_prefetch_bucket_of(&ft->buckets[pfbk]);                  \
                                                                                \
         for (unsigned s = 0u; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {            \
             unsigned idx = old_bk->idx[s];                                    \
@@ -637,91 +517,65 @@ _FTG_API(p, grow_2x)(_FTG_TABLE_T(p) *ft)                                     \
             entry = FTG_LAYOUT_ENTRY_PTR(ft, idx);                            \
             RIX_ASSUME_NONNULL(entry);                                        \
             rix_hash_prefetch_entry_of(entry);                                \
-        }                                                                     \
+            ring[scanned & _GROW_RING_MASK].entry = entry;                    \
+            ring[scanned & _GROW_RING_MASK].old_fp = old_bk->hash[s];        \
+            scanned++;                                                        \
                                                                                \
-        for (unsigned s = 0u; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {            \
-            unsigned idx = old_bk->idx[s];                                    \
-            _FTG_ENTRY_T(p) *entry;                                           \
-            union rix_hash_hash_u h;                                          \
-            unsigned bk0;                                                     \
-            if (idx == (unsigned)RIX_NIL)                                     \
-                continue;                                                     \
-            entry = FTG_LAYOUT_ENTRY_PTR(ft, idx);                            \
-            RIX_ASSUME_NONNULL(entry);                                        \
-            h = hash_fn(&entry->key, ft->start_mask);                          \
-            ctx[produced & (FT_TABLE_GROW_CTX_RING - 1u)].entry = entry;      \
-            ctx[produced & (FT_TABLE_GROW_CTX_RING - 1u)].hash = h;           \
-            {                                                                 \
-                unsigned _bk1;                                                \
-                (void)rix_hash_fp(h, new_mask, &bk0, &_bk1);                 \
-            }                                                                 \
-            rix_hash_prefetch_bucket_hashes_of(&new_buckets[bk0]);            \
-            produced++;                                                       \
-                                                                               \
-            if (produced - consumed > FT_TABLE_GROW_REINSERT_AHEAD) {         \
-                unsigned ci = consumed & (FT_TABLE_GROW_CTX_RING - 1u);       \
-                if (_FTG_INT(p, rehash_insert_hashed_)(                       \
-                        &new_head, new_buckets, ft,                           \
-                        ctx[ci].entry, ctx[ci].hash) != 0) {                  \
-                    ft->bucket_alloc.free(                                    \
-                        new_buckets,                                          \
-                        _FTG_INT(p, bucket_bytes_)(new_nb_bk),                \
-                        _Alignof(struct rix_hash_bucket_s),                   \
-                        ft->bucket_alloc.arg);                                \
-                    ft->stats.grow_failures++;                                \
-                    return -1;                                                \
+            if (scanned - hashed >= _GROW_ENTRY_AHEAD + _GROW_BATCH) {        \
+                for (unsigned _b = 0u; _b < _GROW_BATCH; _b++) {              \
+                    unsigned _ri = hashed & _GROW_RING_MASK;                  \
+                    u32 _cur = ring[_ri].entry->meta.cur_hash;                \
+                    ring[_ri].h.val32[0] = _cur;                              \
+                    ring[_ri].h.val32[1] = ring[_ri].old_fp ^ _cur;           \
+                    rix_hash_prefetch_bucket_of(                              \
+                        &new_buckets[_cur & new_mask]);                        \
+                    hashed++;                                                 \
                 }                                                             \
-                consumed++;                                                   \
+                if (hashed - inserted >= _GROW_INSERT_AHEAD + _GROW_BATCH) {  \
+                    for (unsigned _b = 0u; _b < _GROW_BATCH; _b++) {          \
+                        unsigned _ri = inserted & _GROW_RING_MASK;            \
+                        if (RIX_UNLIKELY(                                     \
+                            _FTG_INT(p, rehash_insert_hashed_)(               \
+                                &new_head, new_buckets, ft,                   \
+                                ring[_ri].entry, ring[_ri].h) != 0))          \
+                            goto _migrate_fail;                               \
+                        inserted++;                                           \
+                    }                                                         \
+                }                                                             \
             }                                                                 \
         }                                                                     \
     }                                                                         \
                                                                                \
-    while (consumed < produced) {                                             \
-        unsigned ci = consumed & (FT_TABLE_GROW_CTX_RING - 1u);               \
-        if (_FTG_INT(p, rehash_insert_hashed_)(                               \
-                &new_head, new_buckets, ft,                                   \
-                ctx[ci].entry, ctx[ci].hash) != 0) {                          \
-            ft->bucket_alloc.free(                                            \
-                new_buckets,                                                  \
-                _FTG_INT(p, bucket_bytes_)(new_nb_bk),                        \
-                _Alignof(struct rix_hash_bucket_s),                           \
-                ft->bucket_alloc.arg);                                        \
-            ft->stats.grow_failures++;                                        \
-            return -1;                                                        \
-        }                                                                     \
-        consumed++;                                                           \
+    while (hashed < scanned) {                                                \
+        unsigned _ri = hashed & _GROW_RING_MASK;                              \
+        u32 _cur = ring[_ri].entry->meta.cur_hash;                            \
+        ring[_ri].h.val32[0] = _cur;                                          \
+        ring[_ri].h.val32[1] = ring[_ri].old_fp ^ _cur;                       \
+        rix_hash_prefetch_bucket_of(                                          \
+            &new_buckets[_cur & new_mask]);                                   \
+        hashed++;                                                             \
     }                                                                         \
+    while (inserted < hashed) {                                               \
+        unsigned _ri = inserted & _GROW_RING_MASK;                            \
+        if (RIX_UNLIKELY(                                                     \
+            _FTG_INT(p, rehash_insert_hashed_)(                               \
+                &new_head, new_buckets, ft,                                   \
+                ring[_ri].entry, ring[_ri].h) != 0))                          \
+            goto _migrate_fail;                                               \
+        inserted++;                                                           \
+    }                                                                         \
+    goto _migrate_done;                                                       \
                                                                                \
-    ft->bucket_alloc.free(ft->buckets,                                        \
-                          _FTG_INT(p, bucket_bytes_)(ft->nb_bk),              \
-                          _Alignof(struct rix_hash_bucket_s),                 \
-                          ft->bucket_alloc.arg);                              \
+_migrate_fail:                                                                \
+    ft->stats.grow_failures++;                                                \
+    return -1;                                                                \
+_migrate_done: (void)0;                                                       \
+                                                                               \
     ft->buckets = new_buckets;                                                \
     ft->ht_head = new_head;                                                   \
     ft->nb_bk = new_nb_bk;                                                    \
     fcore_status_reset(&ft->status, (u32)new_head.rhh_nb);               \
     ft->stats.grow_execs++;                                                   \
-    return 0;                                                                 \
-}                                                                             \
-                                                                               \
-/* --- reserve ----------------------------------------------------------- */ \
-                                                                               \
-static int                                                                           \
-_FTG_API(p, reserve)(_FTG_TABLE_T(p) *ft,                                     \
-                     unsigned min_entries)                                    \
-{                                                                             \
-    unsigned required_nb_bk;                                                  \
-    if (ft == NULL)                                                           \
-        return -1;                                                            \
-    ft->stats.reserve_calls++;                                                \
-    required_nb_bk = _FTG_INT(p, required_nb_bk_)(                            \
-        min_entries, ft->grow_fill_pct);                                      \
-    if (required_nb_bk > ft->max_nb_bk)                                       \
-        return -1;                                                            \
-    while (ft->nb_bk < required_nb_bk) {                                      \
-        if (_FTG_API(p, grow_2x)(ft) != 0)                                    \
-            return -1;                                                        \
-    }                                                                         \
     return 0;                                                                 \
 }                                                                             \
 /* end FT_TABLE_GENERATE */
@@ -738,7 +592,6 @@ _FTG_API(p, reserve)(_FTG_TABLE_T(p) *ft,                                     \
 #define FT_OPS_TABLE(prefix, suffix)                                          \
 const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
     /* cold-path */                                                            \
-    .init_ex         = _FT_OPS_FNAME(prefix, init_ex),                        \
     .destroy         = _FT_OPS_FNAME(prefix, destroy),                        \
     .flush           = _FT_OPS_FNAME(prefix, flush),                          \
     .nb_entries      = _FT_OPS_FNAME(prefix, nb_entries),                     \
@@ -746,8 +599,7 @@ const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
     .stats           = _FT_OPS_FNAME(prefix, stats),                          \
     .status          = _FT_OPS_FNAME(prefix, status),                         \
     .walk            = _FT_OPS_FNAME(prefix, walk),                           \
-    .grow_2x         = _FT_OPS_FNAME(prefix, grow_2x),                       \
-    .reserve         = _FT_OPS_FNAME(prefix, reserve),                        \
+    .migrate         = _FT_OPS_FNAME(prefix, migrate),                        \
     /* hot-path */                                                             \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
     .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \

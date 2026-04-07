@@ -18,10 +18,6 @@
 #include <flow/flow_key.h>
 #include <flow/flow_core.h>
 
-#define FT_FLOW4_DEFAULT_GROW_FILL_PCT 60u
-#define FT_FLOW4_DEFAULT_MIN_NB_BK    16384u
-#define FT_FLOW4_DEFAULT_MAX_NB_BK    1048576u
-
 RIX_HASH_HEAD(ft_flow4_ht);
 
 
@@ -32,13 +28,9 @@ struct ft_flow4_table {
     size_t                      pool_stride;
     size_t                      pool_entry_offset;
     struct ft_flow4_ht          ht_head;
-    struct ft_bucket_allocator  bucket_alloc;
     unsigned                    start_mask;
     unsigned                    nb_bk;
-    unsigned                    max_nb_bk;
     unsigned                    max_entries;
-    u32                    free_head;
-    unsigned                    grow_fill_pct;
     u8                     ts_shift;
     struct ft_table_stats       stats;
     struct fcore_status         status;
@@ -48,16 +40,25 @@ struct ft_flow4_table {
  * Init / destroy / query
  *===========================================================================*/
 
-int ft_flow4_table_init_ex(struct ft_flow4_table *ft,
-                           void *array,
-                           unsigned max_entries,
-                           size_t stride,
-                           size_t entry_offset,
-                           const struct ft_table_config *cfg);
-
+/**
+ * @brief Initialise a flow4 table.
+ *
+ * @p buckets / @p bucket_size need not be aligned — the library carves
+ * out the largest power-of-2 aligned region internally
+ * (see ft_table_bucket_carve()).  The resulting bucket count must be
+ * >= FT_TABLE_MIN_NB_BK (4096), otherwise init fails.
+ *
+ * Use ft_table_bucket_size() to query the recommended allocation size.
+ *
+ * @return 0 on success, -1 on invalid arguments.
+ */
 int ft_flow4_table_init(struct ft_flow4_table *ft,
-                        struct flow4_entry *pool,
+                        void *array,
                         unsigned max_entries,
+                        size_t stride,
+                        size_t entry_offset,
+                        void *buckets,
+                        size_t bucket_size,
                         const struct ft_table_config *cfg);
 
 void ft_flow4_table_destroy(struct ft_flow4_table *ft);
@@ -129,17 +130,32 @@ int ft_flow4_table_walk(struct ft_flow4_table *ft,
                         int (*cb)(u32 entry_idx, void *arg),
                         void *arg);
 
-int ft_flow4_table_grow_2x(struct ft_flow4_table *ft);
-int ft_flow4_table_reserve(struct ft_flow4_table *ft,
-                           unsigned min_entries);
+/**
+ * @brief Migrate entries to a new bucket region (grow, shrink, or rehash).
+ *
+ * @p new_buckets / @p new_bucket_size need not be aligned — the library
+ * carves out the largest power-of-2 aligned region internally.
+ *
+ * Constraints on the carved bucket count (new_nb_bk):
+ *  - new_nb_bk > start_mask  (i.e. >= init-time bucket count)
+ *  - new_nb_bk != current nb_bk is NOT required (same-size rehash allowed)
+ *
+ * On success the table switches to the new buckets; the caller frees the
+ * old bucket memory (read ft->buckets / ft->nb_bk before calling).
+ * On failure (-1) the table is unchanged.
+ */
+int ft_flow4_table_migrate(struct ft_flow4_table *ft,
+                           void *new_buckets,
+                           size_t new_bucket_size);
 
 /*===========================================================================
  * Convenience macros / inline helpers
  *===========================================================================*/
 
-#define FT_FLOW4_TABLE_INIT_TYPED(ft, array, max_entries, type, member, cfg) \
-    ft_flow4_table_init_ex((ft), (array), (max_entries), sizeof(type),        \
-                           offsetof(type, member), (cfg))
+#define FT_FLOW4_TABLE_INIT_TYPED(ft, array, max_entries, type, member, \
+                                  buckets, bucket_size, cfg)           \
+    ft_flow4_table_init((ft), (array), (max_entries), sizeof(type),    \
+                        offsetof(type, member), (buckets), (bucket_size), (cfg))
 
 static inline void *
 ft_flow4_table_record_ptr(struct ft_flow4_table *ft, u32 entry_idx)

@@ -14,8 +14,8 @@
 - caller は stable な record array を所有する
 - `idx` は 1-origin の stable identifier
 - `add_idx*` は caller が key を record に書いた後で呼ぶ
-- `del_entry_idx*` は caller が valid idx だけを渡す
-- `del_key*` は convenience path であり、core の主 API ではない
+- `del_idx*` は caller が valid idx だけを渡す
+- `del_key_bulk` は convenience path であり、core の主 API ではない
 
 ## 2. API 仕様表
 
@@ -30,13 +30,12 @@
 | A7 | `add_idx_bulk` | self duplicate | ignore | `idxv[i]=request idx`, `unused` なし |
 | A8 | `add_idx_bulk(ignore)` | idx 配列 | duplicate を ignore | `unused_idxv[]` に free 対象 request idx を詰める |
 | A9 | `add_idx_bulk(update)` | idx 配列 | duplicate を置換 | `unused_idxv[]` に free 対象 old idx を詰める |
-| A10 | `del_entry_idx` | valid idx | 既登録 entry を削除 | `deleted idx` |
-| A11 | `del_entry_idx_bulk` | valid idx 配列 | 各 idx を独立 delete | return なし |
+| A10 | `del_idx` | valid idx | 既登録 entry を削除 | `deleted idx` |
+| A11 | `del_idx_bulk` | valid idx 配列 | 各 idx を独立 delete | return なし |
 | A12 | `del_key` | key | hit なら削除、miss なら 0 | `deleted idx or 0` |
 | A13 | `walk` | callback | live entry を巡回 | callback 契約 |
 | A14 | `flush` | - | 全 entry を table から外す | void |
-| A15 | `grow_2x` | - | live entry を保持したまま bucket のみ拡張 | `0/-1` |
-| A16 | `reserve` | min_entries | 必要 bucket 数まで拡張 | `0/-1` |
+| A15 | `migrate` | new_buckets, size | live entry を保持したまま bucket を再配置 | `0/-1` |
 | A17 | `maintain` | bucket sweep 範囲 | timeout expired entry を bucket sweep で返す | `expired_n`, `next_bk` |
 | A18 | `maintain_idx_bulk` | hit idx 配列 | hit idx が属する bucket を局所的に expire する | `expired_n` |
 | A19 | `set_permanent_idx` | linked idx | timestamp=0 の permanent entry にする | `0/-1` |
@@ -113,8 +112,7 @@
 | A12 | `test_duplicate_and_delete_miss_stats`, `test_basic_add_find_del`, `testv_basic_add_find_del` | covered |
 | A13 | `test_walk_early_stop`, `test_walk_flush_and_stats_reset`, `testv_walk_flush_and_del_idx` | covered |
 | A14 | `test_walk_flush_and_stats_reset`, `testv_walk_flush_and_del_idx` | covered |
-| A15 | `test_manual_grow_preserves_entries`, `test_grow_failure_preserves_table`, `testv_manual_grow_preserves_entries` | covered |
-| A16 | `test_reserve`, `test_allocator_failure_and_max_bucket_limit`, `testv_reserve` | covered |
+| A15 | `testv_migrate_preserves_entries`, `testv_migrate_doubles_buckets` | covered |
 | A17 | `test_maintain_expire_and_reuse`, `testv_maintain_expire_and_reuse` | covered |
 | A18 | `testv_maintain_idx_bulk` | covered |
 | A19 | `testv_permanent_timestamp` | covered |
@@ -135,7 +133,7 @@
 4. add_idx_bulk
 5. del / del_bulk
 6. walk / flush / stats
-7. grow / reserve
+7. migrate
 8. fill / kickout / fuzz
 
 この順序を変えると、「何の仕様を見ている test か」が読みにくくなる。

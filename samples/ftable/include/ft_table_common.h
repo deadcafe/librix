@@ -139,18 +139,18 @@ ft_roundup_pow2_u32(unsigned v)
     return v + 1u;
 }
 
-/*===========================================================================
- * Bucket allocator interface
- *===========================================================================*/
-typedef void *(*ft_bucket_alloc_fn)(size_t size, size_t align, void *arg);
-typedef void (*ft_bucket_free_fn)(void *ptr, size_t size, size_t align,
-                                  void *arg);
-
-struct ft_bucket_allocator {
-    ft_bucket_alloc_fn alloc;
-    ft_bucket_free_fn  free;
-    void              *arg;
-};
+static inline unsigned
+ft_rounddown_pow2_u32(unsigned v)
+{
+    if (v == 0u)
+        return 0u;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    return v - (v >> 1);
+}
 
 /*===========================================================================
  * Protocol-independent types (shared by all flow variants)
@@ -166,18 +166,74 @@ enum ft_add_policy {
 };
 
 struct ft_table_config {
-    unsigned start_nb_bk;
-    unsigned max_nb_bk;
-    unsigned grow_fill_pct;
     unsigned ts_shift;
-    struct ft_bucket_allocator bucket_alloc;
 };
+
+enum {
+    FT_TABLE_BUCKET_SIZE  = 128u,
+    FT_TABLE_MIN_NB_BK   = 4096u,
+    FT_TABLE_BUCKET_ALIGN = 64u,
+};
+
+/**
+ * @brief Carve out an aligned bucket region from a raw buffer.
+ *
+ * Given (raw, raw_size), aligns the pointer up to bucket alignment,
+ * computes the largest power-of-2 bucket count that fits, and returns
+ * the aligned pointer.  *nb_bk_out is set to the bucket count (0 on
+ * failure).
+ */
+static inline struct rix_hash_bucket_s *
+ft_table_bucket_carve(void *raw, size_t raw_size, unsigned *nb_bk_out)
+{
+    uintptr_t addr = (uintptr_t)raw;
+    uintptr_t aligned = (addr + (_Alignof(struct rix_hash_bucket_s) - 1u))
+                      & ~(uintptr_t)(_Alignof(struct rix_hash_bucket_s) - 1u);
+    size_t lost = (size_t)(aligned - addr);
+    size_t usable = raw_size > lost ? raw_size - lost : 0u;
+    unsigned nb = (unsigned)(usable / sizeof(struct rix_hash_bucket_s));
+
+    nb = ft_rounddown_pow2_u32(nb);
+    *nb_bk_out = nb;
+    return (struct rix_hash_bucket_s *)aligned;
+}
+
+/**
+ * @brief Compute the required bucket memory size for a given max_entries.
+ *
+ * Returns 128 * 2^n bytes (n >= 12, i.e. minimum 4096 buckets = 512 KiB).
+ * The caller allocates this many bytes and passes the pointer and size
+ * to ft_*_table_init().  The buffer need not be aligned; the library
+ * aligns internally.
+ */
+static inline size_t
+ft_table_bucket_size(unsigned max_entries)
+{
+    unsigned nb_bk;
+    nb_bk = (max_entries + (RIX_HASH_BUCKET_ENTRY_SZ - 1u))
+          / RIX_HASH_BUCKET_ENTRY_SZ;
+    if (nb_bk < FT_TABLE_MIN_NB_BK)
+        nb_bk = FT_TABLE_MIN_NB_BK;
+    return (size_t)ft_roundup_pow2_u32(nb_bk) * FT_TABLE_BUCKET_SIZE;
+}
+
+/**
+ * @brief Return the bucket memory size for a given bucket count.
+ *
+ * Useful for computing grow / shrink allocation sizes from the current
+ * bucket count (e.g. @c ft_table_bucket_mem_size(ft->nb_bk) * 2 for
+ * a 2x grow).  Protocol-independent.
+ */
+static inline size_t
+ft_table_bucket_mem_size(unsigned nb_bk)
+{
+    return (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
+}
 
 struct ft_table_stats {
     struct fcore_stats core;
     u64 grow_execs;
     u64 grow_failures;
-    u64 reserve_calls;
     u64 maint_calls;
     u64 maint_bucket_checks;
     u64 maint_evictions;
@@ -188,13 +244,13 @@ struct ft_table_stats {
  *===========================================================================*/
 struct ft_maint_ctx {
     struct rix_hash_bucket_s *buckets;
-    unsigned                  rhh_mask;
     unsigned                 *rhh_nb;
     const unsigned char      *pool_base;
+    struct ft_table_stats    *stats;
     size_t                    pool_stride;
     size_t                    meta_off;
+    unsigned                  rhh_mask;
     u8                   ts_shift;
-    struct ft_table_stats    *stats;
 };
 
 /**

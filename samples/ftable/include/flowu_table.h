@@ -18,10 +18,6 @@
 #include <flow/flow_key.h>
 #include <flow/flow_core.h>
 
-#define FT_FLOWU_DEFAULT_GROW_FILL_PCT 60u
-#define FT_FLOWU_DEFAULT_MIN_NB_BK    16384u
-#define FT_FLOWU_DEFAULT_MAX_NB_BK    1048576u
-
 RIX_HASH_HEAD(ft_flowu_ht);
 
 
@@ -32,13 +28,9 @@ struct ft_flowu_table {
     size_t                      pool_stride;
     size_t                      pool_entry_offset;
     struct ft_flowu_ht          ht_head;
-    struct ft_bucket_allocator  bucket_alloc;
     unsigned                    start_mask;
     unsigned                    nb_bk;
-    unsigned                    max_nb_bk;
     unsigned                    max_entries;
-    u32                    free_head;
-    unsigned                    grow_fill_pct;
     u8                     ts_shift;
     struct ft_table_stats       stats;
     struct fcore_status         status;
@@ -48,16 +40,14 @@ struct ft_flowu_table {
  * Init / destroy / query
  *===========================================================================*/
 
-int ft_flowu_table_init_ex(struct ft_flowu_table *ft,
-                           void *array,
-                           unsigned max_entries,
-                           size_t stride,
-                           size_t entry_offset,
-                           const struct ft_table_config *cfg);
-
+/** @copydoc ft_flow4_table_init */
 int ft_flowu_table_init(struct ft_flowu_table *ft,
-                        struct flowu_entry *pool,
+                        void *array,
                         unsigned max_entries,
+                        size_t stride,
+                        size_t entry_offset,
+                        void *buckets,
+                        size_t bucket_size,
                         const struct ft_table_config *cfg);
 
 void ft_flowu_table_destroy(struct ft_flowu_table *ft);
@@ -129,17 +119,19 @@ int ft_flowu_table_walk(struct ft_flowu_table *ft,
                         int (*cb)(u32 entry_idx, void *arg),
                         void *arg);
 
-int ft_flowu_table_grow_2x(struct ft_flowu_table *ft);
-int ft_flowu_table_reserve(struct ft_flowu_table *ft,
-                           unsigned min_entries);
+/** @copydoc ft_flow4_table_migrate */
+int ft_flowu_table_migrate(struct ft_flowu_table *ft,
+                           void *new_buckets,
+                           size_t new_bucket_size);
 
 /*===========================================================================
  * Convenience macros / inline helpers
  *===========================================================================*/
 
-#define FT_FLOWU_TABLE_INIT_TYPED(ft, array, max_entries, type, member, cfg) \
-    ft_flowu_table_init_ex((ft), (array), (max_entries), sizeof(type),        \
-                           offsetof(type, member), (cfg))
+#define FT_FLOWU_TABLE_INIT_TYPED(ft, array, max_entries, type, member, \
+                                  buckets, bucket_size, cfg)           \
+    ft_flowu_table_init((ft), (array), (max_entries), sizeof(type),    \
+                        offsetof(type, member), (buckets), (bucket_size), (cfg))
 
 static inline void *
 ft_flowu_table_record_ptr(struct ft_flowu_table *ft, u32 entry_idx)

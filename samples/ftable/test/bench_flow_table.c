@@ -43,7 +43,7 @@ static unsigned ftb_sample_raw_repeat = 11u;
 static unsigned ftb_sample_keep_n = 7u;
 static unsigned ftb_query_n = FTB_DEFAULT_QUERY;
 static int ftb_pin_core = -1;
-static int ftb_use_hugepage;
+static int ftb_use_hugepage = 1;
 static const char *ftb_op_filter;   /* NULL = run all */
 static unsigned char *ftb_cold_buf;
 static volatile u64 ftb_cold_sink;
@@ -91,7 +91,6 @@ struct ftb_variant_ops {
     void (*destroy)(void *ft);
     void (*flush)(void *ft);
     unsigned (*nb_bk)(const void *ft);
-    int (*reserve)(void *ft, unsigned min_entries);
     void *(*entry_ptr)(void *ft, u32 entry_idx);
     u32 (*add_idx)(void *ft, u32 entry_idx, u64 now);
     void (*find_bulk)(void *ft, const void *keys, unsigned nb_keys,
@@ -106,7 +105,7 @@ struct ftb_variant_ops {
                                unsigned nb_keys, u32 *unused_idxv);
     unsigned (*del_key_bulk)(void *ft, const void *keys, unsigned nb_keys,
                              u32 *unused_idxv);
-    int (*grow_2x)(void *ft);
+    int (*migrate)(void *ft, void *new_buckets, size_t new_bucket_size);
     unsigned (*maintain)(void *ft, unsigned start_bk, u64 now,
                          u64 expire_tsc, u32 *expired_idxv,
                          unsigned max_expired, unsigned min_bk_entries,
@@ -176,19 +175,15 @@ ftb_munmap_huge(void *ptr, size_t size)
 }
 
 static void *
-ftb_bucket_alloc(size_t size, size_t align, void *arg __attribute__((unused)))
+ftb_alloc_buckets(size_t size)
 {
-    if (ftb_use_hugepage) {
-        (void)align;
+    if (ftb_use_hugepage)
         return ftb_mmap_huge(size);
-    }
-    return aligned_alloc(align, size);
+    return aligned_alloc(FT_TABLE_BUCKET_ALIGN, size);
 }
 
 static void
-ftb_bucket_free(void *ptr, size_t size,
-                size_t align __attribute__((unused)),
-                void *arg __attribute__((unused)))
+ftb_free_buckets(void *ptr, size_t size)
 {
     if (ftb_use_hugepage)
         ftb_munmap_huge(ptr, size);
@@ -317,23 +312,6 @@ ftb_pool_count(unsigned desired)
     return desired + 1u;
 }
 
-static unsigned
-ftb_nb_bk_hint(unsigned max_entries)
-{
-    unsigned n = (max_entries + (RIX_HASH_BUCKET_ENTRY_SZ - 1u))
-               / RIX_HASH_BUCKET_ENTRY_SZ;
-
-    if (n < 2u)
-        n = 2u;
-    n--;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    return n + 1u;
-}
-
 static double
 ftb_aggregate_double(double *samples, unsigned raw_n, unsigned keep_n)
 {
@@ -413,7 +391,7 @@ ftb_print_usage(FILE *out, const char *prog)
             "  -o, --op OP              run only OP (find_hit,find_miss,add_idx,\n"
             "                           add_ignore,add_update,del_idx,del_key,\n"
             "                           find_del_idx)\n"
-            "  -H, --hugepage           use 2 MiB hugepages for pool/buckets\n"
+            "  -H, --no-hugepage        disable 2 MiB hugepages (on by default)\n"
             "  -h, --help               show this help\n",
             prog, FTB_SAMPLE_MAX, FTB_SAMPLE_MAX, FTB_QUERY_MAX);
 }
@@ -431,7 +409,7 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable,
         { "maint",      no_argument,       NULL, 'm' },
         { "pin-core",   required_argument, NULL, 'p' },
         { "op",         required_argument, NULL, 'o' },
-        { "hugepage",   no_argument,       NULL, 'H' },
+        { "no-hugepage", no_argument,       NULL, 'H' },
         { "help",       no_argument,       NULL, 'h' },
         { NULL,         0,                 NULL,  0  }
     };
@@ -477,7 +455,7 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable,
             ftb_op_filter = optarg;
             break;
         case 'H':
-            ftb_use_hugepage = 1;
+            ftb_use_hugepage = 0;
             break;
         case 'p':
             if (ftb_parse_u32_text(optarg, &parsed, 1) != 0 || parsed > (unsigned)INT_MAX) {
@@ -512,19 +490,11 @@ ftb_parse_options(int argc, char **argv, unsigned *arch_enable,
 }
 
 static struct ft_table_config
-ftb_cfg(unsigned max_entries, int fixed_nb_bk)
+ftb_cfg(void)
 {
     struct ft_table_config cfg;
 
     memset(&cfg, 0, sizeof(cfg));
-    cfg.bucket_alloc.alloc = ftb_bucket_alloc;
-    cfg.bucket_alloc.free = ftb_bucket_free;
-    cfg.bucket_alloc.arg = NULL;
-    cfg.grow_fill_pct = FTB_FILL_PCT;
-    if (fixed_nb_bk != 0) {
-        cfg.start_nb_bk = ftb_nb_bk_hint(max_entries);
-        cfg.max_nb_bk = cfg.start_nb_bk;
-    }
     return cfg;
 }
 
@@ -613,27 +583,34 @@ ftb_keyu(unsigned i)
     return k;
 }
 
-#define FTB_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, init_ex_fn,       \
-                             destroy_fn, flush_fn, nb_bk_fn, reserve_fn,      \
+#define FTB_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, init_fn,           \
+                             destroy_fn, flush_fn, nb_bk_fn,                  \
                              entry_ptr_fn, add_idx_fn, find_bulk_fn,          \
                              add_idx_bulk_fn,                                 \
-                             del_idx_bulk_fn,                           \
+                             del_idx_bulk_fn,                                 \
                              del_key_bulk_fn,                                 \
-                             grow_2x_fn, maintain_fn,                         \
+                             migrate_fn, maintain_fn,                         \
                              maintain_idx_bulk_fn,                            \
                              make_key_fn)                                     \
 static int                                                                    \
 ftb_init_##tag(void *ft, void *records, unsigned max_entries,                 \
                const struct ft_table_config *cfg)                             \
 {                                                                             \
-    return init_ex_fn((struct ft_##prefix##_table *)ft, records,              \
-                      max_entries, sizeof(record_t),                           \
-                      offsetof(record_t, entry), cfg);                         \
+    size_t bsz = ft_table_bucket_size(max_entries);                           \
+    void *bk = ftb_alloc_buckets(bsz);                                       \
+    if (bk == NULL) return -1;                                                \
+    return init_fn((struct ft_##prefix##_table *)ft, records,                 \
+                   max_entries, sizeof(record_t),                              \
+                   offsetof(record_t, entry), bk, bsz, cfg);                  \
 }                                                                             \
 static void                                                                   \
 ftb_destroy_##tag(void *ft)                                                   \
 {                                                                             \
-    destroy_fn((struct ft_##prefix##_table *)ft);                             \
+    struct ft_##prefix##_table *t = (struct ft_##prefix##_table *)ft;         \
+    void *bk = t->buckets;                                                    \
+    size_t bsz = (size_t)t->nb_bk * FT_TABLE_BUCKET_SIZE;                    \
+    destroy_fn(t);                                                            \
+    ftb_free_buckets(bk, bsz);                                               \
 }                                                                             \
 static void                                                                   \
 ftb_flush_##tag(void *ft)                                                     \
@@ -644,11 +621,6 @@ static unsigned                                                               \
 ftb_nb_bk_##tag(const void *ft)                                               \
 {                                                                             \
     return nb_bk_fn((const struct ft_##prefix##_table *)ft);                  \
-}                                                                             \
-static int                                                                    \
-ftb_reserve_##tag(void *ft, unsigned min_entries)                             \
-{                                                                             \
-    return reserve_fn((struct ft_##prefix##_table *)ft, min_entries);         \
 }                                                                             \
 static void *                                                                 \
 ftb_entry_ptr_##tag(void *ft, u32 entry_idx)                             \
@@ -698,9 +670,10 @@ ftb_del_key_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,          \
                            (const key_t *)keys, nb_keys, unused_idxv);        \
 }                                                                             \
 static int                                                                    \
-ftb_grow_2x_##tag(void *ft)                                                   \
+ftb_migrate_##tag(void *ft, void *new_buckets, size_t new_bucket_size)        \
 {                                                                             \
-    return grow_2x_fn((struct ft_##prefix##_table *)ft);                      \
+    return migrate_fn((struct ft_##prefix##_table *)ft,                       \
+                      new_buckets, new_bucket_size);                           \
 }                                                                             \
 static unsigned                                                               \
 ftb_maintain_##tag(void *ft, unsigned start_bk, u64 now,                 \
@@ -740,14 +713,13 @@ static const struct ftb_variant_ops ftb_ops_##tag = {                         \
     .destroy = ftb_destroy_##tag,                                             \
     .flush = ftb_flush_##tag,                                                 \
     .nb_bk = ftb_nb_bk_##tag,                                                 \
-    .reserve = ftb_reserve_##tag,                                             \
     .entry_ptr = ftb_entry_ptr_##tag,                                         \
     .add_idx = ftb_add_idx_##tag,                                             \
     .find_bulk = ftb_find_bulk_##tag,                                         \
     .add_idx_bulk = ftb_add_idx_bulk_##tag,                                   \
     .del_idx_bulk = ftb_del_idx_bulk_##tag,                       \
     .del_key_bulk = ftb_del_key_bulk_##tag,                                   \
-    .grow_2x = ftb_grow_2x_##tag,                                             \
+    .migrate = ftb_migrate_##tag,                                              \
     .maintain = ftb_maintain_##tag,                                           \
     .maintain_idx_bulk = ftb_maintain_idx_bulk_##tag,                         \
     .entry_meta = ftb_entry_meta_##tag,                                       \
@@ -755,38 +727,38 @@ static const struct ftb_variant_ops ftb_ops_##tag = {                         \
 }
 
 FTB_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct ftb_user_record4,
-                     ft_flow4_table_init_ex, ft_flow4_table_destroy,
+                     ft_flow4_table_init, ft_flow4_table_destroy,
                      ft_flow4_table_flush, ft_flow4_table_nb_bk,
-                     ft_flow4_table_reserve, ft_flow4_table_entry_ptr,
+                     ft_flow4_table_entry_ptr,
                      ft_flow4_table_add_idx, ft_flow4_table_find_bulk,
                      ft_flow4_table_add_idx_bulk,
                      ft_flow4_table_del_idx_bulk,
                      ft_flow4_table_del_key_bulk,
-                     ft_flow4_table_grow_2x, ft_flow4_table_maintain,
+                     ft_flow4_table_migrate, ft_flow4_table_maintain,
                      ft_flow4_table_maintain_idx_bulk,
                      ftb_key4);
 
 FTB_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct ftb_user_record6,
-                     ft_flow6_table_init_ex, ft_flow6_table_destroy,
+                     ft_flow6_table_init, ft_flow6_table_destroy,
                      ft_flow6_table_flush, ft_flow6_table_nb_bk,
-                     ft_flow6_table_reserve, ft_flow6_table_entry_ptr,
+                     ft_flow6_table_entry_ptr,
                      ft_flow6_table_add_idx, ft_flow6_table_find_bulk,
                      ft_flow6_table_add_idx_bulk,
                      ft_flow6_table_del_idx_bulk,
                      ft_flow6_table_del_key_bulk,
-                     ft_flow6_table_grow_2x, ft_flow6_table_maintain,
+                     ft_flow6_table_migrate, ft_flow6_table_maintain,
                      ft_flow6_table_maintain_idx_bulk,
                      ftb_key6);
 
 FTB_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct ftb_user_recordu,
-                     ft_flowu_table_init_ex, ft_flowu_table_destroy,
+                     ft_flowu_table_init, ft_flowu_table_destroy,
                      ft_flowu_table_flush, ft_flowu_table_nb_bk,
-                     ft_flowu_table_reserve, ft_flowu_table_entry_ptr,
+                     ft_flowu_table_entry_ptr,
                      ft_flowu_table_add_idx, ft_flowu_table_find_bulk,
                      ft_flowu_table_add_idx_bulk,
                      ft_flowu_table_del_idx_bulk,
                      ft_flowu_table_del_key_bulk,
-                     ft_flowu_table_grow_2x, ft_flowu_table_maintain,
+                     ft_flowu_table_migrate, ft_flowu_table_maintain,
                      ft_flowu_table_maintain_idx_bulk,
                      ftb_keyu);
 
@@ -869,7 +841,7 @@ ftb_measure_find_lookup(const struct ftb_variant_ops *ops,
                         unsigned key_base, enum ftb_find_mode mode)
 {
     unsigned max_entries = ftb_pool_count(entries);
-    struct ft_table_config cfg = ftb_cfg(max_entries, 1);
+    struct ft_table_config cfg = ftb_cfg();
     union ftb_any_table ft;
     void *pool = ftb_alloc_zero(max_entries, ops->record_size);
     void *keys = ftb_xcalloc(ftb_query_n, ops->key_size);
@@ -1256,19 +1228,27 @@ ftb_sample_find_del_idx(const struct ftb_variant_ops *ops, void *ft,
                                 ftb_sample_keep_n);
 }
 
-static double
+struct ftb_grow_result {
+    double alloc_cpe;
+    double migrate_cpe;
+    double total_cpe;
+};
+
+static struct ftb_grow_result
 ftb_measure_grow(const struct ftb_variant_ops *ops,
                  unsigned entries, unsigned fill_pct)
 {
     unsigned max_entries = ftb_pool_count(entries);
-    struct ft_table_config cfg = ftb_cfg(max_entries, 0);
+    struct ft_table_config cfg = ftb_cfg();
     void *pool = ftb_alloc_zero(max_entries, ops->record_size);
-    u64 samples[FTB_GROW_REPEAT];
+    u64 alloc_samples[FTB_GROW_REPEAT];
+    u64 migrate_samples[FTB_GROW_REPEAT];
     unsigned live = ftb_fill_target(max_entries, fill_pct);
+    struct ftb_grow_result res;
 
     for (unsigned r = 0; r < FTB_GROW_REPEAT; r++) {
         union ftb_any_table ft;
-        u64 t0, t1;
+        u64 t0, t1, t2;
 
         memset(pool, 0, (size_t)max_entries * ops->record_size);
         if (ops->init(&ft, pool, max_entries, &cfg) != 0) {
@@ -1276,31 +1256,61 @@ ftb_measure_grow(const struct ftb_variant_ops *ops,
             exit(1);
         }
         ftb_prefill(ops, &ft, live, r * (live + 1024u));
-        t0 = ftb_rdtsc();
-        if (ops->grow_2x(&ft) != 0) {
-            fprintf(stderr, "grow_2x failed in grow bench for %s\n",
-                    ops->name);
-            exit(1);
+        {
+            unsigned cur_nb_bk = ops->nb_bk(&ft);
+            size_t old_bsz = (size_t)cur_nb_bk * FT_TABLE_BUCKET_SIZE;
+            size_t new_bsz = (size_t)cur_nb_bk * 2u * FT_TABLE_BUCKET_SIZE;
+            void *old_bk;
+            void *new_bk;
+
+            t0 = ftb_rdtsc();
+            new_bk = ftb_alloc_buckets(new_bsz);
+            t1 = ftb_rdtsc();
+            if (new_bk == NULL) {
+                fprintf(stderr, "bucket alloc failed for %s\n", ops->name);
+                exit(1);
+            }
+            old_bk = ft.flow4.buckets;  /* buckets at same offset in all variants */
+            if (ops->migrate(&ft, new_bk, new_bsz) != 0) {
+                fprintf(stderr, "migrate failed for %s\n", ops->name);
+                ftb_free_buckets(new_bk, new_bsz);
+                exit(1);
+            }
+            ftb_free_buckets(old_bk, old_bsz);
+            t2 = ftb_rdtsc();
         }
-        t1 = ftb_rdtsc();
-        samples[r] = t1 - t0;
+        alloc_samples[r] = t1 - t0;
+        migrate_samples[r] = t2 - t1;
         ops->destroy(&ft);
     }
 
     ftb_free_zero(pool, max_entries, ops->record_size);
-    return ftb_median_u64(samples, FTB_GROW_REPEAT) / (double)live;
+    res.alloc_cpe = ftb_median_u64(alloc_samples, FTB_GROW_REPEAT)
+                    / (double)live;
+    res.migrate_cpe = ftb_median_u64(migrate_samples, FTB_GROW_REPEAT)
+                      / (double)live;
+    res.total_cpe = res.alloc_cpe + res.migrate_cpe;
+    return res;
 }
 
-static double
+static struct ftb_grow_result
 ftb_sample_grow(const struct ftb_variant_ops *ops,
                 unsigned entries, unsigned fill_pct)
 {
-    double samples[FTB_SAMPLE_MAX];
+    double alloc_s[FTB_SAMPLE_MAX], mig_s[FTB_SAMPLE_MAX];
 
-    for (unsigned r = 0; r < ftb_sample_raw_repeat; r++)
-        samples[r] = ftb_measure_grow(ops, entries, fill_pct);
-    return ftb_aggregate_double(samples, ftb_sample_raw_repeat,
-                                ftb_sample_keep_n);
+    for (unsigned r = 0; r < ftb_sample_raw_repeat; r++) {
+        struct ftb_grow_result g = ftb_measure_grow(ops, entries, fill_pct);
+        alloc_s[r] = g.alloc_cpe;
+        mig_s[r] = g.migrate_cpe;
+    }
+    struct ftb_grow_result out;
+    out.alloc_cpe = ftb_aggregate_double(alloc_s, ftb_sample_raw_repeat,
+                                         ftb_sample_keep_n);
+    out.migrate_cpe = ftb_aggregate_double(mig_s, ftb_sample_raw_repeat,
+                                           ftb_sample_keep_n);
+    out.total_cpe = out.alloc_cpe + out.migrate_cpe;
+    return out;
 }
 
 struct ftb_maint_metrics {
@@ -1424,7 +1434,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
                             u64 *units_out)
 {
     unsigned max_entries = ftb_pool_count(entries);
-    struct ft_table_config cfg = ftb_cfg(max_entries, 1);
+    struct ft_table_config cfg = ftb_cfg();
     union ftb_any_table ft;
     void *pool = ftb_alloc_zero(max_entries, ops->record_size);
     u32 *expired_idxv =
@@ -1691,7 +1701,7 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
                 live, ftb_query_n);
         exit(1);
     }
-    cfg = ftb_cfg(max_entries, 1);
+    cfg = ftb_cfg();
     pool = ftb_alloc_zero(max_entries, ops->record_size);
 
     if (ops->init(&ft, pool, max_entries, &cfg) != 0) {
@@ -1734,7 +1744,7 @@ ftb_run_grow(const struct ftb_variant_ops *ops,
              int argc, char **argv, unsigned base_arg)
 {
     unsigned entries, fill_pct;
-    double grow_cpe;
+
 
     ftb_parse_entries_fill(argc, argv, base_arg, &entries, &fill_pct);
     if (ftb_fill_target(entries, fill_pct) < ftb_query_n) {
@@ -1744,9 +1754,11 @@ ftb_run_grow(const struct ftb_variant_ops *ops,
     }
     printf("\nftable grow benchmark (%s)\n\n", ops->name);
     ftb_print_sampling_config();
-    grow_cpe = ftb_sample_grow(ops, entries, fill_pct);
+    struct ftb_grow_result grow = ftb_sample_grow(ops, entries, fill_pct);
     printf("[entries=%u fill=%u%%]\n", entries, fill_pct);
-    printf("  grow_2x    %8.2f cy/live-entry\n", grow_cpe);
+    printf("  grow_alloc   %8.2f cy/live-entry\n", grow.alloc_cpe);
+    printf("  grow_migrate %8.2f cy/live-entry\n", grow.migrate_cpe);
+    printf("  grow_total   %8.2f cy/live-entry\n", grow.total_cpe);
 }
 
 static unsigned

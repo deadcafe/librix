@@ -16,9 +16,6 @@
 #define FT_OPS_DEFINE(prefix)                                                  \
 struct ft_##prefix##_ops {                                                     \
     /* cold-path */                                                            \
-    int (*init_ex)(struct ft_##prefix##_table *ft, void *array,                \
-                   unsigned max_entries, size_t stride, size_t entry_offset,    \
-                   const struct ft_table_config *cfg);                         \
     void (*destroy)(struct ft_##prefix##_table *ft);                           \
     void (*flush)(struct ft_##prefix##_table *ft);                             \
     unsigned (*nb_entries)(const struct ft_##prefix##_table *ft);               \
@@ -29,8 +26,8 @@ struct ft_##prefix##_ops {                                                     \
                    struct fcore_status *out);                                   \
     int (*walk)(struct ft_##prefix##_table *ft,                                \
                 int (*cb)(u32 entry_idx, void *arg), void *arg);               \
-    int (*grow_2x)(struct ft_##prefix##_table *ft);                            \
-    int (*reserve)(struct ft_##prefix##_table *ft, unsigned min_entries);       \
+    int (*migrate)(struct ft_##prefix##_table *ft,                             \
+                   void *new_buckets, size_t new_bucket_size);                 \
     /* hot-path */                                                             \
     void (*find_bulk)(struct ft_##prefix##_table *ft,                          \
                       const struct prefix##_key *keys,                         \

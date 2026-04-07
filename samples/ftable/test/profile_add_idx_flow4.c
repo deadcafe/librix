@@ -76,9 +76,8 @@ profile_cfg(void)
     struct ft_table_config cfg;
 
     memset(&cfg, 0, sizeof(cfg));
-    cfg.bucket_alloc.alloc = bucket_alloc;
-    cfg.bucket_alloc.free = bucket_free;
-    cfg.grow_fill_pct = DEFAULT_FILL_PCT;
+    (void)bucket_alloc;
+    (void)bucket_free;
     return cfg;
 }
 

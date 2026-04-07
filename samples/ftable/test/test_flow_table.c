@@ -19,20 +19,6 @@
 #define TEST_NOW_DUP   UINT64_C(0x303)
 
 static void *
-test_bucket_alloc(size_t size, size_t align, void *arg __attribute__((unused)))
-{
-    return aligned_alloc(align, size);
-}
-
-static void
-test_bucket_free(void *ptr, size_t size __attribute__((unused)),
-                 size_t align __attribute__((unused)),
-                 void *arg __attribute__((unused)))
-{
-    free(ptr);
-}
-
-static void *
 test_aligned_calloc(size_t count, size_t size, size_t align)
 {
     size_t total = count * size;
@@ -43,18 +29,19 @@ test_aligned_calloc(size_t count, size_t size, size_t align)
     return ptr;
 }
 
+static void *
+test_alloc_buckets(unsigned max_entries)
+{
+    size_t sz = ft_table_bucket_size(max_entries);
+    return aligned_alloc(FT_TABLE_BUCKET_ALIGN, sz);
+}
+
 static struct ft_table_config
-test_cfg(unsigned start_nb_bk, unsigned max_nb_bk, unsigned grow_fill_pct)
+test_cfg(void)
 {
     struct ft_table_config cfg;
 
     memset(&cfg, 0, sizeof(cfg));
-    cfg.start_nb_bk = start_nb_bk;
-    cfg.max_nb_bk = max_nb_bk;
-    cfg.grow_fill_pct = grow_fill_pct;
-    cfg.bucket_alloc.alloc = test_bucket_alloc;
-    cfg.bucket_alloc.free = test_bucket_free;
-    cfg.bucket_alloc.arg = NULL;
     return cfg;
 }
 
@@ -182,7 +169,6 @@ struct test_variant_ops {
     size_t entry_offset;
     size_t meta_offset;
     size_t cookie_offset;
-    unsigned default_min_nb_bk;
     int (*init)(void *ft, void *records, unsigned max_entries,
                 const struct ft_table_config *cfg);
     void (*destroy)(void *ft);
@@ -207,8 +193,7 @@ struct test_variant_ops {
     unsigned (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
                                unsigned nb_keys, u32 *unused_idxv);
     int (*walk)(void *ft, int (*cb)(u32 entry_idx, void *arg), void *arg);
-    int (*grow_2x)(void *ft);
-    int (*reserve)(void *ft, unsigned min_entries);
+    int (*migrate)(void *ft, void *new_buckets, size_t new_bucket_size);
     unsigned (*maintain_idx_bulk)(void *ft,
                                   const u32 *entry_idxv,
                                   unsigned nb_idx,
@@ -223,28 +208,34 @@ struct test_variant_ops {
     void (*make_key)(void *out, unsigned i);
 };
 
-#define TEST_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, entry_t, init_ex_fn, \
+#define TEST_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, entry_t, init_fn,  \
                               destroy_fn, flush_fn, nb_entries_fn, nb_bk_fn,   \
                               stats_fn, status_fn, find_fn, add_idx_fn,        \
                               del_key_fn, del_idx_fn, find_bulk_fn,       \
                               add_idx_bulk_fn,                                 \
                               del_idx_bulk_fn,                           \
-                              walk_fn, grow_2x_fn,                              \
-                              reserve_fn, maintain_idx_bulk_fn,                 \
+                              walk_fn, migrate_fn,                              \
+                              maintain_idx_bulk_fn,                             \
                               record_ptr_fn, entry_ptr_fn,                      \
-                              make_key_fn, default_min_nb_bk_v)                 \
+                              make_key_fn)                                      \
 static int                                                                 \
 testv_init_##tag(void *ft, void *records, unsigned max_entries,            \
                  const struct ft_table_config *cfg)                        \
 {                                                                          \
-    return init_ex_fn((struct ft_##prefix##_table *)ft, records,          \
-                      max_entries, sizeof(record_t),                       \
-                      offsetof(record_t, entry), cfg);                     \
+    size_t bsz = ft_table_bucket_size(max_entries);                        \
+    void *bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);                 \
+    if (bk == NULL) return -1;                                             \
+    return init_fn((struct ft_##prefix##_table *)ft, records,              \
+                   max_entries, sizeof(record_t),                           \
+                   offsetof(record_t, entry), bk, bsz, cfg);              \
 }                                                                          \
 static void                                                                 \
 testv_destroy_##tag(void *ft)                                              \
 {                                                                          \
-    destroy_fn((struct ft_##prefix##_table *)ft);                          \
+    struct ft_##prefix##_table *t = (struct ft_##prefix##_table *)ft;      \
+    void *bk = t->buckets;                                                 \
+    destroy_fn(t);                                                         \
+    free(bk);                                                              \
 }                                                                          \
 static void                                                                 \
 testv_flush_##tag(void *ft)                                                \
@@ -333,14 +324,10 @@ testv_walk_##tag(void *ft, int (*cb)(u32 entry_idx, void *arg),        \
     return walk_fn((struct ft_##prefix##_table *)ft, cb, arg);              \
 }                                                                          \
 static int                                                                  \
-testv_grow_2x_##tag(void *ft)                                               \
+testv_migrate_##tag(void *ft, void *new_buckets, size_t new_bucket_size)    \
 {                                                                          \
-    return grow_2x_fn((struct ft_##prefix##_table *)ft);                    \
-}                                                                          \
-static int                                                                  \
-testv_reserve_##tag(void *ft, unsigned min_entries)                         \
-{                                                                          \
-    return reserve_fn((struct ft_##prefix##_table *)ft, min_entries);       \
+    return migrate_fn((struct ft_##prefix##_table *)ft,                     \
+                      new_buckets, new_bucket_size);                        \
 }                                                                          \
 static unsigned                                                             \
 testv_maintain_idx_bulk_##tag(void *ft, const u32 *entry_idxv,         \
@@ -379,7 +366,6 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .entry_offset = offsetof(record_t, entry),                              \
     .meta_offset = offsetof(entry_t, meta),                                 \
     .cookie_offset = offsetof(record_t, cookie),                            \
-    .default_min_nb_bk = (default_min_nb_bk_v),                             \
     .init = testv_init_##tag,                                               \
     .destroy = testv_destroy_##tag,                                         \
     .flush = testv_flush_##tag,                                             \
@@ -396,8 +382,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .set_permanent_idx = testv_set_permanent_idx_##tag,                     \
     .del_idx_bulk = testv_del_idx_bulk_##tag,                   \
     .walk = testv_walk_##tag,                                               \
-    .grow_2x = testv_grow_2x_##tag,                                         \
-    .reserve = testv_reserve_##tag,                                         \
+    .migrate = testv_migrate_##tag,                                         \
     .maintain_idx_bulk = testv_maintain_idx_bulk_##tag,                     \
     .record_ptr = testv_record_ptr_##tag,                                   \
     .entry_ptr = testv_entry_ptr_##tag,                                     \
@@ -405,7 +390,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
 }
 
 TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
-                      struct flow4_entry, ft_flow4_table_init_ex,
+                      struct flow4_entry, ft_flow4_table_init,
                       ft_flow4_table_destroy, ft_flow4_table_flush,
                       ft_flow4_table_nb_entries, ft_flow4_table_nb_bk,
                       ft_flow4_table_stats, ft_flow4_table_status,
@@ -413,13 +398,13 @@ TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
                       ft_flow4_table_del_key_bulk, ft_flow4_table_del_idx,
                       ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
                       ft_flow4_table_del_idx_bulk, ft_flow4_table_walk,
-                      ft_flow4_table_grow_2x, ft_flow4_table_reserve,
+                      ft_flow4_table_migrate,
                       ft_flow4_table_maintain_idx_bulk,
                       ft_flow4_table_record_ptr, ft_flow4_table_entry_ptr,
-                      test_key, FT_FLOW4_DEFAULT_MIN_NB_BK);
+                      test_key);
 
 TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
-                      struct flow6_entry, ft_flow6_table_init_ex,
+                      struct flow6_entry, ft_flow6_table_init,
                       ft_flow6_table_destroy, ft_flow6_table_flush,
                       ft_flow6_table_nb_entries, ft_flow6_table_nb_bk,
                       ft_flow6_table_stats, ft_flow6_table_status,
@@ -427,13 +412,13 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
                       ft_flow6_table_del_key_bulk, ft_flow6_table_del_idx,
                       ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
                       ft_flow6_table_del_idx_bulk, ft_flow6_table_walk,
-                      ft_flow6_table_grow_2x, ft_flow6_table_reserve,
+                      ft_flow6_table_migrate,
                       ft_flow6_table_maintain_idx_bulk,
                       ft_flow6_table_record_ptr, ft_flow6_table_entry_ptr,
-                      test_key6, FT_FLOW6_DEFAULT_MIN_NB_BK);
+                      test_key6);
 
 TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
-                      struct flowu_entry, ft_flowu_table_init_ex,
+                      struct flowu_entry, ft_flowu_table_init,
                       ft_flowu_table_destroy, ft_flowu_table_flush,
                       ft_flowu_table_nb_entries, ft_flowu_table_nb_bk,
                       ft_flowu_table_stats, ft_flowu_table_status,
@@ -441,10 +426,10 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                       ft_flowu_table_del_key_bulk, ft_flowu_table_del_idx,
                       ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
                       ft_flowu_table_del_idx_bulk, ft_flowu_table_walk,
-                      ft_flowu_table_grow_2x, ft_flowu_table_reserve,
+                      ft_flowu_table_migrate,
                       ft_flowu_table_maintain_idx_bulk,
                       ft_flowu_table_record_ptr, ft_flowu_table_entry_ptr,
-                      test_keyu, FT_FLOWU_DEFAULT_MIN_NB_BK);
+                      test_keyu);
 
 #define TEST_KEY_AT(base, ops, i) \
     ((void *)((unsigned char *)(base) + (size_t)(i) * (ops)->key_size))
@@ -499,28 +484,13 @@ walk_count_cb(u32 entry_idx, void *arg)
     return 0;
 }
 
-struct fail_bucket_alloc_ctx {
-    unsigned call_count;
-    unsigned fail_after;
-};
-
-static void *
-fail_bucket_alloc(size_t size, size_t align, void *arg)
-{
-    struct fail_bucket_alloc_ctx *ctx = (struct fail_bucket_alloc_ctx *)arg;
-
-    ctx->call_count++;
-    if (ctx->call_count > ctx->fail_after)
-        return NULL;
-    return aligned_alloc(align, size);
-}
-
 static int
 test_basic_add_find_del(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct flow4_key k1 = test_key(1u);
     struct flow4_key k2 = test_key(2u);
     u32 idx1, idx2;
@@ -529,7 +499,8 @@ test_basic_add_find_del(void)
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("ft_flow4_table_init failed");
     idx1 = test_add_idx_key(&ft, 1u, &k1);
     idx2 = test_add_idx_key(&ft, 2u, &k2);
@@ -548,6 +519,7 @@ test_basic_add_find_del(void)
     if (FT4_FIND(&ft, &k1) != 0u)
         FAIL("deleted key should miss");
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -555,9 +527,10 @@ test_basic_add_find_del(void)
 static int
 test_init_ex_and_mapping(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *users;
+    void *bk;
     struct flow4_key key = test_key(10u);
     u32 idx;
 
@@ -567,8 +540,9 @@ test_init_ex_and_mapping(void)
         FAIL("calloc users");
     for (unsigned i = 0; i < 64u; i++)
         users[i].cookie = UINT32_C(0xabc00000) + i;
+    bk = test_alloc_buckets(64u);
     if (FT_FLOW4_TABLE_INIT_TYPED(&ft, users, 64u,
-                                  struct test_user_record, entry, &cfg) != 0)
+                                  struct test_user_record, entry, bk, ft_table_bucket_size(64u), &cfg) != 0)
         FAIL("FT_FLOW4_TABLE_INIT_TYPED failed");
     idx = test_add_idx_key(&ft, 1u, &key);
     if (idx != 1u)
@@ -583,6 +557,7 @@ test_init_ex_and_mapping(void)
     if (users[idx - 1u].cookie != UINT32_C(0xabc00000) + (idx - 1u))
         FAIL("user record payload mismatch");
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(users);
     return 0;
 }
@@ -590,16 +565,18 @@ test_init_ex_and_mapping(void)
 static int
 test_manual_grow_preserves_entries(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     u32 idxs[256];
 
-    printf("[T] flow4 table grow_2x preserves entries\n");
+    printf("[T] flow4 table migrate preserves entries\n");
     pool = test_aligned_calloc(4096u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 4096u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(4096u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 4096u, struct test_user_record, entry, bk, ft_table_bucket_size(4096u), &cfg) != 0)
         FAIL("init failed");
     for (unsigned i = 0; i < 256u; i++) {
         struct flow4_key key = test_key(i + 100u);
@@ -608,41 +585,69 @@ test_manual_grow_preserves_entries(void)
         if (idxs[i] != i + 1u)
             FAILF("add before grow failed at %u", i);
     }
-    if (ft_flow4_table_grow_2x(&ft) != 0)
-        FAIL("grow_2x failed");
+    {
+        size_t new_bsz = (size_t)ft.nb_bk * 2u * FT_TABLE_BUCKET_SIZE;
+        void *new_bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, new_bsz);
+        void *old_bk = ft.buckets;
+
+        if (ft_flow4_table_migrate(&ft, new_bk, new_bsz) != 0) {
+            free(new_bk);
+            FAIL("migrate failed");
+        }
+        free(old_bk);
+    }
     for (unsigned i = 0; i < 256u; i++) {
         struct flow4_key key = test_key(i + 100u);
 
         if (FT4_FIND(&ft, &key) != idxs[i])
             FAILF("find after grow mismatch at %u", i);
     }
-    ft_flow4_table_destroy(&ft);
+    {
+        void *final_bk = ft.buckets;
+        ft_flow4_table_destroy(&ft);
+        free(final_bk);
+    }
     free(pool);
     return 0;
 }
 
 static int
-test_reserve(void)
+test_migrate_doubles_buckets(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
+    unsigned old_nb_bk;
 
-    printf("[T] flow4 table reserve\n");
+    printf("[T] flow4 table migrate doubles buckets\n");
     pool = test_aligned_calloc(200000u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 200000u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(200000u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 200000u, struct test_user_record, entry, bk, ft_table_bucket_size(200000u), &cfg) != 0)
         FAIL("init failed");
-    if (ft_flow4_table_nb_bk(&ft) != FT_FLOW4_DEFAULT_MIN_NB_BK)
-        FAILF("unexpected initial nb_bk=%u", ft_flow4_table_nb_bk(&ft));
-    if (ft_flow4_table_reserve(&ft, 160000u) != 0)
-        FAIL("reserve failed");
-    if (ft_flow4_table_nb_bk(&ft) != (FT_FLOW4_DEFAULT_MIN_NB_BK << 1))
-        FAILF("reserve should grow to %u, got %u",
-              FT_FLOW4_DEFAULT_MIN_NB_BK << 1, ft_flow4_table_nb_bk(&ft));
+    old_nb_bk = ft_flow4_table_nb_bk(&ft);
+    {
+        size_t new_bsz = (size_t)old_nb_bk * 2u * FT_TABLE_BUCKET_SIZE;
+        void *new_bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, new_bsz);
+        void *old_bk = ft.buckets;
 
-    ft_flow4_table_destroy(&ft);
+        if (ft_flow4_table_migrate(&ft, new_bk, new_bsz) != 0) {
+            free(new_bk);
+            FAIL("migrate failed");
+        }
+        free(old_bk);
+    }
+    if (ft_flow4_table_nb_bk(&ft) != old_nb_bk * 2u)
+        FAILF("migrate should double nb_bk to %u, got %u",
+              old_nb_bk * 2u, ft_flow4_table_nb_bk(&ft));
+
+    {
+        void *final_bk = ft.buckets;
+        ft_flow4_table_destroy(&ft);
+        free(final_bk);
+    }
     free(pool);
     return 0;
 }
@@ -650,9 +655,10 @@ test_reserve(void)
 static int
 test_bulk_ops_and_stats(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct flow4_key keys[8];
     u32 entry_idxv[8];
     struct ft_table_result find_results[8];
@@ -663,7 +669,8 @@ test_bulk_ops_and_stats(void)
     pool = test_aligned_calloc(256u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 256u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(256u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 256u, struct test_user_record, entry, bk, ft_table_bucket_size(256u), &cfg) != 0)
         FAIL("init failed");
     for (unsigned i = 0; i < 8u; i++) {
         keys[i] = test_key(i + 2000u);
@@ -719,6 +726,7 @@ test_bulk_ops_and_stats(void)
         FAILF("del_miss=%llu", (unsigned long long)stats.core.del_miss);
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -726,9 +734,10 @@ test_bulk_ops_and_stats(void)
 static int
 test_walk_flush_and_stats_reset(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct walk_ctx ctx;
     struct ft_table_stats stats;
 
@@ -736,7 +745,8 @@ test_walk_flush_and_stats_reset(void)
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 16u; i++) {
@@ -771,43 +781,42 @@ test_walk_flush_and_stats_reset(void)
               (unsigned long long)stats.core.adds);
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
 
 static int
-test_allocator_failure_and_max_bucket_limit(void)
+test_migrate_invalid_args(void)
 {
-    struct fail_bucket_alloc_ctx alloc_ctx = { 0u, 1u };
-    struct ft_table_config cfg;
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
 
-    printf("[T] flow4 table allocator failure/max bucket limit\n");
-    cfg = test_cfg(FT_FLOW4_DEFAULT_MIN_NB_BK,
-                   FT_FLOW4_DEFAULT_MIN_NB_BK, 60u);
-    cfg.bucket_alloc.alloc = fail_bucket_alloc;
-    cfg.bucket_alloc.free = test_bucket_free;
-    cfg.bucket_alloc.arg = &alloc_ctx;
-
-    pool = test_aligned_calloc(200000u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    printf("[T] flow4 table migrate invalid args\n");
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 200000u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
-    if (ft_flow4_table_reserve(&ft, 160000u) == 0)
-        FAIL("reserve should fail when max_nb_bk is reached");
-    if (ft_flow4_table_grow_2x(&ft) == 0)
-        FAIL("grow_2x should fail at max_nb_bk");
-    ft_flow4_table_destroy(&ft);
 
-    alloc_ctx.call_count = 0u;
-    alloc_ctx.fail_after = 0u;
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 200000u, struct test_user_record, entry, &cfg) == 0) {
-        ft_flow4_table_destroy(&ft);
-        FAIL("init should fail when allocator returns NULL");
+    if (ft_flow4_table_migrate(&ft, NULL, (size_t)FT_TABLE_MIN_NB_BK * 2u * FT_TABLE_BUCKET_SIZE) == 0)
+        FAIL("migrate with NULL buckets should fail");
+    {
+        size_t bad_sz = 123u;
+        void *tmp = aligned_alloc(FT_TABLE_BUCKET_ALIGN, FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE);
+
+        if (ft_flow4_table_migrate(&ft, tmp, bad_sz) == 0) {
+            free(tmp);
+            FAIL("migrate with non-power-of-2 bucket_size should fail");
+        }
+        free(tmp);
     }
 
+    ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -815,9 +824,10 @@ test_allocator_failure_and_max_bucket_limit(void)
 static int
 test_duplicate_and_delete_miss_stats(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct ft_table_stats stats;
     struct flow4_key key = test_key(6000u);
     struct flow4_key miss = test_key(6001u);
@@ -827,7 +837,8 @@ test_duplicate_and_delete_miss_stats(void)
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
     idx = test_add_idx_key(&ft, 1u, &key);
@@ -849,6 +860,7 @@ test_duplicate_and_delete_miss_stats(void)
         FAILF("add_failed=%llu", (unsigned long long)stats.core.add_failed);
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -856,16 +868,18 @@ test_duplicate_and_delete_miss_stats(void)
 static int
 test_walk_early_stop(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct walk_ctx ctx;
 
     printf("[T] flow4 table walk early stop\n");
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 16u; i++) {
@@ -883,31 +897,27 @@ test_walk_early_stop(void)
         FAILF("walk early-stop count=%u", ctx.count);
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
 
 static int
-test_grow_failure_preserves_table(void)
+test_migrate_failure_preserves_table(void)
 {
-    struct fail_bucket_alloc_ctx alloc_ctx = { 0u, 1u };
-    struct ft_table_config cfg;
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     u32 idxs[64];
     unsigned old_nb_bk;
 
-    printf("[T] flow4 table grow failure preserves table\n");
-    cfg = test_cfg(FT_FLOW4_DEFAULT_MIN_NB_BK,
-                   FT_FLOW4_DEFAULT_MIN_NB_BK << 1, 60u);
-    cfg.bucket_alloc.alloc = fail_bucket_alloc;
-    cfg.bucket_alloc.free = test_bucket_free;
-    cfg.bucket_alloc.arg = &alloc_ctx;
-
+    printf("[T] flow4 table migrate failure preserves table\n");
     pool = test_aligned_calloc(2048u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 2048u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(2048u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 2048u, struct test_user_record, entry, bk, ft_table_bucket_size(2048u), &cfg) != 0)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 64u; i++) {
@@ -919,43 +929,53 @@ test_grow_failure_preserves_table(void)
     }
 
     old_nb_bk = ft_flow4_table_nb_bk(&ft);
-    if (ft_flow4_table_grow_2x(&ft) == 0)
-        FAIL("grow_2x should fail");
+    {
+        size_t small_bsz = (size_t)(old_nb_bk / 2u) * FT_TABLE_BUCKET_SIZE;
+        void *small_bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, small_bsz);
+
+        if (ft_flow4_table_migrate(&ft, small_bk, small_bsz) == 0) {
+            free(small_bk);
+            FAIL("migrate to smaller buckets should fail");
+        }
+        free(small_bk);
+    }
     if (ft_flow4_table_nb_bk(&ft) != old_nb_bk)
-        FAIL("nb_bk changed after failed grow");
+        FAIL("nb_bk changed after failed migrate");
 
     for (unsigned i = 0; i < 64u; i++) {
         struct flow4_key key = test_key(i + 8000u);
 
         if (FT4_FIND(&ft, &key) != idxs[i])
-            FAILF("find after failed grow mismatch at %u", i);
+            FAILF("find after failed migrate mismatch at %u", i);
     }
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
 
 static int
-test_config_rounding_and_clamp(void)
+test_bucket_size_determines_nb_bk(void)
 {
-    struct ft_table_config cfg = test_cfg(9000u, 9000u, 0u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
 
-    printf("[T] flow4 table config rounding/clamp\n");
+    printf("[T] flow4 table bucket_size determines nb_bk\n");
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
-    if (ft_flow4_table_nb_bk(&ft) != FT_FLOW4_DEFAULT_MIN_NB_BK)
-        FAILF("rounded/clamped nb_bk=%u", ft_flow4_table_nb_bk(&ft));
-    if (ft_flow4_table_grow_2x(&ft) == 0)
-        FAIL("grow_2x should fail because max_nb_bk clamps to start");
+    if (ft_flow4_table_nb_bk(&ft) != FT_TABLE_MIN_NB_BK)
+        FAILF("nb_bk=%u expected=%u", ft_flow4_table_nb_bk(&ft), FT_TABLE_MIN_NB_BK);
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -972,9 +992,11 @@ test_high_fill(void)
     const unsigned nb_bk = 64u;
     const unsigned capacity = nb_bk * 16u; /* 1024 */
     const unsigned target = (capacity * 15u) / 16u; /* 960 */
-    struct ft_table_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
+    size_t bsz = (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE;
     unsigned inserted = 0u;
 
     printf("[T] flow4 table high fill (94%%)\n");
@@ -982,7 +1004,8 @@ test_high_fill(void)
                                FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, capacity, struct test_user_record, entry, &cfg) != 0)
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, capacity, struct test_user_record, entry, bk, bsz, &cfg) != 0)
         FAIL("init failed");
 
     for (unsigned i = 0; i < target; i++) {
@@ -1029,6 +1052,7 @@ test_high_fill(void)
     }
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -1043,9 +1067,11 @@ test_max_fill(void)
 {
     const unsigned nb_bk = 128u;
     const unsigned capacity = nb_bk * 16u; /* 2048 */
-    struct ft_table_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
+    size_t bsz = (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE;
     unsigned inserted = 0u;
 
     printf("[T] flow4 table max fill\n");
@@ -1053,7 +1079,8 @@ test_max_fill(void)
                                FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, capacity, struct test_user_record, entry, &cfg) != 0)
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, capacity, struct test_user_record, entry, bk, bsz, &cfg) != 0)
         FAIL("init failed");
 
     for (unsigned i = 0; i < capacity; i++) {
@@ -1090,6 +1117,7 @@ test_max_fill(void)
     }
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -1108,9 +1136,11 @@ test_kickout_safety(void)
     const unsigned nb_bk = 32u;
     const unsigned capacity = nb_bk * 16u; /* 512 */
     const unsigned overflow = 64u;
-    struct ft_table_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
+    size_t bsz = (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE;
     unsigned phase1_count = 0u;
     unsigned lost = 0u;
 
@@ -1119,8 +1149,9 @@ test_kickout_safety(void)
                                FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
     if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, capacity + overflow,
-                                  struct test_user_record, entry, &cfg) != 0)
+                                  struct test_user_record, entry, bk, bsz, &cfg) != 0)
         FAIL("init failed");
 
     /* Phase 1: fill until first rejection */
@@ -1154,6 +1185,7 @@ test_kickout_safety(void)
         FAILF("kickout caused %u victim(s) to become unreachable", lost);
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -1165,9 +1197,10 @@ test_kickout_safety(void)
 static int
 test_del_idx(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct flow4_key keys[8];
     u32 idxs[8];
 
@@ -1175,7 +1208,8 @@ test_del_idx(void)
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
     for (unsigned i = 0; i < 8u; i++) {
@@ -1207,6 +1241,7 @@ test_del_idx(void)
         FAIL("double del_idx should return 0");
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -1214,10 +1249,11 @@ test_del_idx(void)
 static int
 test_maintain_basic(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     const u64 expire_tsc = UINT64_C(100000);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct flow4_key keys[16];
     struct flow4_key new_key;
     u32 expired[16];
@@ -1229,7 +1265,8 @@ test_maintain_basic(void)
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
     /* Add 8 entries (TEST_NOW_ADD = 0x101 = 257) */
@@ -1324,6 +1361,7 @@ test_maintain_basic(void)
         FAIL("new key should be found after same-idx reuse");
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -1331,10 +1369,11 @@ test_maintain_basic(void)
 static int
 test_maintain_partial_and_limit(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     const u64 expire_tsc = UINT64_C(100000);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct flow4_key keys[16];
     struct flow4_entry *entry;
     u32 expired[4];
@@ -1345,7 +1384,8 @@ test_maintain_partial_and_limit(void)
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
     /* Add 8 entries (TEST_NOW_ADD = 0x101 = 257) */
@@ -1399,12 +1439,14 @@ test_maintain_partial_and_limit(void)
     /* Test max_expired limit with next_bk continuation.
      * Use a fresh table to avoid flush+re-add cur_hash issues. */
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
 
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool 2");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init 2 failed");
 
     for (unsigned i = 0; i < 8u; i++) {
@@ -1442,6 +1484,7 @@ test_maintain_partial_and_limit(void)
     }
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -1449,10 +1492,11 @@ test_maintain_partial_and_limit(void)
 static int
 test_maintain_min_bk_entries(void)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     const u64 expire_tsc = UINT64_C(100000);
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
     struct flow4_key keys[16];
     struct flow4_entry *entry;
     u32 expired[16];
@@ -1463,7 +1507,8 @@ test_maintain_min_bk_entries(void)
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init failed");
 
     /* Add 8 entries, all expired */
@@ -1489,11 +1534,13 @@ test_maintain_min_bk_entries(void)
 
     /* Re-create table for skip test */
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     if (pool == NULL)
         FAIL("calloc pool 2");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, &cfg) != 0)
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u, struct test_user_record, entry, bk, ft_table_bucket_size(128u), &cfg) != 0)
         FAIL("init 2 failed");
 
     for (unsigned i = 0; i < 8u; i++) {
@@ -1518,6 +1565,7 @@ test_maintain_min_bk_entries(void)
         FAILF("min_bk=1 should expire 8, got %u", n);
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     return 0;
 }
@@ -1529,19 +1577,24 @@ test_maintain_min_bk_entries(void)
 static int
 test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
 {
-    struct ft_table_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_table_config cfg = test_cfg();
     struct ft_flow4_table ft;
     struct test_user_record *pool;
+    void *bk;
+    size_t bsz = (size_t)nb_bk * FT_TABLE_BUCKET_SIZE;
     u8 *in_table; /* 1 if entry i is in table */
     unsigned in_count = 0u;
 
     printf("[T] flow4 table fuzz seed=%u N=%u nb_bk=%u ops=%u\n",
            seed, n, nb_bk, ops);
+    if (bsz < (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE)
+        bsz = (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE;
     pool = test_aligned_calloc(n + 1u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
     in_table = calloc(n, 1u);
     if (pool == NULL || in_table == NULL)
         FAIL("alloc failed");
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, n, struct test_user_record, entry, &cfg) != 0)
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, n, struct test_user_record, entry, bk, bsz, &cfg) != 0)
         FAIL("init failed");
 
     for (unsigned op = 0; op < ops; op++) {
@@ -1616,6 +1669,7 @@ test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
     }
 
     ft_flow4_table_destroy(&ft);
+    free(bk);
     free(pool);
     free(in_table);
     return 0;
@@ -1656,7 +1710,7 @@ testv_add_idx_key(const struct test_variant_ops *ops, void *ft,
 static int
 testv_basic_add_find_del(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(128u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -1694,7 +1748,7 @@ testv_basic_add_find_del(const struct test_variant_ops *ops)
 static int
 testv_init_ex_and_mapping(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *users = test_aligned_calloc(64u, ops->record_size,
                                       FT_TABLE_CACHE_LINE_SIZE);
@@ -1737,7 +1791,7 @@ testv_init_ex_and_mapping(const struct test_variant_ops *ops)
 static int
 testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(256u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -1805,7 +1859,7 @@ testv_bulk_ops_and_stats(const struct test_variant_ops *ops)
 static int
 testv_add_idx_bulk_duplicate_ignore(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(64u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -1865,7 +1919,7 @@ testv_add_idx_bulk_duplicate_ignore(const struct test_variant_ops *ops)
 static int
 testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(64u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -1940,7 +1994,7 @@ testv_add_idx_bulk_mixed_batch(const struct test_variant_ops *ops)
 static int
 testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(64u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -2084,8 +2138,8 @@ testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
 static int
 testv_timestamp_update(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
-    struct ft_table_config cfg_shift = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
+    struct ft_table_config cfg_shift = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(32u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -2175,7 +2229,7 @@ testv_timestamp_update(const struct test_variant_ops *ops)
 static int
 testv_permanent_timestamp(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(32u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -2231,7 +2285,7 @@ testv_permanent_timestamp(const struct test_variant_ops *ops)
 static int
 testv_maintain_idx_bulk(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     const u64 expire_tsc = UINT64_C(100000);
     union test_any_table ft;
     void *pool = test_aligned_calloc(2048u, ops->record_size,
@@ -2431,14 +2485,14 @@ testv_maintain_idx_bulk(const struct test_variant_ops *ops)
 static int
 testv_manual_grow_preserves_entries(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(4096u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
     union test_any_key key;
     u32 idxs[256];
 
-    printf("[T] %s table grow_2x preserves entries\n", ops->name);
+    printf("[T] %s table migrate preserves entries\n", ops->name);
     if (pool == NULL)
         FAIL("calloc pool");
     if (ops->init(&ft, pool, 4096u, &cfg) != 0)
@@ -2449,8 +2503,18 @@ testv_manual_grow_preserves_entries(const struct test_variant_ops *ops)
         if (idxs[i] != i + 1u)
             FAILF("add before grow failed at %u", i);
     }
-    if (ops->grow_2x(&ft) != 0)
-        FAIL("grow_2x failed");
+    {
+        unsigned cur_nb_bk = ops->nb_bk(&ft);
+        size_t new_bsz = (size_t)cur_nb_bk * 2u * FT_TABLE_BUCKET_SIZE;
+        void *new_bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, new_bsz);
+        void *old_bk = ft.flow4.buckets;
+
+        if (ops->migrate(&ft, new_bk, new_bsz) != 0) {
+            free(new_bk);
+            FAIL("migrate failed");
+        }
+        free(old_bk);
+    }
     for (unsigned i = 0; i < 256u; i++) {
         ops->make_key(&key, i + 100u);
         if (TEST_OPS_FIND(ops, &ft, &key) != idxs[i])
@@ -2462,24 +2526,33 @@ testv_manual_grow_preserves_entries(const struct test_variant_ops *ops)
 }
 
 static int
-testv_reserve(const struct test_variant_ops *ops)
+testv_migrate_doubles_buckets(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(200000u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
+    unsigned old_nb_bk;
 
-    printf("[T] %s table reserve\n", ops->name);
+    printf("[T] %s table migrate doubles buckets\n", ops->name);
     if (pool == NULL)
         FAIL("calloc pool");
     if (ops->init(&ft, pool, 200000u, &cfg) != 0)
         FAIL("init failed");
-    if (ops->nb_bk(&ft) != ops->default_min_nb_bk)
-        FAIL("unexpected initial nb_bk");
-    if (ops->reserve(&ft, 160000u) != 0)
-        FAIL("reserve failed");
-    if (ops->nb_bk(&ft) != (ops->default_min_nb_bk << 1))
-        FAIL("reserve should double nb_bk");
+    old_nb_bk = ops->nb_bk(&ft);
+    {
+        size_t new_bsz = (size_t)old_nb_bk * 2u * FT_TABLE_BUCKET_SIZE;
+        void *new_bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, new_bsz);
+        void *old_bk = ft.flow4.buckets;
+
+        if (ops->migrate(&ft, new_bk, new_bsz) != 0) {
+            free(new_bk);
+            FAIL("migrate failed");
+        }
+        free(old_bk);
+    }
+    if (ops->nb_bk(&ft) != old_nb_bk * 2u)
+        FAIL("migrate should double nb_bk");
 
     ops->destroy(&ft);
     free(pool);
@@ -2489,7 +2562,7 @@ testv_reserve(const struct test_variant_ops *ops)
 static int
 testv_walk_flush_and_del_idx(const struct test_variant_ops *ops)
 {
-    struct ft_table_config cfg = test_cfg(0u, 0u, 60u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(128u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -2546,7 +2619,7 @@ static int
 testv_fuzz(const struct test_variant_ops *ops,
            unsigned seed, unsigned n, unsigned nb_bk, unsigned ops_n)
 {
-    struct ft_table_config cfg = test_cfg(nb_bk, nb_bk, 99u);
+    struct ft_table_config cfg = test_cfg();
     union test_any_table ft;
     void *pool = test_aligned_calloc(n + 1u, ops->record_size,
                                      FT_TABLE_CACHE_LINE_SIZE);
@@ -2643,7 +2716,7 @@ test_variant_suite(const struct test_variant_ops *ops)
         return 1;
     if (testv_manual_grow_preserves_entries(ops) != 0)
         return 1;
-    if (testv_reserve(ops) != 0)
+    if (testv_migrate_doubles_buckets(ops) != 0)
         return 1;
     if (testv_fuzz(ops, 3237998097u, 512u, 64u, 200000u) != 0)
         return 1;
@@ -2673,16 +2746,16 @@ main(void)
     if (test_walk_flush_and_stats_reset() != 0)
         return 1;
 
-    /* grow / reserve / config */
+    /* migrate / config */
     if (test_manual_grow_preserves_entries() != 0)
         return 1;
-    if (test_grow_failure_preserves_table() != 0)
+    if (test_migrate_failure_preserves_table() != 0)
         return 1;
-    if (test_reserve() != 0)
+    if (test_migrate_doubles_buckets() != 0)
         return 1;
-    if (test_allocator_failure_and_max_bucket_limit() != 0)
+    if (test_migrate_invalid_args() != 0)
         return 1;
-    if (test_config_rounding_and_clamp() != 0)
+    if (test_bucket_size_determines_nb_bk() != 0)
         return 1;
 
     /* maintain */

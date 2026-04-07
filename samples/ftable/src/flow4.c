@@ -118,16 +118,6 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
  * FT_TABLE layer: flow4_entry slot + FT_TABLE_GENERATE
  *===========================================================================*/
 
-#define FTG_LAYOUT_INIT_STORAGE(ft, array, stride, entry_offset)               \
-    do {                                                                       \
-        (ft)->pool_base = (unsigned char *)(array);                            \
-        (ft)->pool_stride = (stride);                                          \
-        (ft)->pool_entry_offset = (entry_offset);                              \
-        (ft)->pool = FT_RECORD_MEMBER_PTR((ft)->pool_base, (ft)->pool_stride, \
-                                          1u, (ft)->pool_entry_offset,         \
-                                          struct flow4_entry);                 \
-    } while (0)
-
 #define FTG_LAYOUT_HASH_BASE(ft)                                               \
     ((struct flow4_entry *)(void *)(ft))
 
@@ -163,12 +153,7 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow4_ht, flow4_entry, key,
 
 #include "ft_table_generate.h"
 
-FT_TABLE_GENERATE(flow4,
-                  FT_FLOW4_DEFAULT_MIN_NB_BK,
-                  FT_FLOW4_DEFAULT_MAX_NB_BK,
-                  FT_FLOW4_DEFAULT_GROW_FILL_PCT,
-                  0u,
-                  ft_flow4_hash_fn, ft_flow4_cmp)
+FT_TABLE_GENERATE(flow4, 0u, ft_flow4_hash_fn, ft_flow4_cmp)
 
 #ifdef FT_ARCH_SUFFIX
 #include "ft_ops.h"

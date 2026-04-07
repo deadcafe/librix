@@ -5,6 +5,8 @@
  * All rights reserved.
  */
 
+#include <string.h>
+
 #include <rix/rix_hash_arch.h>
 
 #include "ft_ops.h"
@@ -102,35 +104,70 @@ ft_arch_init(unsigned arch_enable)
 }
 
 /*===========================================================================
- * Dispatch: cold-path forwarding (always via _gen ops)
+ * Dispatch: init (inlined — not in ops table, compiled once per variant)
  *===========================================================================*/
-#define FT_DISPATCH_COLD(prefix)                                               \
+#define FT_DISPATCH_INIT(prefix, entry_type)                                   \
                                                                                \
 int                                                                            \
 ft_##prefix##_table_init(struct ft_##prefix##_table *ft,                       \
-                         struct prefix##_entry *pool,                          \
+                         void *array,                                          \
                          unsigned max_entries,                                  \
+                         size_t stride,                                         \
+                         size_t entry_offset,                                   \
+                         void *buckets_raw,                                     \
+                         size_t bucket_size,                                    \
                          const struct ft_table_config *cfg)                    \
 {                                                                              \
-    return ft_##prefix##_ops_gen.init_ex(ft, pool, max_entries,                \
-                                         sizeof(*pool), 0u, cfg);              \
-}                                                                              \
+    struct ft_table_config defcfg;                                             \
+    struct rix_hash_bucket_s *buckets;                                         \
+    unsigned nb_bk;                                                            \
                                                                                \
-int                                                                            \
-ft_##prefix##_table_init_ex(struct ft_##prefix##_table *ft,                    \
-                            void *array,                                       \
-                            unsigned max_entries,                               \
-                            size_t stride,                                      \
-                            size_t entry_offset,                                \
-                            const struct ft_table_config *cfg)                 \
-{                                                                              \
-    RIX_ASSERT(stride >= sizeof(struct prefix##_entry));                        \
-    RIX_ASSERT(entry_offset + sizeof(struct prefix##_entry) <= stride);         \
+    if (ft == NULL || array == NULL || max_entries == 0u)                       \
+        return -1;                                                             \
+    if (buckets_raw == NULL || bucket_size == 0u)                               \
+        return -1;                                                             \
+    buckets = ft_table_bucket_carve(buckets_raw, bucket_size, &nb_bk);         \
+    if (nb_bk < FT_TABLE_MIN_NB_BK)                                           \
+        return -1;                                                             \
+                                                                               \
+    memset(&defcfg, 0, sizeof(defcfg));                                        \
+    if (cfg == NULL)                                                           \
+        cfg = &defcfg;                                                         \
+                                                                               \
+    RIX_ASSERT(stride >= sizeof(entry_type));                                  \
+    RIX_ASSERT(entry_offset + sizeof(entry_type) <= stride);                   \
     RIX_ASSERT(FT_PTR_IS_ALIGNED(FT_BYTE_PTR_ADD(array, entry_offset),        \
-                                 _Alignof(struct prefix##_entry)));             \
-    return ft_##prefix##_ops_gen.init_ex(ft, array, max_entries,               \
-                                          stride, entry_offset, cfg);           \
-}                                                                              \
+                                 _Alignof(entry_type)));                       \
+                                                                               \
+    memset(ft, 0, sizeof(*ft));                                                \
+    ft->ts_shift = (u8)((cfg->ts_shift != 0u)                                 \
+        ? flow_timestamp_shift_clamp(cfg->ts_shift)                            \
+        : FLOW_TIMESTAMP_DEFAULT_SHIFT);                                       \
+    ft->max_entries = max_entries;                                              \
+    ft->start_mask = nb_bk - 1u;                                               \
+    ft->pool_base = (unsigned char *)array;                                     \
+    ft->pool_stride = stride;                                                   \
+    ft->pool_entry_offset = entry_offset;                                       \
+    ft->pool = FT_RECORD_MEMBER_PTR(ft->pool_base, ft->pool_stride,           \
+                                    1u, ft->pool_entry_offset,                 \
+                                    entry_type);                               \
+                                                                               \
+    memset(buckets, 0, (size_t)nb_bk * sizeof(*buckets));                      \
+    ft->buckets = buckets;                                                     \
+    ft->nb_bk = nb_bk;                                                         \
+    ft->ht_head.rhh_mask = nb_bk - 1u;                                        \
+    ft->ht_head.rhh_nb = 0u;                                                   \
+    return 0;                                                                  \
+}
+
+FT_DISPATCH_INIT(flow4, struct flow4_entry)
+FT_DISPATCH_INIT(flow6, struct flow6_entry)
+FT_DISPATCH_INIT(flowu, struct flowu_entry)
+
+/*===========================================================================
+ * Dispatch: cold-path forwarding (always via _gen ops)
+ *===========================================================================*/
+#define FT_DISPATCH_COLD(prefix)                                               \
                                                                                \
 void                                                                           \
 ft_##prefix##_table_destroy(struct ft_##prefix##_table *ft)                    \
@@ -179,16 +216,11 @@ ft_##prefix##_table_walk(struct ft_##prefix##_table *ft,                       \
 }                                                                              \
                                                                                \
 int                                                                            \
-ft_##prefix##_table_grow_2x(struct ft_##prefix##_table *ft)                    \
+ft_##prefix##_table_migrate(struct ft_##prefix##_table *ft,                    \
+                            void *new_buckets,                                 \
+                            size_t new_bucket_size)                             \
 {                                                                              \
-    return ft_##prefix##_ops_gen.grow_2x(ft);                                  \
-}                                                                              \
-                                                                               \
-int                                                                            \
-ft_##prefix##_table_reserve(struct ft_##prefix##_table *ft,                    \
-                            unsigned min_entries)                               \
-{                                                                              \
-    return ft_##prefix##_ops_gen.reserve(ft, min_entries);                      \
+    return ft_##prefix##_ops_gen.migrate(ft, new_buckets, new_bucket_size);    \
 }
 
 FT_DISPATCH_COLD(flow4)
