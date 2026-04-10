@@ -117,62 +117,6 @@ _FTG_INT(p, hash_base_)(_FTG_TABLE_T(p) *ft)                                  \
     return (_FTG_ENTRY_T(p) *)(void *)ft;                                     \
 }                                                                             \
                                                                                \
-static inline void                                                            \
-_FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
-{                                                                             \
-    entry->meta.cur_hash = 0u;                                                \
-    entry->meta.slot = 0u;                                                    \
-    flow_timestamp_clear(&entry->meta);                                       \
-    entry->meta.reserved0 = 0u;                                               \
-}                                                                             \
-                                                                               \
-static inline size_t                                                          \
-_FTG_INT(p, bucket_bytes_)(unsigned nb_bk)                                    \
-{                                                                             \
-    return (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);                  \
-}                                                                             \
-                                                                               \
-/* find_hashed_: single-key lookup using precomputed hash */                  \
-static inline _FTG_ENTRY_T(p) *                                               \
-_FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
-                          const _FTG_KEY_T(p) *key,                           \
-                          union rix_hash_hash_u h)                            \
-{                                                                             \
-    unsigned bk0, bk1;                                                        \
-    u32 fp;                                                                   \
-    u32 hits;                                                                 \
-                                                                               \
-    fp = rix_hash_fp(h, ft->ht_head.rhh_mask, &bk0, &bk1);              \
-    hits = RIX_HASH_FIND_U32X16(ft->buckets[bk0].hash, fp);                  \
-    while (hits != 0u) {                                                      \
-        unsigned bit = (unsigned)__builtin_ctz(hits);                         \
-        unsigned idx = ft->buckets[bk0].idx[bit];                             \
-        _FTG_ENTRY_T(p) *entry;                                               \
-        hits &= hits - 1u;                                                    \
-        if (idx == (unsigned)RIX_NIL)                                         \
-            continue;                                                         \
-        entry = FTG_LAYOUT_ENTRY_PTR(ft, idx);                                \
-        RIX_ASSUME_NONNULL(entry);                                            \
-        if (cmp_fn(&entry->key, key) == 0)                                    \
-            return entry;                                                     \
-    }                                                                         \
-    if (bk1 == bk0)                                                           \
-        return NULL;                                                          \
-    hits = RIX_HASH_FIND_U32X16(ft->buckets[bk1].hash, fp);                  \
-    while (hits != 0u) {                                                      \
-        unsigned bit = (unsigned)__builtin_ctz(hits);                         \
-        unsigned idx = ft->buckets[bk1].idx[bit];                             \
-        _FTG_ENTRY_T(p) *entry;                                               \
-        hits &= hits - 1u;                                                    \
-        if (idx == (unsigned)RIX_NIL)                                         \
-            continue;                                                         \
-        entry = FTG_LAYOUT_ENTRY_PTR(ft, idx);                                \
-        RIX_ASSUME_NONNULL(entry);                                            \
-        if (cmp_fn(&entry->key, key) == 0)                                    \
-            return entry;                                                     \
-    }                                                                         \
-    return NULL;                                                              \
-}                                                                             \
                                                                                \
 static inline void                                                            \
 _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
@@ -244,33 +188,6 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
     ft->stats.core.lookups += nb_keys;                                        \
     ft->stats.core.hits += hit_count;                                         \
     ft->stats.core.misses += miss_count;                                      \
-}                                                                             \
-                                                                               \
-/* insert_hashed_: insert pre-hashed entry into hash table */                 \
-static inline int                                                             \
-_FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
-                            _FTG_ENTRY_T(p) *entry,                           \
-                            const union rix_hash_hash_u h,                    \
-                            u32 *entry_idx_out)                          \
-{                                                                             \
-    _FTG_ENTRY_T(p) *ret;                                                     \
-    _Pragma("GCC diagnostic push")                                            \
-    _Pragma("GCC diagnostic ignored \"-Wstrict-aliasing\"")                   \
-    ret = _FTG_HT(p, insert_hashed)((_FTG_HT_T(p) *)(void *)&ft->ht_head,     \
-                                    ft->buckets,                              \
-                                    _FTG_INT(p, hash_base_)(ft),              \
-                                    entry, h);                                \
-    _Pragma("GCC diagnostic pop")                                             \
-    if (ret == NULL) {                                                        \
-        *entry_idx_out = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                   \
-        return 0;                                                             \
-    }                                                                         \
-    if (ret != entry) {                                                       \
-        *entry_idx_out = FTG_LAYOUT_ENTRY_INDEX(ft, ret);                     \
-        return 1; /* duplicate found */                                       \
-    }                                                                         \
-    *entry_idx_out = 0u;                                                      \
-    return -1; /* table full */                                               \
 }                                                                             \
                                                                                \
 /* rehash_insert_hashed_: for grow_2x, insert into new bucket array */        \

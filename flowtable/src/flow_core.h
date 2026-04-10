@@ -86,12 +86,20 @@ fcore_record_member_ptr_nonnull(void *base,
                                 size_t member_offset,
                                 size_t member_align)
 {
+    void *ptr;
+
     RIX_ASSERT(idx != RIX_NIL);
-    return __builtin_assume_aligned(
-        FT_BYTE_PTR_ADD(FT_BYTE_PTR_ADD(base,
-                                        RIX_IDX_TO_OFF0(idx) * stride),
-                        member_offset),
-        member_align);
+    ptr = FT_BYTE_PTR_ADD(FT_BYTE_PTR_ADD(base,
+                                          RIX_IDX_TO_OFF0(idx) * stride),
+                          member_offset);
+#if defined(__clang__)
+    RIX_ASSERT(member_align != 0u);
+    RIX_ASSERT((member_align & (member_align - 1u)) == 0u);
+    __builtin_assume((((uintptr_t)ptr) & ((uintptr_t)member_align - 1u)) == 0u);
+    return ptr;
+#else
+    return __builtin_assume_aligned(ptr, member_align);
+#endif
 }
 
 /*===========================================================================
