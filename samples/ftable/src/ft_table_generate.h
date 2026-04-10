@@ -42,7 +42,7 @@
 #define FTG_ENTRY_TYPE(p)   struct _FTG_CAT(ft_, _FTG_CAT(p, _entry))
 #endif
 #define _FTG_ENTRY_T(p)     FTG_ENTRY_TYPE(p)
-#define _FTG_TABLE_T(p)     struct _FTG_CAT(ft_, _FTG_CAT(p, _table))
+#define _FTG_TABLE_T(p)     struct ft_table
 #define _FTG_CONFIG_T(p)    struct ft_table_config
 #define _FTG_STATS_T(p)     struct ft_table_stats
 #define _FTG_HT_T(p)        struct _FTG_CAT(ft_, _FTG_CAT(p, _ht))
@@ -119,6 +119,10 @@
 
 #ifndef FT_TABLE_GROW_CTX_RING
 #define FT_TABLE_GROW_CTX_RING 64u
+#endif
+
+#ifndef FT_TABLE_FIND_BULK_MIN_KEYS
+#define FT_TABLE_FIND_BULK_MIN_KEYS 32u
 #endif
 
 /*===========================================================================
@@ -238,6 +242,78 @@ _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
     return NULL;                                                              \
 }                                                                             \
                                                                                \
+static inline void                                                            \
+_FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
+                         const _FTG_KEY_T(p) *keys,                           \
+                         unsigned nb_keys,                                    \
+                         u64 now,                                             \
+                         _FTG_RESULT_T(p) *results)                           \
+{                                                                             \
+    const u32 hash_mask = ft->start_mask;                                     \
+    u64 hit_count = 0u;                                                       \
+    u64 miss_count = 0u;                                                      \
+                                                                              \
+    if (nb_keys > 1u && nb_keys < 4u) {                                       \
+        struct rix_hash_find_ctx_s ctx[3];                                    \
+                                                                              \
+        for (unsigned i = 0u; i < nb_keys; i++)                               \
+            rix_hash_prefetch_key(&keys[i]);                                  \
+        for (unsigned i = 0u; i < nb_keys; i++)                               \
+            _FTG_HT(p, hash_key_2bk_masked)(&ctx[i], ft->buckets, &keys[i],   \
+                                            hash_mask, ft->ht_head.rhh_mask); \
+        for (unsigned i = 0u; i < nb_keys; i++) {                             \
+            _FTG_HT(p, scan_bk)(&ctx[i], (_FTG_HT_T(p) *)0, ft->buckets);     \
+            _FTG_HT(p, prefetch_node)(&ctx[i], FTG_LAYOUT_HASH_BASE(ft));      \
+        }                                                                     \
+        for (unsigned i = 0u; i < nb_keys; i++) {                             \
+            _FTG_ENTRY_T(p) *entry =                                          \
+                _FTG_HT(p, cmp_key)(&ctx[i], FTG_LAYOUT_HASH_BASE(ft));        \
+                                                                              \
+            if (RIX_LIKELY(entry != NULL)) {                                  \
+                u32 entry_idx = FTG_LAYOUT_ENTRY_INDEX(ft, entry);            \
+                                                                              \
+                FCORE_TOUCH_TIMESTAMP(ft, entry, now);                        \
+                FCORE_ON_HIT(ft, entry, entry_idx);                           \
+                results[i].entry_idx = entry_idx;                             \
+                hit_count++;                                                  \
+            } else {                                                          \
+                results[i].entry_idx = 0u;                                    \
+                miss_count++;                                                 \
+            }                                                                 \
+        }                                                                     \
+        ft->stats.core.lookups += nb_keys;                                    \
+        ft->stats.core.hits += hit_count;                                     \
+        ft->stats.core.misses += miss_count;                                  \
+        return;                                                               \
+    }                                                                         \
+                                                                              \
+    for (unsigned i = 0u; i < nb_keys; i++) {                                 \
+        struct rix_hash_find_ctx_s ctx;                                       \
+        _FTG_ENTRY_T(p) *entry;                                               \
+                                                                              \
+        _FTG_HT(p, hash_key_2bk_masked)(&ctx, ft->buckets, &keys[i],          \
+                                        hash_mask, ft->ht_head.rhh_mask);     \
+        _FTG_HT(p, scan_bk)(&ctx, (_FTG_HT_T(p) *)0, ft->buckets);            \
+        _FTG_HT(p, prefetch_node)(&ctx, FTG_LAYOUT_HASH_BASE(ft));            \
+        entry = _FTG_HT(p, cmp_key)(&ctx, FTG_LAYOUT_HASH_BASE(ft));          \
+                                                                              \
+        if (RIX_LIKELY(entry != NULL)) {                                      \
+            u32 entry_idx = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                \
+                                                                              \
+            FCORE_TOUCH_TIMESTAMP(ft, entry, now);                            \
+            FCORE_ON_HIT(ft, entry, entry_idx);                               \
+            results[i].entry_idx = entry_idx;                                 \
+            hit_count++;                                                      \
+        } else {                                                              \
+            results[i].entry_idx = 0u;                                        \
+            miss_count++;                                                     \
+        }                                                                     \
+    }                                                                         \
+    ft->stats.core.lookups += nb_keys;                                        \
+    ft->stats.core.hits += hit_count;                                         \
+    ft->stats.core.misses += miss_count;                                      \
+}                                                                             \
+                                                                               \
 /* insert_hashed_: insert pre-hashed entry into hash table */                 \
 static inline int                                                             \
 _FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
@@ -246,9 +322,13 @@ _FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
                             u32 *entry_idx_out)                          \
 {                                                                             \
     _FTG_ENTRY_T(p) *ret;                                                     \
-    ret = _FTG_HT(p, insert_hashed)(&ft->ht_head, ft->buckets,                \
-                                     _FTG_INT(p, hash_base_)(ft),             \
-                                     entry, h);                               \
+    _Pragma("GCC diagnostic push")                                            \
+    _Pragma("GCC diagnostic ignored \"-Wstrict-aliasing\"")                   \
+    ret = _FTG_HT(p, insert_hashed)((_FTG_HT_T(p) *)(void *)&ft->ht_head,     \
+                                    ft->buckets,                              \
+                                    _FTG_INT(p, hash_base_)(ft),              \
+                                    entry, h);                                \
+    _Pragma("GCC diagnostic pop")                                             \
     if (ret == NULL) {                                                        \
         FTG_ON_INSERT_SUCCESS(entry, flag_active);                            \
         *entry_idx_out = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                   \
@@ -336,7 +416,7 @@ _FTG_API(p, flush)(_FTG_TABLE_T(p) *ft)                                       \
     if (ft == NULL || ft->buckets == NULL)                                    \
         return;                                                               \
     _FTG_FLUSH_BODY(p, ft);                                                   \
-    fcore_status_reset(&ft->status, 0u);                                      \
+    flow_status_reset(&ft->status, 0u);                                       \
 }                                                                             \
                                                                                \
 /* --- nb_entries -------------------------------------------------------- */ \
@@ -368,7 +448,7 @@ _FTG_API(p, stats)(const _FTG_TABLE_T(p) *ft,                                 \
                                                                                \
 static void                                                                          \
 _FTG_API(p, status)(const _FTG_TABLE_T(p) *ft,                                \
-                    struct fcore_status *out)                                 \
+                    struct flow_status *out)                                  \
 {                                                                             \
     if (out == NULL)                                                          \
         return;                                                               \
@@ -393,6 +473,10 @@ _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
     if (ft == NULL || ft->buckets == NULL || keys == NULL) {                  \
         for (unsigned i = 0; i < nb_keys; i++)                                \
             results[i].entry_idx = 0u;                                        \
+        return;                                                               \
+    }                                                                         \
+    if (nb_keys < FT_TABLE_FIND_BULK_MIN_KEYS) {                              \
+        _FTG_INT(p, find_small_)(ft, keys, nb_keys, now, results);            \
         return;                                                               \
     }                                                                         \
     _FTG_FIND_BULK_BODY(p, ft, keys, nb_keys, now, results, hash_fn, cmp_fn);\
@@ -572,9 +656,9 @@ _migrate_fail:                                                                \
 _migrate_done: (void)0;                                                       \
                                                                                \
     ft->buckets = new_buckets;                                                \
-    ft->ht_head = new_head;                                                   \
+    memcpy(&ft->ht_head, &new_head, sizeof(ft->ht_head));                     \
     ft->nb_bk = new_nb_bk;                                                    \
-    fcore_status_reset(&ft->status, (u32)new_head.rhh_nb);               \
+    flow_status_reset(&ft->status, (u32)new_head.rhh_nb);                \
     ft->stats.grow_execs++;                                                   \
     return 0;                                                                 \
 }                                                                             \

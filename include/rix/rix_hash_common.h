@@ -25,7 +25,6 @@
         rix_hash_arch->find_u32x16_2((arr), (val0), (val1), (mask0), (mask1))
 #  endif
 
-
 /*
  * Map a generated hash-table prefix and an operation suffix to the actual
  * generated helper symbol.  This only performs token pasting; availability of

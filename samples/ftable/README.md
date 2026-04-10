@@ -456,6 +456,14 @@ Options:
 
 Default `make bench` policy: `--pin-core 2 --raw-repeat 11 --keep-n 7`
 
+Notes:
+
+- In cold datapath `add_*` measurements, the query entry itself is warmed
+  immediately before timing. This keeps the input record hot while bucket and
+  resident-table state remain cold.
+- `add_idx_bulk()` uses the small scalar add path for `--query < 4`; larger
+  batches use the pipelined bulk path.
+
 ### 11.2 Representative Performance
 
 Measured on a single x86-64 core with `--pin-core 2 --raw-repeat 3

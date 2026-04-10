@@ -28,6 +28,9 @@ WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
+BENCH_FT_SMALL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
+BENCH_FT_SMALL_PERF_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7 --perf-cycles
+BENCH_FT_SMALL_DEBUG_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7 --show-samples
 BENCH_FT_FULL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
@@ -43,7 +46,7 @@ BENCH_SRC    = bench_flow_table.c
 LIBFT        = $(FTDIR)/lib/libftable.a
 DEPS         = $(TARGET).d $(BENCH).d
 
-.PHONY: all test bench bench-light bench-full bench-maint clean libft
+.PHONY: all test bench bench-light bench-small bench-small-debug bench-small-perf bench-full bench-maint clean libft FORCE
 
 all: test bench-light
 
@@ -53,6 +56,8 @@ $(TARGET): $(SRC) $(LIBFT)
 $(BENCH): $(BENCH_SRC) $(LIBFT)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SRC) $(LIBFT)
 
+# Always enter the ftable sub-make so its own .d files can decide whether
+# header changes require rebuilding the library objects/archive.
 $(LIBFT): FORCE
 	$(MAKE) -C $(FTDIR) static
 
@@ -63,13 +68,67 @@ libft: $(LIBFT)
 test: $(TARGET)
 	./$(TARGET)
 
-bench: $(BENCH)
-
 bench-light: $(BENCH)
-	@echo "== representative light ftable bench (1M, query=256, cold bulk datapath @ fill=50%) =="
-	./$(BENCH) $(BENCH_FT_OPTS) flow4 1048576 50
-	./$(BENCH) $(BENCH_FT_OPTS) flow6 1048576 50
-	./$(BENCH) $(BENCH_FT_OPTS) flowu 1048576 50
+	@echo "== light ftable bench (flow4, q=1, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 1 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=2, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 2 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=4, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 4 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=8, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 8 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=16, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 16 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=32, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 32 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=64, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 64 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=128, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 128 flow4 1048576 60
+	@echo "== light ftable bench (flow4, q=256, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_OPTS) --query 256 flow4 1048576 60
+
+bench-small: $(BENCH)
+	@echo "== small ftable bench (flow4, q=1, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 1 flow4 1048576 60
+	@echo "== small ftable bench (flow4, q=2, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 2 flow4 1048576 60
+	@echo "== small ftable bench (flow4, q=3, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 3 flow4 1048576 60
+	@echo "== small ftable bench (flow4, q=4, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 4 flow4 1048576 60
+	@echo "== small ftable bench (flow4, q=6, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 6 flow4 1048576 60
+	@echo "== small ftable bench (flow4, q=8, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 8 flow4 1048576 60
+	@echo "== small ftable bench (flow4, q=12, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 12 flow4 1048576 60
+	@echo "== small ftable bench (flow4, q=16, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 16 flow4 1048576 60
+
+bench-small-debug: $(BENCH)
+	@echo "== small debug ftable bench (flow4, q=1, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 1 flow4 1048576 60
+	@echo "== small debug ftable bench (flow4, q=2, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 2 flow4 1048576 60
+	@echo "== small debug ftable bench (flow4, q=4, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 4 flow4 1048576 60
+	@echo "== small debug ftable bench (flow4, q=8, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 8 flow4 1048576 60
+	@echo "== small debug ftable bench (flow4, q=16, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 16 flow4 1048576 60
+
+bench-small-perf: $(BENCH)
+	@echo "== small perf ftable bench (flow4, q=1, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 1 flow4 1048576 60
+	@echo "== small perf ftable bench (flow4, q=2, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 2 flow4 1048576 60
+	@echo "== small perf ftable bench (flow4, q=4, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 4 flow4 1048576 60
+	@echo "== small perf ftable bench (flow4, q=8, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 8 flow4 1048576 60
+	@echo "== small perf ftable bench (flow4, q=16, 1M @ fill=60%) =="
+	./$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 16 flow4 1048576 60
 
 bench: bench-light
 

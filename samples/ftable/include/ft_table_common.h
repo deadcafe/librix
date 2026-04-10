@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include <rix/rix_hash.h>
+#include <rix/rix_queue.h>
 #include <flow/flow_core.h>
 
 #ifndef FT_TABLE_CACHE_LINE_SIZE
@@ -231,13 +232,75 @@ ft_table_bucket_mem_size(unsigned nb_bk)
 }
 
 struct ft_table_stats {
-    struct fcore_stats core;
+    struct flow_stats core;
     u64 grow_execs;
     u64 grow_failures;
     u64 maint_calls;
     u64 maint_bucket_checks;
     u64 maint_evictions;
 };
+
+enum ft_table_variant {
+    FT_TABLE_VARIANT_FLOW4 = 1u,
+    FT_TABLE_VARIANT_FLOW6 = 2u,
+    FT_TABLE_VARIANT_FLOWU = 3u,
+};
+
+RIX_HASH_HEAD(ft_table_ht);
+
+struct ft_table {
+    struct rix_hash_bucket_s *buckets;
+    unsigned char            *pool_base;
+    size_t                    pool_stride;
+    size_t                    pool_entry_offset;
+    struct ft_table_ht        ht_head;
+    unsigned                  start_mask;
+    unsigned                  nb_bk;
+    unsigned                  max_entries;
+    u8                        variant;
+    u8                        ts_shift;
+    struct ft_table_stats     stats;
+    struct flow_status        status;
+};
+
+int ft_table_init(struct ft_table *ft,
+                  enum ft_table_variant variant,
+                  void *array,
+                  unsigned max_entries,
+                  size_t stride,
+                  size_t entry_offset,
+                  void *buckets,
+                  size_t bucket_size,
+                  const struct ft_table_config *cfg);
+void ft_table_destroy(struct ft_table *ft);
+void ft_table_flush(struct ft_table *ft);
+unsigned ft_table_nb_entries(const struct ft_table *ft);
+unsigned ft_table_nb_bk(const struct ft_table *ft);
+void ft_table_stats(const struct ft_table *ft, struct ft_table_stats *out);
+void ft_table_status(const struct ft_table *ft, struct flow_status *out);
+u32 ft_table_add_idx(struct ft_table *ft, u32 entry_idx, u64 now);
+unsigned ft_table_add_idx_bulk(struct ft_table *ft,
+                               u32 *entry_idxv,
+                               unsigned nb_keys,
+                               enum ft_add_policy policy,
+                               u64 now,
+                               u32 *unused_idxv);
+u32 ft_table_del_idx(struct ft_table *ft, u32 entry_idx);
+unsigned ft_table_del_idx_bulk(struct ft_table *ft,
+                               const u32 *entry_idxv,
+                               unsigned nb_keys,
+                               u32 *unused_idxv);
+int ft_table_walk(struct ft_table *ft,
+                  int (*cb)(u32 entry_idx, void *arg),
+                  void *arg);
+int ft_table_migrate(struct ft_table *ft,
+                     void *new_buckets,
+                     size_t new_bucket_size);
+
+#define FT_TABLE_INIT_TYPED(ft, variant, array, max_entries, type, member,    \
+                            buckets, bucket_size, cfg)                        \
+    ft_table_init((ft), (variant), (array), (max_entries), sizeof(type),      \
+                  offsetof(type, member), (buckets), (bucket_size), (cfg))
 
 /*===========================================================================
  * Protocol-free maintenance context

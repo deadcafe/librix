@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "flow_table.h"
+#include "ft_test_record_allocator.h"
 
 #define FAIL(msg) do { fprintf(stderr, "FAIL: %s\n", (msg)); return 1; } while (0)
 #define FAILF(fmt, ...) do { fprintf(stderr, "FAIL: " fmt "\n", __VA_ARGS__); return 1; } while (0)
@@ -80,11 +81,18 @@ struct test_user_recordu {
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
+struct test_alloc_record {
+    struct flow4_entry entry;
+    u32 cookie;
+    RIX_SLIST_ENTRY(test_alloc_record) free_link;
+    unsigned char pad[64];
+} __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
+
 
 union test_any_table {
-    struct ft_flow4_table flow4;
-    struct ft_flow6_table flow6;
-    struct ft_flowu_table flowu;
+    struct ft_table flow4;
+    struct ft_table flow6;
+    struct ft_table flowu;
 };
 
 union test_any_key {
@@ -92,6 +100,115 @@ union test_any_key {
     struct flow6_key flow6;
     struct flowu_key flowu;
 };
+
+static int
+test_record_allocator_basic(void)
+{
+    struct ft_record_allocator alloc;
+    struct test_alloc_record *pool;
+    u32 idx;
+
+    printf("[T] record allocator basic\n");
+    pool = test_aligned_calloc(8u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc allocator pool");
+    if (FT_RECORD_ALLOCATOR_INIT_TYPED(&alloc, pool, 8u,
+                                       struct test_alloc_record,
+                                       free_link) != 0)
+        FAIL("allocator init failed");
+    if (RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[0]
+        || alloc.free_count != 8u)
+        FAIL("allocator init state mismatch");
+    if (FT_RECORD_ALLOCATOR_RECORD_PTR_AS(&alloc, struct test_alloc_record, 3u)
+        != &pool[2])
+        FAIL("allocator record_ptr mismatch");
+
+    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record,
+                                              free_link);
+    if (idx != 1u || RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[1]
+        || alloc.free_count != 7u)
+        FAIL("allocator first alloc mismatch");
+    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record,
+                                              free_link);
+    if (idx != 2u || RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[2]
+        || alloc.free_count != 6u)
+        FAIL("allocator second alloc mismatch");
+    if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
+                                           free_link, 2u) != 0)
+        FAIL("allocator free failed");
+    if (RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[1]
+        || alloc.free_count != 7u)
+        FAIL("allocator free state mismatch");
+    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record,
+                                              free_link);
+    if (idx != 2u || alloc.free_count != 6u)
+        FAIL("allocator reuse mismatch");
+    if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
+                                           free_link, 2u) != 0)
+        FAIL("allocator re-free failed");
+    if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
+                                           free_link, 2u) == 0)
+        FAIL("allocator double free accepted");
+    if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
+                                           free_link, 0u) == 0)
+        FAIL("allocator nil free accepted");
+    free(pool);
+    return 0;
+}
+
+static int
+test_record_allocator_bulk_and_reset(void)
+{
+    struct ft_record_allocator alloc;
+    struct test_alloc_record *pool;
+    u32 idxv[8];
+    u32 freev[2];
+    unsigned n;
+
+    printf("[T] record allocator bulk/reset\n");
+    pool = test_aligned_calloc(6u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc allocator pool");
+    if (FT_RECORD_ALLOCATOR_INIT_TYPED(&alloc, pool, 6u,
+                                       struct test_alloc_record,
+                                       free_link) != 0)
+        FAIL("allocator init failed");
+
+    n = FT_RECORD_ALLOCATOR_ALLOC_BULK_TYPED(&alloc, struct test_alloc_record,
+                                             free_link, idxv, 4u);
+    if (n != 4u)
+        FAIL("allocator alloc_bulk count mismatch");
+    if (idxv[0] != 1u || idxv[1] != 2u || idxv[2] != 3u || idxv[3] != 4u)
+        FAIL("allocator alloc_bulk order mismatch");
+    freev[0] = idxv[1];
+    freev[1] = idxv[2];
+    n = FT_RECORD_ALLOCATOR_FREE_BULK_TYPED(&alloc, struct test_alloc_record,
+                                            free_link, freev, 2u);
+    if (n != 2u)
+        FAIL("allocator free_bulk count mismatch");
+    if (RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[2]
+        || alloc.free_count != 4u)
+        FAIL("allocator free_bulk state mismatch");
+    n = FT_RECORD_ALLOCATOR_ALLOC_BULK_TYPED(&alloc, struct test_alloc_record,
+                                             free_link, idxv, 4u);
+    if (n != 4u)
+        FAIL("allocator second alloc_bulk count mismatch");
+    if (idxv[0] != 3u || idxv[1] != 2u || idxv[2] != 5u || idxv[3] != 6u)
+        FAIL("allocator second alloc_bulk order mismatch");
+    if (FT_RECORD_ALLOCATOR_RESET_TYPED(&alloc, struct test_alloc_record,
+                                        free_link) != 0)
+        FAIL("allocator reset failed");
+    n = FT_RECORD_ALLOCATOR_ALLOC_BULK_TYPED(&alloc, struct test_alloc_record,
+                                             free_link, idxv, 6u);
+    if (n != 6u)
+        FAIL("allocator reset alloc_bulk count mismatch");
+    for (unsigned i = 0u; i < 6u; i++) {
+        if (idxv[i] != i + 1u)
+            FAIL("allocator reset order mismatch");
+    }
+    free(pool);
+    return 0;
+}
 
 static struct flow6_key
 test_key6(unsigned i)
@@ -176,7 +293,7 @@ struct test_variant_ops {
     unsigned (*nb_entries)(const void *ft);
     unsigned (*nb_bk)(const void *ft);
     void (*stats)(const void *ft, struct ft_table_stats *out);
-    void (*status)(const void *ft, struct fcore_status *out);
+    void (*status)(const void *ft, struct flow_status *out);
     u32 (*find)(void *ft, const void *key, u64 now);
     u32 (*add_idx)(void *ft, u32 entry_idx, u64 now);
     u32 (*del_key)(void *ft, const void *key); /* single-key convenience: calls del_key_bulk */
@@ -208,7 +325,7 @@ struct test_variant_ops {
     void (*make_key)(void *out, unsigned i);
 };
 
-#define TEST_VARIANT_WRAPPERS(tag, prefix, key_t, record_t, entry_t, init_fn,  \
+#define TEST_VARIANT_WRAPPERS(tag, prefix, variant_id, key_t, record_t, entry_t, init_fn, \
                               destroy_fn, flush_fn, nb_entries_fn, nb_bk_fn,   \
                               stats_fn, status_fn, find_fn, add_idx_fn,        \
                               del_key_fn, del_idx_fn, find_bulk_fn,       \
@@ -225,14 +342,14 @@ testv_init_##tag(void *ft, void *records, unsigned max_entries,            \
     size_t bsz = ft_table_bucket_size(max_entries);                        \
     void *bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);                 \
     if (bk == NULL) return -1;                                             \
-    return init_fn((struct ft_##prefix##_table *)ft, records,              \
+    return init_fn((struct ft_table *)ft, (variant_id), records,           \
                    max_entries, sizeof(record_t),                           \
                    offsetof(record_t, entry), bk, bsz, cfg);              \
 }                                                                          \
 static void                                                                 \
 testv_destroy_##tag(void *ft)                                              \
 {                                                                          \
-    struct ft_##prefix##_table *t = (struct ft_##prefix##_table *)ft;      \
+    struct ft_table *t = (struct ft_table *)ft;                            \
     void *bk = t->buckets;                                                 \
     destroy_fn(t);                                                         \
     free(bk);                                                              \
@@ -240,58 +357,58 @@ testv_destroy_##tag(void *ft)                                              \
 static void                                                                 \
 testv_flush_##tag(void *ft)                                                \
 {                                                                          \
-    flush_fn((struct ft_##prefix##_table *)ft);                            \
+    flush_fn((struct ft_table *)ft);                                       \
 }                                                                          \
 static unsigned                                                             \
 testv_nb_entries_##tag(const void *ft)                                      \
 {                                                                          \
-    return nb_entries_fn((const struct ft_##prefix##_table *)ft);          \
+    return nb_entries_fn((const struct ft_table *)ft);                     \
 }                                                                          \
 static unsigned                                                             \
 testv_nb_bk_##tag(const void *ft)                                           \
 {                                                                          \
-    return nb_bk_fn((const struct ft_##prefix##_table *)ft);               \
+    return nb_bk_fn((const struct ft_table *)ft);                          \
 }                                                                          \
 static void                                                                 \
 testv_stats_##tag(const void *ft, struct ft_table_stats *out)               \
 {                                                                          \
-    stats_fn((const struct ft_##prefix##_table *)ft, out);                 \
+    stats_fn((const struct ft_table *)ft, out);                            \
 }                                                                          \
 static void                                                                 \
-testv_status_##tag(const void *ft, struct fcore_status *out)                \
+testv_status_##tag(const void *ft, struct flow_status *out)                 \
 {                                                                          \
-    status_fn((const struct ft_##prefix##_table *)ft, out);                \
+    status_fn((const struct ft_table *)ft, out);                           \
 }                                                                          \
 static u32                                                             \
 testv_find_##tag(void *ft, const void *key, u64 now)                    \
 {                                                                          \
-    return find_fn((struct ft_##prefix##_table *)ft,                        \
+    return find_fn((struct ft_table *)ft,                                  \
                    (const key_t *)key, now);                                \
 }                                                                          \
 static u32                                                             \
 testv_add_idx_##tag(void *ft, u32 entry_idx, u64 now)              \
 {                                                                          \
-    return add_idx_fn((struct ft_##prefix##_table *)ft, entry_idx, now);   \
+    return add_idx_fn((struct ft_table *)ft, entry_idx, now);              \
 }                                                                          \
 static u32                                                             \
 testv_del_key_##tag(void *ft, const void *key)                              \
 {                                                                          \
     u32 idx;                                                               \
-    unsigned n = del_key_fn((struct ft_##prefix##_table *)ft,              \
+    unsigned n = del_key_fn((struct ft_table *)ft,                         \
                             (const key_t *)key, 1u, &idx);                  \
     return n > 0u ? idx : 0u;                                              \
 }                                                                          \
 static u32                                                             \
 testv_del_idx_##tag(void *ft, u32 entry_idx)                     \
 {                                                                          \
-    return del_idx_fn((struct ft_##prefix##_table *)ft, entry_idx);  \
+    return del_idx_fn((struct ft_table *)ft, entry_idx);                   \
 }                                                                          \
 static void                                                                 \
 testv_find_bulk_##tag(void *ft, const void *keys, unsigned nb_keys,         \
                       u64 now,                                          \
                       struct ft_table_result *results)                       \
 {                                                                          \
-    find_bulk_fn((struct ft_##prefix##_table *)ft,                          \
+    find_bulk_fn((struct ft_table *)ft,                                     \
                  (const key_t *)keys, nb_keys, now, results);               \
 }                                                                          \
 static unsigned                                                             \
@@ -301,32 +418,32 @@ testv_add_idx_bulk_##tag(void *ft, u32 *entry_idxv,                   \
                          u64 now,                                       \
                          u32 *unused_idxv)                             \
 {                                                                          \
-    return add_idx_bulk_fn((struct ft_##prefix##_table *)ft,                \
+    return add_idx_bulk_fn((struct ft_table *)ft,                           \
                            entry_idxv, nb_keys, policy, now, unused_idxv);  \
 }                                                                          \
 static int                                                                  \
 testv_set_permanent_idx_##tag(void *ft, u32 entry_idx)                 \
 {                                                                          \
     return ft_##prefix##_table_set_permanent_idx(                           \
-        (struct ft_##prefix##_table *)ft, entry_idx);                       \
+        (struct ft_table *)ft, entry_idx);                                  \
 }                                                                          \
 static unsigned                                                             \
 testv_del_idx_bulk_##tag(void *ft, const u32 *entry_idxv,        \
                                unsigned nb_keys, u32 *unused_idxv)           \
 {                                                                          \
-    return del_idx_bulk_fn((struct ft_##prefix##_table *)ft,                 \
+    return del_idx_bulk_fn((struct ft_table *)ft,                            \
                           entry_idxv, nb_keys, unused_idxv);               \
 }                                                                          \
 static int                                                                  \
 testv_walk_##tag(void *ft, int (*cb)(u32 entry_idx, void *arg),        \
                  void *arg)                                                  \
 {                                                                          \
-    return walk_fn((struct ft_##prefix##_table *)ft, cb, arg);              \
+    return walk_fn((struct ft_table *)ft, cb, arg);                         \
 }                                                                          \
 static int                                                                  \
 testv_migrate_##tag(void *ft, void *new_buckets, size_t new_bucket_size)    \
 {                                                                          \
-    return migrate_fn((struct ft_##prefix##_table *)ft,                     \
+    return migrate_fn((struct ft_table *)ft,                                \
                       new_buckets, new_bucket_size);                        \
 }                                                                          \
 static unsigned                                                             \
@@ -338,7 +455,7 @@ testv_maintain_idx_bulk_##tag(void *ft, const u32 *entry_idxv,         \
                               unsigned min_bk_entries,                       \
                               int enable_filter)                             \
 {                                                                          \
-    return maintain_idx_bulk_fn((struct ft_##prefix##_table *)ft,           \
+    return maintain_idx_bulk_fn((struct ft_table *)ft,                      \
                                 entry_idxv, nb_idx, now, expire_tsc,        \
                                 expired_idxv, max_expired,                  \
                                 min_bk_entries, enable_filter);             \
@@ -346,12 +463,12 @@ testv_maintain_idx_bulk_##tag(void *ft, const u32 *entry_idxv,         \
 static void *                                                               \
 testv_record_ptr_##tag(void *ft, u32 entry_idx)                        \
 {                                                                          \
-    return record_ptr_fn((struct ft_##prefix##_table *)ft, entry_idx);      \
+    return record_ptr_fn((struct ft_table *)ft, entry_idx);                 \
 }                                                                          \
 static void *                                                               \
 testv_entry_ptr_##tag(void *ft, u32 entry_idx)                         \
 {                                                                          \
-    return entry_ptr_fn((struct ft_##prefix##_table *)ft, entry_idx);       \
+    return entry_ptr_fn((struct ft_table *)ft, entry_idx);                  \
 }                                                                          \
 static void                                                                 \
 testv_make_key_##tag(void *out, unsigned i)                                  \
@@ -360,7 +477,7 @@ testv_make_key_##tag(void *out, unsigned i)                                  \
 }                                                                          \
 static const struct test_variant_ops test_ops_##tag = {                     \
     .name = #prefix,                                                        \
-    .table_size = sizeof(struct ft_##prefix##_table),                       \
+    .table_size = sizeof(struct ft_table),                                  \
     .key_size = sizeof(key_t),                                              \
     .record_size = sizeof(record_t),                                        \
     .entry_offset = offsetof(record_t, entry),                              \
@@ -389,44 +506,47 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .make_key = testv_make_key_##tag                                        \
 }
 
-TEST_VARIANT_WRAPPERS(flow4, flow4, struct flow4_key, struct test_user_record,
-                      struct flow4_entry, ft_flow4_table_init,
-                      ft_flow4_table_destroy, ft_flow4_table_flush,
-                      ft_flow4_table_nb_entries, ft_flow4_table_nb_bk,
-                      ft_flow4_table_stats, ft_flow4_table_status,
-                      ft_flow4_table_find, ft_flow4_table_add_idx,
-                      ft_flow4_table_del_key_bulk, ft_flow4_table_del_idx,
-                      ft_flow4_table_find_bulk, ft_flow4_table_add_idx_bulk,
-                      ft_flow4_table_del_idx_bulk, ft_flow4_table_walk,
-                      ft_flow4_table_migrate,
+TEST_VARIANT_WRAPPERS(flow4, flow4, FT_TABLE_VARIANT_FLOW4,
+                      struct flow4_key, struct test_user_record,
+                      struct flow4_entry, ft_table_init,
+                      ft_table_destroy, ft_table_flush,
+                      ft_table_nb_entries, ft_table_nb_bk,
+                      ft_table_stats, ft_table_status,
+                      ft_flow4_table_find, ft_table_add_idx,
+                      ft_flow4_table_del_key_bulk, ft_table_del_idx,
+                      ft_flow4_table_find_bulk, ft_table_add_idx_bulk,
+                      ft_table_del_idx_bulk, ft_table_walk,
+                      ft_table_migrate,
                       ft_flow4_table_maintain_idx_bulk,
                       ft_flow4_table_record_ptr, ft_flow4_table_entry_ptr,
                       test_key);
 
-TEST_VARIANT_WRAPPERS(flow6, flow6, struct flow6_key, struct test_user_record6,
-                      struct flow6_entry, ft_flow6_table_init,
-                      ft_flow6_table_destroy, ft_flow6_table_flush,
-                      ft_flow6_table_nb_entries, ft_flow6_table_nb_bk,
-                      ft_flow6_table_stats, ft_flow6_table_status,
-                      ft_flow6_table_find, ft_flow6_table_add_idx,
-                      ft_flow6_table_del_key_bulk, ft_flow6_table_del_idx,
-                      ft_flow6_table_find_bulk, ft_flow6_table_add_idx_bulk,
-                      ft_flow6_table_del_idx_bulk, ft_flow6_table_walk,
-                      ft_flow6_table_migrate,
+TEST_VARIANT_WRAPPERS(flow6, flow6, FT_TABLE_VARIANT_FLOW6,
+                      struct flow6_key, struct test_user_record6,
+                      struct flow6_entry, ft_table_init,
+                      ft_table_destroy, ft_table_flush,
+                      ft_table_nb_entries, ft_table_nb_bk,
+                      ft_table_stats, ft_table_status,
+                      ft_flow6_table_find, ft_table_add_idx,
+                      ft_flow6_table_del_key_bulk, ft_table_del_idx,
+                      ft_flow6_table_find_bulk, ft_table_add_idx_bulk,
+                      ft_table_del_idx_bulk, ft_table_walk,
+                      ft_table_migrate,
                       ft_flow6_table_maintain_idx_bulk,
                       ft_flow6_table_record_ptr, ft_flow6_table_entry_ptr,
                       test_key6);
 
-TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
-                      struct flowu_entry, ft_flowu_table_init,
-                      ft_flowu_table_destroy, ft_flowu_table_flush,
-                      ft_flowu_table_nb_entries, ft_flowu_table_nb_bk,
-                      ft_flowu_table_stats, ft_flowu_table_status,
-                      ft_flowu_table_find, ft_flowu_table_add_idx,
-                      ft_flowu_table_del_key_bulk, ft_flowu_table_del_idx,
-                      ft_flowu_table_find_bulk, ft_flowu_table_add_idx_bulk,
-                      ft_flowu_table_del_idx_bulk, ft_flowu_table_walk,
-                      ft_flowu_table_migrate,
+TEST_VARIANT_WRAPPERS(flowu, flowu, FT_TABLE_VARIANT_FLOWU,
+                      struct flowu_key, struct test_user_recordu,
+                      struct flowu_entry, ft_table_init,
+                      ft_table_destroy, ft_table_flush,
+                      ft_table_nb_entries, ft_table_nb_bk,
+                      ft_table_stats, ft_table_status,
+                      ft_flowu_table_find, ft_table_add_idx,
+                      ft_flowu_table_del_key_bulk, ft_table_del_idx,
+                      ft_flowu_table_find_bulk, ft_table_add_idx_bulk,
+                      ft_table_del_idx_bulk, ft_table_walk,
+                      ft_table_migrate,
                       ft_flowu_table_maintain_idx_bulk,
                       ft_flowu_table_record_ptr, ft_flowu_table_entry_ptr,
                       test_keyu);
@@ -455,7 +575,7 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, struct flowu_key, struct test_user_recordu,
                          TEST_NOW_ADD, (unused_idxv)))
 
 static u32
-test_add_idx_key(struct ft_flow4_table *ft, u32 entry_idx,
+test_add_idx_key(struct ft_table *ft, u32 entry_idx,
                  const struct flow4_key *key)
 {
     struct flow4_entry *entry = ft_flow4_table_entry_ptr(ft, entry_idx);
@@ -488,7 +608,7 @@ static int
 test_basic_add_find_del(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct flow4_key k1 = test_key(1u);
@@ -528,7 +648,7 @@ static int
 test_init_ex_and_mapping(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *users;
     void *bk;
     struct flow4_key key = test_key(10u);
@@ -566,7 +686,7 @@ static int
 test_manual_grow_preserves_entries(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     u32 idxs[256];
@@ -615,7 +735,7 @@ static int
 test_migrate_doubles_buckets(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     unsigned old_nb_bk;
@@ -656,7 +776,7 @@ static int
 test_bulk_ops_and_stats(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct flow4_key keys[8];
@@ -735,7 +855,7 @@ static int
 test_walk_flush_and_stats_reset(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct walk_ctx ctx;
@@ -790,7 +910,7 @@ static int
 test_migrate_invalid_args(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
 
@@ -825,7 +945,7 @@ static int
 test_duplicate_and_delete_miss_stats(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct ft_table_stats stats;
@@ -869,7 +989,7 @@ static int
 test_walk_early_stop(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct walk_ctx ctx;
@@ -906,7 +1026,7 @@ static int
 test_migrate_failure_preserves_table(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     u32 idxs[64];
@@ -959,7 +1079,7 @@ static int
 test_bucket_size_determines_nb_bk(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
 
@@ -993,7 +1113,7 @@ test_high_fill(void)
     const unsigned capacity = nb_bk * 16u; /* 1024 */
     const unsigned target = (capacity * 15u) / 16u; /* 960 */
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     size_t bsz = (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE;
@@ -1068,7 +1188,7 @@ test_max_fill(void)
     const unsigned nb_bk = 128u;
     const unsigned capacity = nb_bk * 16u; /* 2048 */
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     size_t bsz = (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE;
@@ -1137,7 +1257,7 @@ test_kickout_safety(void)
     const unsigned capacity = nb_bk * 16u; /* 512 */
     const unsigned overflow = 64u;
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     size_t bsz = (size_t)FT_TABLE_MIN_NB_BK * FT_TABLE_BUCKET_SIZE;
@@ -1198,7 +1318,7 @@ static int
 test_del_idx(void)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct flow4_key keys[8];
@@ -1251,7 +1371,7 @@ test_maintain_basic(void)
 {
     struct ft_table_config cfg = test_cfg();
     const u64 expire_tsc = UINT64_C(100000);
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct flow4_key keys[16];
@@ -1371,7 +1491,7 @@ test_maintain_partial_and_limit(void)
 {
     struct ft_table_config cfg = test_cfg();
     const u64 expire_tsc = UINT64_C(100000);
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct flow4_key keys[16];
@@ -1494,7 +1614,7 @@ test_maintain_min_bk_entries(void)
 {
     struct ft_table_config cfg = test_cfg();
     const u64 expire_tsc = UINT64_C(100000);
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     struct flow4_key keys[16];
@@ -1578,7 +1698,7 @@ static int
 test_fuzz(unsigned seed, unsigned n, unsigned nb_bk, unsigned ops)
 {
     struct ft_table_config cfg = test_cfg();
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct test_user_record *pool;
     void *bk;
     size_t bsz = (size_t)nb_bk * FT_TABLE_BUCKET_SIZE;
@@ -2568,7 +2688,7 @@ testv_walk_flush_and_del_idx(const struct test_variant_ops *ops)
                                      FT_TABLE_CACHE_LINE_SIZE);
     struct walk_ctx ctx;
     union test_any_key key;
-    struct fcore_status status;
+    struct flow_status status;
 
     printf("[T] %s table walk/flush/del_idx\n", ops->name);
     if (pool == NULL)
@@ -2726,6 +2846,11 @@ test_variant_suite(const struct test_variant_ops *ops)
 int
 main(void)
 {
+    if (test_record_allocator_basic() != 0)
+        return 1;
+    if (test_record_allocator_bulk_and_reset() != 0)
+        return 1;
+
     /* lifecycle / mapping */
     if (test_init_ex_and_mapping() != 0)
         return 1;

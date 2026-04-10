@@ -38,12 +38,6 @@ SRCDIR       = src
 INCDIR       = include
 DISPATCH_SRC  = $(SRCDIR)/ft_dispatch.c
 
-PUB_HDRS     = $(INCDIR)/flow_table.h \
-               $(INCDIR)/flow4_table.h \
-               $(INCDIR)/flow6_table.h \
-               $(INCDIR)/flowu_table.h \
-               $(INCDIR)/ft_table_common.h
-
 OBJS         = $(LIBDIR)/flow4_gen.o \
                $(LIBDIR)/flow4_sse.o \
                $(LIBDIR)/flow4_avx2.o \

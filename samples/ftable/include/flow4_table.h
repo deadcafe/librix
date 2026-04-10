@@ -11,30 +11,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <rix/rix_hash.h>
 #include <rix/rix_defs_private.h>
 
 #include "ft_table_common.h"
 #include <flow/flow_key.h>
 #include <flow/flow_core.h>
-
-RIX_HASH_HEAD(ft_flow4_ht);
-
-
-struct ft_flow4_table {
-    struct rix_hash_bucket_s   *buckets;
-    struct flow4_entry         *pool;
-    unsigned char              *pool_base;
-    size_t                      pool_stride;
-    size_t                      pool_entry_offset;
-    struct ft_flow4_ht          ht_head;
-    unsigned                    start_mask;
-    unsigned                    nb_bk;
-    unsigned                    max_entries;
-    u8                     ts_shift;
-    struct ft_table_stats       stats;
-    struct fcore_status         status;
-};
 
 /*===========================================================================
  * Init / destroy / query
@@ -52,7 +33,7 @@ struct ft_flow4_table {
  *
  * @return 0 on success, -1 on invalid arguments.
  */
-int ft_flow4_table_init(struct ft_flow4_table *ft,
+int ft_flow4_table_init(struct ft_table *ft,
                         void *array,
                         unsigned max_entries,
                         size_t stride,
@@ -61,35 +42,35 @@ int ft_flow4_table_init(struct ft_flow4_table *ft,
                         size_t bucket_size,
                         const struct ft_table_config *cfg);
 
-void ft_flow4_table_destroy(struct ft_flow4_table *ft);
-void ft_flow4_table_flush(struct ft_flow4_table *ft);
-unsigned ft_flow4_table_nb_entries(const struct ft_flow4_table *ft);
-unsigned ft_flow4_table_nb_bk(const struct ft_flow4_table *ft);
-void ft_flow4_table_stats(const struct ft_flow4_table *ft,
+void ft_flow4_table_destroy(struct ft_table *ft);
+void ft_flow4_table_flush(struct ft_table *ft);
+unsigned ft_flow4_table_nb_entries(const struct ft_table *ft);
+unsigned ft_flow4_table_nb_bk(const struct ft_table *ft);
+void ft_flow4_table_stats(const struct ft_table *ft,
                           struct ft_table_stats *out);
-void ft_flow4_table_status(const struct ft_flow4_table *ft,
-                           struct fcore_status *out);
+void ft_flow4_table_status(const struct ft_table *ft,
+                           struct flow_status *out);
 
 /*===========================================================================
  * Single-key operations
  *===========================================================================*/
 
-u32 ft_flow4_table_find(struct ft_flow4_table *ft,
+u32 ft_flow4_table_find(struct ft_table *ft,
                              const struct flow4_key *key,
                              u64 now);
 
-void ft_flow4_table_find_bulk(struct ft_flow4_table *ft,
+void ft_flow4_table_find_bulk(struct ft_table *ft,
                               const struct flow4_key *keys,
                               unsigned nb_keys,
                               u64 now,
                               struct ft_table_result *results);
 
-u32 ft_flow4_table_add_idx(struct ft_flow4_table *ft,
+u32 ft_flow4_table_add_idx(struct ft_table *ft,
                                 u32 entry_idx,
                                 u64 now);
 
 static inline int
-ft_flow4_table_set_permanent_idx(struct ft_flow4_table *ft, u32 entry_idx)
+ft_flow4_table_set_permanent_idx(struct ft_table *ft, u32 entry_idx)
 {
     struct flow4_entry *entry;
 
@@ -101,7 +82,7 @@ ft_flow4_table_set_permanent_idx(struct ft_flow4_table *ft, u32 entry_idx)
     return 0;
 }
 
-unsigned ft_flow4_table_add_idx_bulk(struct ft_flow4_table *ft,
+unsigned ft_flow4_table_add_idx_bulk(struct ft_table *ft,
                                      u32 *entry_idxv,
                                      unsigned nb_keys,
                                      enum ft_add_policy policy,
@@ -109,15 +90,15 @@ unsigned ft_flow4_table_add_idx_bulk(struct ft_flow4_table *ft,
                                      u32 *unused_idxv);
 
 
-unsigned ft_flow4_table_del_key_bulk(struct ft_flow4_table *ft,
+unsigned ft_flow4_table_del_key_bulk(struct ft_table *ft,
                                     const struct flow4_key *keys,
                                     unsigned nb_keys,
                                     u32 *unused_idxv);
 
-u32 ft_flow4_table_del_idx(struct ft_flow4_table *ft,
+u32 ft_flow4_table_del_idx(struct ft_table *ft,
                                       u32 entry_idx);
 
-unsigned ft_flow4_table_del_idx_bulk(struct ft_flow4_table *ft,
+unsigned ft_flow4_table_del_idx_bulk(struct ft_table *ft,
                                        const u32 *entry_idxv,
                                        unsigned nb_keys,
                                        u32 *unused_idxv);
@@ -126,7 +107,7 @@ unsigned ft_flow4_table_del_idx_bulk(struct ft_flow4_table *ft,
  * Walk / grow
  *===========================================================================*/
 
-int ft_flow4_table_walk(struct ft_flow4_table *ft,
+int ft_flow4_table_walk(struct ft_table *ft,
                         int (*cb)(u32 entry_idx, void *arg),
                         void *arg);
 
@@ -144,7 +125,7 @@ int ft_flow4_table_walk(struct ft_flow4_table *ft,
  * old bucket memory (read ft->buckets / ft->nb_bk before calling).
  * On failure (-1) the table is unchanged.
  */
-int ft_flow4_table_migrate(struct ft_flow4_table *ft,
+int ft_flow4_table_migrate(struct ft_table *ft,
                            void *new_buckets,
                            size_t new_bucket_size);
 
@@ -154,11 +135,12 @@ int ft_flow4_table_migrate(struct ft_flow4_table *ft,
 
 #define FT_FLOW4_TABLE_INIT_TYPED(ft, array, max_entries, type, member, \
                                   buckets, bucket_size, cfg)           \
-    ft_flow4_table_init((ft), (array), (max_entries), sizeof(type),    \
-                        offsetof(type, member), (buckets), (bucket_size), (cfg))
+    FT_TABLE_INIT_TYPED((ft), FT_TABLE_VARIANT_FLOW4, (array),          \
+                        (max_entries), type, member,                    \
+                        (buckets), (bucket_size), (cfg))
 
 static inline void *
-ft_flow4_table_record_ptr(struct ft_flow4_table *ft, u32 entry_idx)
+ft_flow4_table_record_ptr(struct ft_table *ft, u32 entry_idx)
 {
     if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
         return NULL;
@@ -166,7 +148,7 @@ ft_flow4_table_record_ptr(struct ft_flow4_table *ft, u32 entry_idx)
 }
 
 static inline const void *
-ft_flow4_table_record_cptr(const struct ft_flow4_table *ft, u32 entry_idx)
+ft_flow4_table_record_cptr(const struct ft_table *ft, u32 entry_idx)
 {
     if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
         return NULL;
@@ -174,7 +156,7 @@ ft_flow4_table_record_cptr(const struct ft_flow4_table *ft, u32 entry_idx)
 }
 
 static inline struct flow4_entry *
-ft_flow4_table_entry_ptr(struct ft_flow4_table *ft, u32 entry_idx)
+ft_flow4_table_entry_ptr(struct ft_table *ft, u32 entry_idx)
 {
     if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
         return NULL;
@@ -183,7 +165,7 @@ ft_flow4_table_entry_ptr(struct ft_flow4_table *ft, u32 entry_idx)
 }
 
 static inline const struct flow4_entry *
-ft_flow4_table_entry_cptr(const struct ft_flow4_table *ft, u32 entry_idx)
+ft_flow4_table_entry_cptr(const struct ft_table *ft, u32 entry_idx)
 {
     if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
         return NULL;
@@ -193,7 +175,7 @@ ft_flow4_table_entry_cptr(const struct ft_flow4_table *ft, u32 entry_idx)
 }
 
 static inline u32
-ft_flow4_table_entry_idx(const struct ft_flow4_table *ft,
+ft_flow4_table_entry_idx(const struct ft_table *ft,
                          const struct flow4_entry *entry)
 {
     if (ft == NULL || entry == NULL)
@@ -203,13 +185,13 @@ ft_flow4_table_entry_idx(const struct ft_flow4_table *ft,
 }
 
 static inline size_t
-ft_flow4_table_record_stride(const struct ft_flow4_table *ft)
+ft_flow4_table_record_stride(const struct ft_table *ft)
 {
     return ft == NULL ? 0u : ft->pool_stride;
 }
 
 static inline size_t
-ft_flow4_table_entry_offset(const struct ft_flow4_table *ft)
+ft_flow4_table_entry_offset(const struct ft_table *ft)
 {
     return ft == NULL ? 0u : ft->pool_entry_offset;
 }
@@ -229,19 +211,19 @@ ft_flow4_table_entry_offset(const struct ft_flow4_table *ft)
 
 /* Compatibility wrappers */
 static inline u32
-ft_flow4_table_add_entry(struct ft_flow4_table *ft, u32 entry_idx)
+ft_flow4_table_add_entry(struct ft_table *ft, u32 entry_idx)
 {
     return ft_flow4_table_add_idx(ft, entry_idx, 0u);
 }
 
 static inline u32
-ft_flow4_table_add_entry_idx(struct ft_flow4_table *ft, u32 entry_idx)
+ft_flow4_table_add_entry_idx(struct ft_table *ft, u32 entry_idx)
 {
     return ft_flow4_table_add_idx(ft, entry_idx, 0u);
 }
 
 static inline u32
-ft_flow4_table_del_key_oneshot(struct ft_flow4_table *ft,
+ft_flow4_table_del_key_oneshot(struct ft_table *ft,
                                const struct flow4_key *key)
 {
     u32 idx;
@@ -253,7 +235,7 @@ ft_flow4_table_del_key_oneshot(struct ft_flow4_table *ft,
  *===========================================================================*/
 
 static inline unsigned
-ft_flow4_table_maintain(struct ft_flow4_table *ft,
+ft_flow4_table_maintain(struct ft_table *ft,
                         unsigned start_bk,
                         u64 now,
                         u64 expire_tsc,
@@ -278,7 +260,7 @@ ft_flow4_table_maintain(struct ft_flow4_table *ft,
 }
 
 static inline unsigned
-ft_flow4_table_maintain_idx_bulk(struct ft_flow4_table *ft,
+ft_flow4_table_maintain_idx_bulk(struct ft_table *ft,
                                  const u32 *entry_idxv,
                                  unsigned nb_idx,
                                  u64 now,

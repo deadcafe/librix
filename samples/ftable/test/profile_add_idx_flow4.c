@@ -160,7 +160,7 @@ median_u64(u64 *samples, unsigned n)
 }
 
 static void
-prefill(struct ft_flow4_table *ft, unsigned live, unsigned key_base)
+prefill(struct ft_table *ft, unsigned live, unsigned key_base)
 {
     for (unsigned i = 0; i < live; i++) {
         struct profile_record4 *rec =
@@ -202,7 +202,7 @@ run_group(const char *title,
           unsigned query_n,
           unsigned repeat)
 {
-    struct ft_flow4_table ft;
+    struct ft_table ft;
     struct ft_table_config cfg = profile_cfg();
     struct profile_record4 *records;
     struct ft_table_result *results;

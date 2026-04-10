@@ -15,7 +15,7 @@
 #define ft_flow4_cmp     flow4_key_cmp
 
 static inline struct flow4_entry *
-ft_flow4_layout_entry_ptr_(const struct ft_flow4_table *ft, unsigned idx)
+ft_flow4_layout_entry_ptr_(const struct ft_table *ft, unsigned idx)
 {
     if (idx == RIX_NIL)
         return NULL;
@@ -24,7 +24,7 @@ ft_flow4_layout_entry_ptr_(const struct ft_flow4_table *ft, unsigned idx)
 }
 
 static inline unsigned
-ft_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
+ft_flow4_layout_entry_idx_(const struct ft_table *ft,
                            const struct flow4_entry *entry)
 {
     if (entry == NULL)
@@ -38,14 +38,14 @@ ft_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
  *===========================================================================*/
 
 static inline struct flow4_entry *
-fcore_flow4_layout_entry_ptr_(const struct ft_flow4_table *ft, unsigned idx)
+fcore_flow4_layout_entry_ptr_(const struct ft_table *ft, unsigned idx)
 {
     return (struct flow4_entry *)(void *)
         ft_flow4_layout_entry_ptr_(ft, idx);
 }
 
 static inline unsigned
-fcore_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
+fcore_flow4_layout_entry_idx_(const struct ft_table *ft,
                               const struct flow4_entry *hdr)
 {
     return ft_flow4_layout_entry_idx_(
@@ -53,21 +53,22 @@ fcore_flow4_layout_entry_idx_(const struct ft_flow4_table *ft,
 }
 
 RIX_HASH_HEAD(fcore_flow4_ht);
+RIX_HASH_HEAD(ft_flow4_ht);
 
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 #define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
 name##_hidx(struct type *base, const struct type *p)                          \
 {                                                                             \
-    const struct ft_flow4_table *ft =                                         \
-        (const struct ft_flow4_table *)(const void *)base;                    \
+    const struct ft_table *ft =                                               \
+        (const struct ft_table *)(const void *)base;                          \
     return fcore_flow4_layout_entry_idx_(ft, p);                              \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
 name##_hptr(struct type *base, unsigned i)                                    \
 {                                                                             \
-    const struct ft_flow4_table *ft =                                         \
-        (const struct ft_flow4_table *)(const void *)base;                    \
+    const struct ft_table *ft =                                               \
+        (const struct ft_table *)(const void *)base;                          \
     return fcore_flow4_layout_entry_ptr_(ft, i);                              \
 }
 
@@ -84,8 +85,8 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
 #define FCORE_LAYOUT_HASH_BASE(owner) \
     ((struct flow4_entry *)(void *)(owner))
 
-#undef FCORE_STATS
-#define FCORE_STATS(owner) ((owner)->stats.core)
+#undef FLOW_STATS
+#define FLOW_STATS(owner) ((owner)->stats.core)
 
 /*
  * ftable uses start_mask (not ht_head.rhh_mask) so that entries hashed
@@ -101,7 +102,7 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
  */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
-FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
+FCORE_GENERATE(flow4, ft_table, fcore_flow4_ht,
                ft_flow4_hash_fn, ft_flow4_cmp)
 #pragma GCC diagnostic pop
 
@@ -111,7 +112,7 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
 #undef FCORE_LAYOUT_ENTRY_PTR
 #undef FCORE_LAYOUT_ENTRY_INDEX
 #undef FCORE_LAYOUT_HASH_BASE
-#undef FCORE_STATS
+#undef FLOW_STATS
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 
 /*===========================================================================
@@ -135,15 +136,15 @@ FCORE_GENERATE(flow4, ft_flow4_table, fcore_flow4_ht,
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
 name##_hidx(struct type *base, const struct type *p)                          \
 {                                                                             \
-    const struct ft_flow4_table *ft =                                         \
-        (const struct ft_flow4_table *)(const void *)base;                    \
+    const struct ft_table *ft =                                               \
+        (const struct ft_table *)(const void *)base;                          \
     return ft_flow4_layout_entry_idx_(ft, p);                                 \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
 name##_hptr(struct type *base, unsigned i)                                    \
 {                                                                             \
-    const struct ft_flow4_table *ft =                                         \
-        (const struct ft_flow4_table *)(const void *)base;                    \
+    const struct ft_table *ft =                                               \
+        (const struct ft_table *)(const void *)base;                          \
     return ft_flow4_layout_entry_ptr_(ft, i);                                 \
 }
 

@@ -14,13 +14,13 @@
  * Single List
  */
 #  define RIX_SLIST_ENTRY(type) \
-    struct {                  \
-        unsigned rsle_next;   \
+    struct {                    \
+        unsigned rsle_next;     \
     }
 
 #  define RIX_SLIST_HEAD(name, type) \
-    struct name {                  \
-        unsigned rslh_first;       \
+    struct name {                    \
+        unsigned rslh_first;         \
     }
 
 #  define RIX_SLIST_HEAD_INITIALIZER(headvar) \
@@ -32,26 +32,26 @@
 #  define RIX_SLIST_NEXT(elm, base, field) \
     (RIX_PTR_FROM_IDX((base), (elm)->field.rsle_next))
 
-#  define RIX_SLIST_INIT(head)          \
+#  define RIX_SLIST_INIT(head)        \
     do {                              \
         (head)->rslh_first = RIX_NIL; \
     } while (0)
 
-#  define RIX_SLIST_INSERT_HEAD(head, base, elm, field)         \
+#  define RIX_SLIST_INSERT_HEAD(head, base, elm, field)       \
     do {                                                      \
         unsigned __first = (head)->rslh_first;                \
         (elm)->field.rsle_next = __first;                     \
         (head)->rslh_first = RIX_IDX_FROM_PTR((base), (elm)); \
     } while (0)
 
-#  define RIX_SLIST_INSERT_AFTER(base, slistelm, elm, field)             \
+#  define RIX_SLIST_INSERT_AFTER(base, slistelm, elm, field)           \
     do {                                                               \
         unsigned __next = (slistelm)->field.rsle_next;                 \
         (elm)->field.rsle_next = __next;                               \
         (slistelm)->field.rsle_next = RIX_IDX_FROM_PTR((base), (elm)); \
     } while (0)
 
-#  define RIX_SLIST_REMOVE_HEAD(head, base, field)                              \
+#  define RIX_SLIST_REMOVE_HEAD(head, base, field)                            \
     do {                                                                      \
         unsigned __first = (head)->rslh_first;                                \
         if (__first != RIX_NIL) {                                             \
@@ -60,7 +60,7 @@
         }                                                                     \
     } while (0)
 
-#  define RIX_SLIST_REMOVE_AFTER(base, elm, field)                  \
+#  define RIX_SLIST_REMOVE_AFTER(base, elm, field)                \
     do {                                                          \
         unsigned __rem = (elm)->field.rsle_next;                  \
         if (__rem != RIX_NIL) {                                   \
@@ -69,7 +69,7 @@
         }                                                         \
     } while (0)
 
-#  define RIX_SLIST_REMOVE(head, base, elm, type, field)                        \
+#  define RIX_SLIST_REMOVE(head, base, elm, type, field)                      \
     do {                                                                      \
         if (RIX_SLIST_FIRST((head), (base)) == (elm)) {                       \
             RIX_SLIST_REMOVE_HEAD((head), (base), field);                     \
@@ -83,18 +83,18 @@
     } while (0)
 
 #  define RIX_SLIST_FOREACH(var, head, base, field)                \
-    for ((var) = RIX_SLIST_FIRST((head), (base)); (var) != NULL; \
+    for ((var) = RIX_SLIST_FIRST((head), (base)); (var) != NULL;   \
          (var) = RIX_SLIST_NEXT((var), (base), field))
 
-#  define RIX_SLIST_FOREACH_SAFE(var, head, base, field, tvar)            \
+#  define RIX_SLIST_FOREACH_SAFE(var, head, base, field, tvar)          \
     for ((var) = RIX_SLIST_FIRST((head), (base)),                       \
         (tvar) = ((var) ? RIX_SLIST_NEXT((var), (base), field) : NULL); \
          (var) != NULL; (var) = (tvar),                                 \
         (tvar) = ((var) ? RIX_SLIST_NEXT((var), (base), field) : NULL))
 
-#  define RIX_SLIST_FOREACH_PREVINDEX(var, varidxp, head, base, field) \
-    for ((varidxp) = &((head)->rslh_first);                          \
-         ((var) = RIX_PTR_FROM_IDX((base), *(varidxp))) != NULL;     \
+#  define RIX_SLIST_FOREACH_PREVINDEX(var, varidxp, head, base, field)  \
+    for ((varidxp) = &((head)->rslh_first);                             \
+         ((var) = RIX_PTR_FROM_IDX((base), *(varidxp))) != NULL;        \
          (varidxp) = &((var)->field.rsle_next))
 
 /*

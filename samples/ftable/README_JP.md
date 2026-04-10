@@ -445,6 +445,14 @@ make -C samples/ftable/test bench
 
 `make bench` 既定値: `--pin-core 2 --raw-repeat 11 --keep-n 7`
 
+注記:
+
+- cold datapath の `add_*` 計測では、測定直前に query entry 自体を warm
+  する。入力 record は hot のままにしつつ、bucket と既存 table state は
+  cold のまま測る。
+- `add_idx_bulk()` は `--query < 4` では small scalar add path を使い、
+  それ以上では pipelined bulk path を使う。
+
 ### 11.2 代表性能値
 
 x86-64 単一コアで `--pin-core 2 --raw-repeat 3 --keep-n 1`、
