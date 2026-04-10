@@ -6,7 +6,7 @@ Use this checklist before publishing a public release of `librix`.
 
 - [ ] Confirm the release scope (`librix`, `flowtable`, or both)
 - [ ] CI passes for `gcc` and `clang`
-- [ ] Confirm the release tag (for example `v0.1.1`)
+- [ ] Confirm the release tag (for example `v0.2.0`)
 - [ ] Confirm what is considered stable vs experimental
 
 ## Documentation
@@ -52,6 +52,6 @@ Use this checklist before publishing a public release of `librix`.
 
 ## Suggested Known Limitations
 
-- [ ] AVX-512 is implemented but not yet validated on AVX-512 hardware
+- [ ] AVX-512 status is described accurately (validated, unvalidated, or CPU-dependent)
 - [ ] Most tuning so far focuses on `flow4`
 - [ ] `flow6` and `flowu` are functionally covered, but have seen less performance tuning

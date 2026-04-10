@@ -23,7 +23,7 @@ librix takes a different approach:
 - it stores indices instead of pointers
 - it keeps data structures relocatable by construction
 - it supports SIMD-friendly cuckoo hash implementations
-- it ships with a non-trivial flow-cache sample, not just container macros
+- it ships with a non-trivial flow-table library, not just container macros
 
 The goal is to make shared-memory-friendly data structures practical without
 giving up performance.
@@ -702,93 +702,38 @@ Pipelined stages follow the same pattern: `ht64_hash_key4`, `ht64_scan_bk4`,
   - `elm` itself -- table full (kickout depth exhausted)
 - Operating guidance: do not plan around `100%` fill.
   Keep steady-state fill **<= 90%** as a hard upper bound, and prefer
-  **<= 75%** when datapath performance matters. The sample flow-cache does
-  this by running maintenance/reclaim periodically.
+  **<= 75%** when datapath performance matters.
 
 ---
 
 ## Samples
 
-`samples/` provides a flow-cache implementation built on top of librix.
+`flowtable/` provides a flow-table library built on top of librix.
 The current tree includes three variants:
 
-- `flow4`  : IPv4 5-tuple cache
-- `flow6`  : IPv6 5-tuple cache
-- `flowu`  : unified IPv4/IPv6 cache
+- `flow4`  : IPv4 5-tuple table
+- `flow6`  : IPv6 5-tuple table
+- `flowu`  : unified IPv4/IPv6 table
 
-The flow-cache code is not just a toy sample; it is the main performance
-showcase in this tree. In the latest rerun on `AMD Ryzen 9 8945HS`
-(`avx512`, March 23, 2026), `flow4` reached `25.94 cyc/key` at `32K` entries
-and `26.60 cyc/key` at `1024K` entries on `findadd_hit`, while `flowu`
-reached `341.42 cyc/key` on the larger `1024K findadd_miss` case.
+This code is not a toy sample. It is the main higher-level consumer of the
+librix hash primitives in this repository, and it is intended both as a real
+library and as a performance reference.
 
-There is an `avx512` dispatch tier and it has been validated on real
-hardware. In `flowtable/`, the `avx512` tier now uses dedicated
-AVX-512 bucket-scan helpers, while the `avx2` tier keeps the AVX2 helpers.
-The AVX2-versus-AVX-512 balance is still CPU-specific: on this Zen 4
-machine, forced `avx512` improved some datapaths and regressed others, so
-the published numbers are reference measurements rather than universal
-expectations for all AVX-512 CPUs.
+Current `flowtable/` characteristics:
 
-The flow-cache variants also support an allocator-independent, hugepage-friendly
-size-query initialization flow via `fc_*_cache_size_query()` and
-`fc_cache_size_bind()`.
+- explicit `find`, `add_idx`, `del_idx`, and `del_key` APIs
+- no `findadd`
+- bucket-table-only resize through `migrate()`
+- explicit timeout maintenance through `maintain()` and `maintain_idx_bulk()`
+- caller-owned record arrays via stride + entry-offset layout
 
-For intrusive integration, the `*_cache_init_ex()` APIs accept a caller-owned
-fixed-stride record array instead of a plain `fc_flow*_entry[]` pool. The
-library only needs to know:
-
-- `stride`: bytes between records
-- `entry_offset`: where the embedded `fc_flow*_entry` lives inside each record
-
-Everything else in the record is opaque to librix. This lets the caller attach
-arbitrary per-entry payload bytes and interpret them freely from the record
-base returned by:
-
-- `fc_flow*_cache_record_ptr()`
-- `fc_flow*_cache_entry_ptr()`
-
-Typical shape:
-
-```c
-struct my_flow_rec {
-    struct fc_flow4_entry entry;   /* or place it later with entry_offset */
-    u8 body[];
-};
-```
-
-or a raw fixed-stride byte record:
-
-```c
-unsigned char *rec =
-    FC_FLOW4_CACHE_RECORD_PTR_AS(&fc, unsigned char, entry_idx);
-void *my_body = rec + my_body_offset;
-```
-
-Performance guidance for `*_init_ex()`:
-
-- keep `entry_offset` aligned to `FC_CACHE_LINE_SIZE`
-- do not let the embedded entry cross a cache-line boundary
-- `entry` does not have to be the first member, but it should start at a
-  cache-line boundary if datapath performance matters
-- large record sizes increase footprint, cache pressure, and TLB pressure;
-  `*_init_ex()` itself is cheap, but oversized user records can still slow
-  lookup/add/remove paths
-- enabling `fc_flow*_cache_set_event_cb()` puts caller code on alloc/free
-  paths; lightweight counters are usually fine, but touching large or cold
-  payload regions in the callback can materially reduce throughput
-
-The library now exposes record/entry accessors for `flow4`, `flow6`, and
-`flowu`, while keeping the original `fc_flow*_cache_init()` API intact.
-
-See [flowtable/README.md](flowtable/README.md) for the flow-table-specific helper
-naming note, API walkthrough, detailed benchmark tables, backend-specific
-validation commands, and design notes. For release-facing text, see
-[CHANGELOG.md](CHANGELOG.md) and
-[RELEASE_NOTES_v0.1.1.md](RELEASE_NOTES_v0.1.1.md). For GitHub metadata and
+See [flowtable/README.md](flowtable/README.md) for the flow-table API,
+storage model, resize behavior, benchmark commands, and validation notes.
+For release-facing text, see [CHANGELOG.md](CHANGELOG.md) and
+[RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md). For GitHub metadata and
 release preparation, see
 [GITHUB_ABOUT.md](GITHUB_ABOUT.md),
-[RELEASE_NOTES_v0.1.1_SHORT.md](RELEASE_NOTES_v0.1.1_SHORT.md), and
+[RELEASE_NOTES_v0.2.0_SHORT.md](RELEASE_NOTES_v0.2.0_SHORT.md), and
 [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md).
 
 ---
@@ -835,25 +780,10 @@ make CC=clang OPTLEVEL=3
 
 The current tree is expected to build with both GCC and Clang in this mode.
 
-For `flowtable/`, the `avx512` tier uses AVX-512 bucket-scan helpers.
-The detailed measured AVX2-versus-AVX-512 numbers in
-[flowtable/README.md](flowtable/README.md) are reference data from
-`AMD Ryzen 9 8945HS` (Zen 4), not a blanket claim for every AVX-512 system.
-
-For `flowtable/`, the lookup pipeline constants default to
-`FLOW_CACHE_LOOKUP_STEP_KEYS=8`,
-`FLOW_CACHE_LOOKUP_AHEAD_STEPS=4`, and
-`FLOW_CACHE_LOOKUP_AHEAD_KEYS=32`.
-`AHEAD_KEYS` is the software-pipeline stage distance, not a count of
-hardware prefetch requests.
-You can override them for tuning runs via `EXTRA_CFLAGS`:
-
-```sh
-make -C flowtable static CC=gcc OPTLEVEL=3 \
-     EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
-make -C flowtable/test all CC=gcc OPTLEVEL=3 \
-     EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
-```
+For `flowtable/`, the `avx512` tier is implemented and validated, but the
+best choice remains workload- and CPU-dependent. Detailed benchmark numbers
+and the current benchmark commands are documented in
+[flowtable/README.md](flowtable/README.md).
 
 For address/UB sanitizers during development:
 
@@ -889,7 +819,7 @@ make bench
 make bench-full
 ```
 
-For flow-cache-specific validation and benchmark commands, see
+For flowtable-specific validation and benchmark commands, see
 [flowtable/README.md](flowtable/README.md).
 
 Test coverage includes:
@@ -900,7 +830,7 @@ Test coverage includes:
 - Red-Black invariants (root black, no red-red, equal black height)
 - Hash table: duplicate detection, staged pipeline correctness, walk count
 - Fuzz: random insert/find/remove verified against a reference model
-- Flow cache: find, remove, flush, expire, batch lookup, insert exhaustion
+- Flowtable: find, add, remove, flush, expire, batch lookup, insert exhaustion
 
 ### Hash table test coverage matrix
 

@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog.
 
+## [0.2.0] - 2026-04-10
+
+Public release focused on consolidating the repository around `flowtable/`
+and tightening the public/private boundary of the flow-table codebase.
+
+### Added
+
+- New release notes for `v0.2.0`.
+- Root-level release metadata now reflects `flowtable/` as the primary sample
+  library rather than the removed `fcache` tree.
+
+### Changed
+
+- The old `samples/` layout has been replaced by a dedicated `flowtable/`
+  subtree with flat public headers under `flowtable/include/`.
+- Build outputs for `flowtable/` now live under `flowtable/build/{lib,obj,bin}`.
+- Public and private headers are now separated cleanly:
+  - public API headers remain under `flowtable/include/`
+  - private generator/dispatch/hash headers live under `flowtable/src/`
+  - bench-only helpers live under `flowtable/test/`
+- `q=2/3` `add_idx` now uses the small-query add path instead of the bulk
+  `step=2/ahead=2` path, improving small-query behavior.
+- The `flowtable/test` benchmark targets are simplified to `bench-light` and
+  `bench-full`, with clearer top-level forwarding targets.
+- Generator-side hooks and wrapper macros were simplified so the current
+  implementation matches the actual flow-table behavior more directly.
+
+### Fixed
+
+- Older GCC builds that warned about possible null dereferences in generated
+  `flow4/6/u add_idx_bulk` paths now build cleanly by using internal non-null
+  record helpers rather than weakening warning policy.
+- Public-facing documents no longer refer to removed `samples/fcache` paths as
+  the current sample layout.
+
+### Validation status
+
+- `make -C flowtable/test test`: passed
+- Representative flowtable benchmark reruns: completed during tuning and
+  release preparation
+- Generic scalar path: tested
+- AVX2 path: tested
+- AVX-512 path: tested on AVX-512-capable hardware; performance remains
+  workload- and CPU-dependent
+
 ## [0.1.1] - 2026-03-26
 
 Public maintenance release focused on portability, validation, and benchmark

@@ -681,93 +681,38 @@ entry64 *ht64_remove(&head, buckets, pool, key_value);
 - 運用指針として、`100%` 充填を前提にしてはいけません。
   定常運用の上限は全スロット (`NB_BK * 16`) の **90% 以下**に抑え、
   データパス性能を重視する場合は **75% 以下**を優先します。
-  sample flow-cache ではそのために maintenance / reclaim を定期実行します。
+  その前提で capacity planning を行うべきです。
 
 ---
 
 ## サンプル
 
-`samples/` には librix を基盤としたフローキャッシュ実装が含まれます。
+`flowtable/` には librix を基盤とした flow-table ライブラリが含まれます。
 現在のツリーには次の 3 バリアントがあります。
 
-- `flow4`  : IPv4 5-tuple キャッシュ
-- `flow6`  : IPv6 5-tuple キャッシュ
-- `flowu`  : IPv4/IPv6 統合キャッシュ
+- `flow4`  : IPv4 5-tuple table
+- `flow6`  : IPv6 5-tuple table
+- `flowu`  : IPv4/IPv6 統合 table
 
-設計・API・性能データは [flowtable/README.md](flowtable/README.md) を参照してください。
+これは単なるサンプルではなく、このリポジトリで librix の hash primitive を
+実際に使う主要 library です。
+
+現在の `flowtable/` は次を備えます。
+
+- 明示的な `find`, `add_idx`, `del_idx`, `del_key`
+- `findadd` なし
+- `migrate()` による bucket-table-only resize
+- `maintain()` / `maintain_idx_bulk()` による明示 timeout maintenance
+- stride + entry_offset を持つ caller-owned record array
+
+設計・API・性能データは [flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
 公開向けの要約文書としては
 [CHANGELOG.md](CHANGELOG.md)、
-[RELEASE_NOTES_v0.1.1.md](RELEASE_NOTES_v0.1.1.md)、
-[RELEASE_NOTES_v0.1.1_SHORT.md](RELEASE_NOTES_v0.1.1_SHORT.md)、
+[RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md)、
+[RELEASE_NOTES_v0.2.0_SHORT.md](RELEASE_NOTES_v0.2.0_SHORT.md)、
 [GITHUB_ABOUT.md](GITHUB_ABOUT.md)、
 [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md)
 も用意しています。
-
-flow cache バリアント (`flow4`, `flow6`, `flowu`) では、allocator 非依存で
-hugepage 配置にも向く size-query ベースの初期化 API を追加しています。
-
-さらに intrusive な統合向けに、`*_cache_init_ex()` は単純な
-`fc_flow*_entry[]` ではなく、呼び出し側が持つ固定 stride の record 配列を
-受けられます。library が必要とするのは次の 2 つだけです。
-
-- `stride`: record 間のバイト間隔
-- `entry_offset`: 各 record 内で embedded `fc_flow*_entry` が始まる位置
-
-record の残りの領域は librix にとって opaque であり、user が自由に payload
-として使えます。record base / entry 取得には次を使います。
-
-- `fc_flow*_cache_record_ptr()`
-- `fc_flow*_cache_entry_ptr()`
-
-典型的には次のような形です。
-
-```c
-struct my_flow_rec {
-    struct fc_flow4_entry entry;   /* 先頭でなくてもよい */
-    u8 body[];
-};
-```
-
-あるいは raw byte record として
-
-```c
-unsigned char *rec =
-    FC_FLOW4_CACHE_RECORD_PTR_AS(&fc, unsigned char, entry_idx);
-void *my_body = rec + my_body_offset;
-```
-
-`*_init_ex()` の性能上の指針:
-
-- `entry_offset` は `FC_CACHE_LINE_SIZE` 境界に合わせる
-- embedded entry が cache line を跨がないようにする
-- `entry` は先頭 member でなくてもよいが、datapath 性能を重視するなら
-  cache-line 境界で始める
-- record を大きくしすぎると footprint が増え、cache/TLB 圧で lookup/add/remove
-  が遅くなる。`*_init_ex()` 自体のコストは小さいが、巨大な user record は
-  別問題として性能低下要因になる
-- `fc_flow*_cache_set_event_cb()` を有効にすると alloc/free path で caller code
-  が走る。軽い counter 更新程度なら許容されやすいが、大きい payload や cold
-  な領域へ触る callback は throughput をかなり落とし得る
-
-この record/entry accessor は `flow4`, `flow6`, `flowu` のすべてで利用できます。
-一方で、従来の `fc_flow*_cache_init()` API もそのまま維持しています。
-
-この flow cache は単なるサンプルではなく、このリポジトリにおける主要な
-性能アピール対象です。直近の再計測では `AMD Ryzen 9 8945HS`
-（`avx512`, 2026-03-23）上で、`flow4` の `findadd_hit` が `32K` entries で
-`25.94 cyc/key`、`1024K` entries で `26.60 cyc/key` を記録し、大きい
-`1024K findadd_miss` では `flowu` が `341.42 cyc/key` でした。
-
-`avx512` dispatch tier 自体は存在し、実機でも確認済みです。現行の
-`flowtable/` では `avx512` tier が AVX-512 bucket-scan helper を使い、
-`avx2` tier は AVX2 helper を使います。ただし AVX2 と AVX-512 の優劣は
-CPU 依存で、この Zen 4 実測でも強制 `avx512` は一部の datapath では改善し、
-別の datapath では悪化しました。README に載せる数値は Zen 4 上の参考値です。
-
-helper 名の詳しい説明や `fcache` 固有の API、性能表、backend 別検証手順、
-設計ノートは
-[flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
-
 ---
 
 ## ビルド
@@ -811,25 +756,9 @@ make CC=clang OPTLEVEL=3
 
 現状ツリーはこの条件で GCC / Clang の両方でビルドできる前提です。
 
-`flowtable/` では、`avx512` tier が AVX-512 bucket-scan helper を使います。
-AVX2 と AVX-512 の実測比較は
-[flowtable/README_JP.md](flowtable/README_JP.md) に記載しています。
-掲載値は `AMD Ryzen 9 8945HS`（Zen 4）上の参考値です。
-
-`flowtable/` の lookup pipeline 定数の既定値は
-`FLOW_CACHE_LOOKUP_STEP_KEYS=8`,
-`FLOW_CACHE_LOOKUP_AHEAD_STEPS=4`,
-`FLOW_CACHE_LOOKUP_AHEAD_KEYS=32` です。
-`AHEAD_KEYS` は hardware prefetch 回数ではなく、
-software pipeline の段間距離です。
-tuning 比較では `EXTRA_CFLAGS` で上書きできます:
-
-```sh
-make -C flowtable static CC=gcc OPTLEVEL=3 \
-     EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
-make -C flowtable/test all CC=gcc OPTLEVEL=3 \
-     EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
-```
+`flowtable/` では `avx512` tier は実装済みで、実機でも確認済みです。
+ただし最適な選択は workload と CPU に依存します。詳細な benchmark 数値と
+検証コマンドは [flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
 
 開発時のサニタイザ:
 
@@ -862,7 +791,7 @@ make bench
 make bench-full
 ```
 
-flow-cache 固有の検証・ベンチマーク手順は
+flowtable 固有の検証・ベンチマーク手順は
 [flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
 
 テストカバレッジ:
@@ -873,7 +802,7 @@ flow-cache 固有の検証・ベンチマーク手順は
 - Red-Black 不変条件 (ルートが黒、赤-赤なし、黒高さ一致)
 - ハッシュテーブル: 重複検出、パイプラインステージ正確性、walk カウント
 - ファジング: ランダム insert/find/remove をリファレンスモデルと照合
-- フローキャッシュ: find, remove, flush, expire, batch lookup, insert 枯渇
+- flowtable: find, add, remove, flush, expire, batch lookup, insert 枯渇
 
 ### ハッシュテーブル テストカバレッジ一覧
 
