@@ -13,7 +13,7 @@
 
 #include <rix/rix_hash.h>
 #include <rix/rix_queue.h>
-#include <flow/flow_core.h>
+#include "flow_core.h"
 
 #ifndef FT_TABLE_CACHE_LINE_SIZE
 #define FT_TABLE_CACHE_LINE_SIZE 64u

@@ -84,7 +84,7 @@ include/
     rix_hash_32.h    カッコーハッシュ -- u32 キー版
     rix_hash_64.h    カッコーハッシュ -- u64 キー版
     rix_hash_key.h  カッコーハッシュ -- u32 / u64 キー版 (統合)
-samples/              フローキャッシュサンプル (samples/README.md 参照)
+flowtable/            フロー表サンプル (flowtable/README.md 参照)
 ```
 
 ---
@@ -461,7 +461,7 @@ hash32/hash64 がより高い充填率を達成できるのは、キー比較が
 `enable=0` (GEN 強制) でも実際には AVX2 命令が実行されます。
 
 この表は現状 GEN / SSE4.2 / AVX2 までを掲載しています。AVX-512 の参考値は
-[samples/README_JP.md](samples/README_JP.md) に分けて記載しています。
+[flowtable/README_JP.md](flowtable/README_JP.md) に分けて記載しています。
 公開している AVX-512 再計測は `AMD Ryzen 9 8945HS`（Zen 4）上で後から取得した値で、
 CPU 依存の参考データとして扱うためです。
 
@@ -694,7 +694,7 @@ entry64 *ht64_remove(&head, buckets, pool, key_value);
 - `flow6`  : IPv6 5-tuple キャッシュ
 - `flowu`  : IPv4/IPv6 統合キャッシュ
 
-設計・API・性能データは [samples/README.md](samples/README.md) を参照してください。
+設計・API・性能データは [flowtable/README.md](flowtable/README.md) を参照してください。
 公開向けの要約文書としては
 [CHANGELOG.md](CHANGELOG.md)、
 [RELEASE_NOTES_v0.1.1.md](RELEASE_NOTES_v0.1.1.md)、
@@ -759,14 +759,14 @@ void *my_body = rec + my_body_offset;
 `1024K findadd_miss` では `flowu` が `341.42 cyc/key` でした。
 
 `avx512` dispatch tier 自体は存在し、実機でも確認済みです。現行の
-`samples/fcache` では `avx512` tier が AVX-512 bucket-scan helper を使い、
+`flowtable/` では `avx512` tier が AVX-512 bucket-scan helper を使い、
 `avx2` tier は AVX2 helper を使います。ただし AVX2 と AVX-512 の優劣は
 CPU 依存で、この Zen 4 実測でも強制 `avx512` は一部の datapath では改善し、
 別の datapath では悪化しました。README に載せる数値は Zen 4 上の参考値です。
 
 helper 名の詳しい説明や `fcache` 固有の API、性能表、backend 別検証手順、
 設計ノートは
-[samples/README_JP.md](samples/README_JP.md) を参照してください。
+[flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
 
 ---
 
@@ -811,12 +811,12 @@ make CC=clang OPTLEVEL=3
 
 現状ツリーはこの条件で GCC / Clang の両方でビルドできる前提です。
 
-`samples/fcache` では、`avx512` tier が AVX-512 bucket-scan helper を使います。
+`flowtable/` では、`avx512` tier が AVX-512 bucket-scan helper を使います。
 AVX2 と AVX-512 の実測比較は
-[samples/README_JP.md](samples/README_JP.md) に記載しています。
+[flowtable/README_JP.md](flowtable/README_JP.md) に記載しています。
 掲載値は `AMD Ryzen 9 8945HS`（Zen 4）上の参考値です。
 
-`samples/fcache` の lookup pipeline 定数の既定値は
+`flowtable/` の lookup pipeline 定数の既定値は
 `FLOW_CACHE_LOOKUP_STEP_KEYS=8`,
 `FLOW_CACHE_LOOKUP_AHEAD_STEPS=4`,
 `FLOW_CACHE_LOOKUP_AHEAD_KEYS=32` です。
@@ -825,9 +825,9 @@ software pipeline の段間距離です。
 tuning 比較では `EXTRA_CFLAGS` で上書きできます:
 
 ```sh
-make -C samples/fcache static CC=gcc OPTLEVEL=3 \
+make -C flowtable static CC=gcc OPTLEVEL=3 \
      EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
-make -C samples/fcache/test all CC=gcc OPTLEVEL=3 \
+make -C flowtable/test all CC=gcc OPTLEVEL=3 \
      EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
 ```
 
@@ -863,7 +863,7 @@ make bench-full
 ```
 
 flow-cache 固有の検証・ベンチマーク手順は
-[samples/README_JP.md](samples/README_JP.md) を参照してください。
+[flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
 
 テストカバレッジ:
 

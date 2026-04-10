@@ -1,13 +1,13 @@
 # librix -- Relative Index Library
 
-Index-based data structures for shared memory, plus a practical flow-cache
+Index-based data structures for shared memory, plus a practical flow-table
 implementation built on top of them.
 
 librix provides relative (index-pointing) implementations of classic BSD data
 structures -- SLIST, LIST, STAILQ, TAILQ, CIRCLEQ, a Red-Black tree, and
 high-performance cuckoo hash tables -- so they can live directly in shared
 memory or mmapped files without raw pointers. The repository also includes
-`samples/fcache`, a flow-cache implementation for IPv4, IPv6, and unified
+`flowtable/`, a flow-table implementation for IPv4, IPv6, and unified
 operation, intended as both a real sample application and a performance
 reference.
 
@@ -106,7 +106,7 @@ include/
     rix_hash_32.h    cuckoo hash -- u32 key variant
     rix_hash_64.h    cuckoo hash -- u64 key variant
     rix_hash_key.h  cuckoo hash -- u32 and u64 variants combined
-samples/              flow cache sample application (see samples/README.md)
+flowtable/            flow table sample application (see flowtable/README.md)
 ```
 
 ---
@@ -483,7 +483,7 @@ Measured on a single core with 128 buckets resident in L2 cache:
 loop itself, so forcing `enable=0` still executes AVX2 instructions.
 
 This table currently stops at GEN / SSE4.2 / AVX2. AVX-512 reference
-measurements are documented separately in [samples/README.md](samples/README.md),
+measurements are documented separately in [flowtable/README.md](flowtable/README.md),
 because the published AVX-512 rerun was captured later on `AMD Ryzen 9 8945HS`
 (Zen 4) and should be treated as CPU-specific reference data.
 
@@ -723,7 +723,7 @@ and `26.60 cyc/key` at `1024K` entries on `findadd_hit`, while `flowu`
 reached `341.42 cyc/key` on the larger `1024K findadd_miss` case.
 
 There is an `avx512` dispatch tier and it has been validated on real
-hardware. In `samples/fcache`, the `avx512` tier now uses dedicated
+hardware. In `flowtable/`, the `avx512` tier now uses dedicated
 AVX-512 bucket-scan helpers, while the `avx2` tier keeps the AVX2 helpers.
 The AVX2-versus-AVX-512 balance is still CPU-specific: on this Zen 4
 machine, forced `avx512` improved some datapaths and regressed others, so
@@ -781,7 +781,7 @@ Performance guidance for `*_init_ex()`:
 The library now exposes record/entry accessors for `flow4`, `flow6`, and
 `flowu`, while keeping the original `fc_flow*_cache_init()` API intact.
 
-See [samples/README.md](samples/README.md) for the `fcache`-specific helper
+See [flowtable/README.md](flowtable/README.md) for the flow-table-specific helper
 naming note, API walkthrough, detailed benchmark tables, backend-specific
 validation commands, and design notes. For release-facing text, see
 [CHANGELOG.md](CHANGELOG.md) and
@@ -835,12 +835,12 @@ make CC=clang OPTLEVEL=3
 
 The current tree is expected to build with both GCC and Clang in this mode.
 
-For `samples/fcache`, the `avx512` tier uses AVX-512 bucket-scan helpers.
+For `flowtable/`, the `avx512` tier uses AVX-512 bucket-scan helpers.
 The detailed measured AVX2-versus-AVX-512 numbers in
-[samples/README.md](samples/README.md) are reference data from
+[flowtable/README.md](flowtable/README.md) are reference data from
 `AMD Ryzen 9 8945HS` (Zen 4), not a blanket claim for every AVX-512 system.
 
-For `samples/fcache`, the lookup pipeline constants default to
+For `flowtable/`, the lookup pipeline constants default to
 `FLOW_CACHE_LOOKUP_STEP_KEYS=8`,
 `FLOW_CACHE_LOOKUP_AHEAD_STEPS=4`, and
 `FLOW_CACHE_LOOKUP_AHEAD_KEYS=32`.
@@ -849,9 +849,9 @@ hardware prefetch requests.
 You can override them for tuning runs via `EXTRA_CFLAGS`:
 
 ```sh
-make -C samples/fcache static CC=gcc OPTLEVEL=3 \
+make -C flowtable static CC=gcc OPTLEVEL=3 \
      EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
-make -C samples/fcache/test all CC=gcc OPTLEVEL=3 \
+make -C flowtable/test all CC=gcc OPTLEVEL=3 \
      EXTRA_CFLAGS='-DFLOW_CACHE_LOOKUP_STEP_KEYS=8 -DFLOW_CACHE_LOOKUP_AHEAD_KEYS=64'
 ```
 
@@ -890,7 +890,7 @@ make bench-full
 ```
 
 For flow-cache-specific validation and benchmark commands, see
-[samples/README.md](samples/README.md).
+[flowtable/README.md](flowtable/README.md).
 
 Test coverage includes:
 

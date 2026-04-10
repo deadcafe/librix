@@ -4,7 +4,7 @@
  * Copyright (c) 2026 deadcafe.beef@gmail.com
  * All rights reserved.
  *
- * flow_core.h - Shared compile-time layer for fcache / ftable.
+ * flow_core.h - Shared compile-time layer for ftable variants.
  *
  * Provides:
  *   1. Record pool macros (stride/offset-based indirection)
@@ -15,7 +15,7 @@
  * Usage in variant .c files:
  *
  *   // 1. Include owner header (which includes this via common.h)
- *   #include "flow4_cache.h"   // or "flow4_table.h"
+ *   #include "flow4_table.h"
  *
  *   // 2. Define hash/cmp functions
  *   static inline union rix_hash_hash_u
@@ -36,12 +36,11 @@
  *   RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
  *       key, cur_hash, slot, fcore_flow4_cmp, fcore_flow4_hash_fn)
  *
- *   // 6. Optional hit hook (fcache only)
+ *   // 6. Optional hit hook
  *   #define FCORE_ON_HIT(owner, entry, idx) ...
- *   // #define FCORE_ON_FINDADD_MISS(owner, entry, idx) ...  // fcache only
  *
  *   // 7. Expand
- *   FCORE_GENERATE(flow4, fc_flow4_cache, fcore_flow4_ht,
+ *   FCORE_GENERATE(flow4, ft_table, fcore_flow4_ht,
  *                  fcore_flow4_hash_fn, fcore_flow4_cmp)
  *
  * Owner struct requirements (field names are part of the contract):

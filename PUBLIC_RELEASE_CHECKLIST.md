@@ -4,7 +4,7 @@ Use this checklist before publishing a public release of `librix`.
 
 ## Scope
 
-- [ ] Confirm the release scope (`librix`, `samples/fcache`, or both)
+- [ ] Confirm the release scope (`librix`, `flowtable`, or both)
 - [ ] CI passes for `gcc` and `clang`
 - [ ] Confirm the release tag (for example `v0.1.1`)
 - [ ] Confirm what is considered stable vs experimental
@@ -20,8 +20,8 @@ Use this checklist before publishing a public release of `librix`.
 
 ## Validation
 
-- [ ] `make -C samples/fcache/test test`
-- [ ] `make -C samples/fcache/test bench`
+- [ ] `make -C flowtable/test test`
+- [ ] `make -C flowtable/test bench`
 - [ ] GCC build confirmed
 - [ ] Clang build confirmed
 - [ ] Generic path tested

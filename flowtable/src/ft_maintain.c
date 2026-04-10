@@ -13,7 +13,7 @@
 #include <rix/rix_defs_private.h>
 
 #include "ft_table_common.h"
-#include <flow/flow_key.h>
+#include "flow_key.h"
 
 /*===========================================================================
  * Arch-suffix name mangling

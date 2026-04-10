@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <bench/bench_scope.h>
+#include "bench_scope.h"
 
 #include "flow4_table.h"
 

@@ -82,3 +82,4 @@ samples/test/fc_bench_ndebug
 samples/test/out/
 tests/hashtbl/slot_query_sweep
 tests/hashtbl/out/
+flowtable/build/

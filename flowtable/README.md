@@ -1,7 +1,6 @@
 # Flow Table
 
-`samples/ftable/` is a flow-table library built on librix. It is related
-to `samples/fcache/`, but its purpose is different:
+`flowtable/` is a flow-table library built on librix.
 
 - no `findadd`
 - no implicit reclaim or timeout-driven eviction on datapath add
@@ -21,19 +20,26 @@ with runtime arch dispatch (`gen`, `sse4.2`, `avx2`, `avx512f`).
 
 ```sh
 # Build the flow table library
-make -C samples/ftable static
+make -C flowtable static
 
 # Run functional tests
-make -C samples/ftable/test test
+make -C flowtable/test test
 
 # Run benchmarks
-make -C samples/ftable/test bench
+make -C flowtable/test bench
 
 # Or use the top-level delegating targets
-make -C samples ftable
-make -C samples ftable-test
-make -C samples ftable-bench
+make flowtable
+make flowtable-test
+make flowtable-bench
 ```
+
+Build artifacts are written under `flowtable/build/`:
+
+- `build/lib/libftable.a`
+- `build/obj/*.o`
+- `build/bin/ft_test`
+- `build/bin/ft_bench`
 
 ## 1. Design Goals
 
@@ -258,11 +264,11 @@ allocators. The library never calls `malloc` or `free` internally.
 
 Public headers:
 
-- `samples/ftable/include/flow_table.h` — umbrella header
-- `samples/ftable/include/flow4_table.h`
-- `samples/ftable/include/flow6_table.h`
-- `samples/ftable/include/flowu_table.h`
-- `samples/ftable/include/ft_table_common.h` — shared types and helpers
+- `flowtable/include/flow_table.h` — umbrella header
+- `flowtable/include/flow4_table.h`
+- `flowtable/include/flow6_table.h`
+- `flowtable/include/flowu_table.h`
+- `flowtable/include/ft_table_common.h` — shared types and helpers
 
 Primary APIs (shown for `flow4`; `flow6` and `flowu` are identical):
 
@@ -404,7 +410,7 @@ be >= the init-time bucket count.
 
 ## 10. Current Test Coverage
 
-The current test program is `samples/ftable/test/test_flow_table.c`.
+The current test program is `flowtable/test/test_flow_table.c`.
 
 It covers (for all three variants: flow4, flow6, flowu):
 
@@ -427,16 +433,16 @@ It covers (for all three variants: flow4, flow6, flowu):
 Run:
 
 ```sh
-make -C samples/ftable/test test
+make -C flowtable/test test
 ```
 
 ## 11. Benchmark
 
-The benchmark program is `samples/ftable/test/bench_flow_table.c`,
+The benchmark program is `flowtable/test/bench_flow_table.c`,
 producing the `ft_bench` binary.
 
 ```sh
-make -C samples/ftable/test bench
+make -C flowtable/test bench
 ```
 
 ### 11.1 Benchmark modes
@@ -512,7 +518,7 @@ Notes:
 ## 12. File Structure
 
 ```text
-samples/ftable/
+flowtable/
   README.md
   README_JP.md
   TEST_SPEC_JP.md

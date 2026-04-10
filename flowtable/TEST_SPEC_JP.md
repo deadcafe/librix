@@ -1,6 +1,6 @@
 # ftable Test Spec
 
-この文書は `samples/ftable/test/test_flow_table.c` の test を、
+この文書は `flowtable/test/test_flow_table.c` の test を、
 実装都合ではなく **API 仕様** を起点に整理するための基準表である。
 
 目的は 2 つある。

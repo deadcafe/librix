@@ -3,8 +3,8 @@ export CC
 
 TESTDIRS := tests/slist tests/list tests/stailq tests/tailq tests/circleq \
             tests/rbtree tests/hashtbl tests/hashtbl32 tests/hashtbl64
-BENCHDIRS := samples
-SUBDIRS  := $(TESTDIRS) samples
+BENCHDIRS := flowtable
+SUBDIRS  := $(TESTDIRS) flowtable
 
 HTAGS_PORT   ?= 8000
 HTAGS_BIND   ?= 127.0.0.1
@@ -13,7 +13,7 @@ PREFIX       ?= /usr/local
 
 RIX_PUB_HDRS := $(filter-out %_private.h, $(wildcard include/rix/*.h))
 
-.PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help ftable
+.PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help ftable flowtable flowtable-test flowtable-bench
 all: build run-tests run-bench
 
 help:
@@ -26,7 +26,8 @@ help:
 	  '  test         Build and run all tests' \
 	  '  bench        Build and run the representative benchmark suite' \
 	  '  bench-full   Build and run the full long-running benchmark suite' \
-	  '  ftable       Build ftable library and run ftable tests' \
+	  '  flowtable    Build flowtable library and run flowtable tests' \
+	  '  ftable       Alias for flowtable' \
 	  '  clean        Remove build artifacts and generated HTML' \
 	  '  install      Install headers and sample library under PREFIX' \
 	  '  htags        Generate HTML source browsing output under HTML/' \
@@ -70,11 +71,11 @@ CLEAN_TARGETS := $(addprefix clean-,$(SUBDIRS))
 
 bench-full: build run-bench-full
 
-run-bench-full: $(BENCH_FULL_TARGETS) bench-full-samples
+run-bench-full: $(BENCH_FULL_TARGETS) bench-full-flowtable
 
-bench-full-samples: build-samples
-	@echo "[BENCH] samples"
-	@$(MAKE) -C samples bench-full
+bench-full-flowtable: build-flowtable
+	@echo "[BENCH] flowtable"
+	@$(MAKE) -C flowtable bench-full
 
 $(BENCH_FULL_TARGETS): bench-full-%: build-%
 	@echo "[BENCH] $*"
@@ -87,14 +88,22 @@ $(CLEAN_TARGETS): clean-%:
 	@echo "[CLEAN] $*"
 	@$(MAKE) -C $* clean
 
-ftable:
-	@$(MAKE) -C samples ftable
+flowtable:
+	@$(MAKE) -C flowtable/test all
+
+ftable: flowtable
+
+flowtable-test:
+	@$(MAKE) -C flowtable/test test
+
+flowtable-bench:
+	@$(MAKE) -C flowtable/test bench-light
 
 install:
 	install -d $(PREFIX)/include/rix $(PREFIX)/lib
 	install -m 644 include/librix.h   $(PREFIX)/include/
 	install -m 644 $(RIX_PUB_HDRS)   $(PREFIX)/include/rix/
-	@echo "[SKIP] fcache install (legacy, use 'make -C samples fcache' to build)"
+	@echo "[SKIP] flowtable sample install is not provided"
 
 htags:
 	mkdir -p HTML

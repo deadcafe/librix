@@ -20,7 +20,7 @@
 #include <time.h>
 #include <sys/mman.h>
 
-#include <bench/bench_scope.h>
+#include "bench_scope.h"
 
 #include "flow_table.h"
 #include "ft_test_record_allocator.h"
