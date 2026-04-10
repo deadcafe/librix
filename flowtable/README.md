@@ -445,6 +445,9 @@ producing the `ft_bench` binary.
 make -C flowtable/test bench
 ```
 
+- `bench` / `bench-light`: `flow4` only, `q=1/8/32/256`, fill `60%`
+- `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`
+
 ### 11.1 Benchmark modes
 
 - **Datapath** (default): cold bulk operations with cache-flush between rounds

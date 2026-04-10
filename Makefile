@@ -40,8 +40,8 @@ help:
 	  '  HTAGS_PORT=8000       Port for htags-serve'
 
 BUILD_TARGETS := $(addprefix build-,$(SUBDIRS))
-TEST_TARGETS  := $(addprefix test-,$(SUBDIRS))
-BENCH_TARGETS := $(addprefix bench-,$(BENCHDIRS))
+TEST_TARGETS  := $(addprefix test-,$(TESTDIRS))
+BENCH_TARGETS :=
 
 build: $(BUILD_TARGETS)
 
@@ -51,15 +51,23 @@ $(BUILD_TARGETS): build-%:
 
 test: build run-tests
 
-run-tests: $(TEST_TARGETS)
+run-tests: $(TEST_TARGETS) test-flowtable
 
 $(TEST_TARGETS): test-%: build-%
 	@echo "[TEST] $*"
 	@$(MAKE) -C $* test
 
+test-flowtable: build-flowtable
+	@echo "[TEST] flowtable"
+	@$(MAKE) -C flowtable/test test
+
 bench: build run-bench
 
-run-bench: $(BENCH_TARGETS)
+run-bench: bench-flowtable
+
+bench-flowtable: build-flowtable
+	@echo "[BENCH] flowtable"
+	@$(MAKE) -C flowtable/test bench
 
 $(BENCH_TARGETS): bench-%: build-%
 	@echo "[BENCH] $*"
@@ -97,7 +105,7 @@ flowtable-test:
 	@$(MAKE) -C flowtable/test test
 
 flowtable-bench:
-	@$(MAKE) -C flowtable/test bench-light
+	@$(MAKE) -C flowtable/test bench
 
 install:
 	install -d $(PREFIX)/include/rix $(PREFIX)/lib

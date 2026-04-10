@@ -434,6 +434,9 @@ benchmark program は `flowtable/test/bench_flow_table.c` であり、
 make -C flowtable/test bench
 ```
 
+- `bench` / `bench-light`: `flow4` のみ、`q=1/8/32/256`、fill `60%`
+- `bench-full`: `flow4/6/u` の query sweep に `maint` と `grow` を加える
+
 ### 11.1 benchmark mode
 
 - **datapath**（既定）: cold bulk 操作（ラウンド間に cache flush）

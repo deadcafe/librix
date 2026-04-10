@@ -28,10 +28,14 @@ WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
-BENCH_FT_SMALL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
-BENCH_FT_SMALL_PERF_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7 --perf-cycles
-BENCH_FT_SMALL_DEBUG_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7 --show-samples
 BENCH_FT_FULL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
+BENCH_QUERIES := 1 8 32 256
+BENCH_LIGHT_FAMILY := flow4
+BENCH_FULL_FAMILIES := flow4 flow6 flowu
+BENCH_LIGHT_FILL := 60
+BENCH_FULL_FILLS := 40 50 60 80 90
+BENCH_GROW_FILL := 60
+BENCH_MAINT_FILL := 50
 
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include \
@@ -50,9 +54,23 @@ BENCH_SRC    = bench_flow_table.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
 DEPS         = $(TARGET).d $(BENCH).d
 
-.PHONY: all test bench bench-light bench-small bench-small-debug bench-small-perf bench-full bench-maint clean libft FORCE
+.PHONY: all help test bench bench-light bench-full clean libft FORCE
 
-all: test bench-light
+all: test
+
+help:
+	@printf '%s\n' \
+	  'flowtable/test targets:' \
+	  '  help         Show this help' \
+	  '  test         Build and run functional tests' \
+	  '  bench        Run the light benchmark set (flow4 only, q=1/8/32/256 @ fill=60%)' \
+	  '  bench-light  Same as bench' \
+	  '  bench-full   Run the full benchmark sweep (flow4/6/u query, maintain, grow)' \
+	  '  clean        Remove generated binaries and dependency files' \
+	  '' \
+	  'Useful variables:' \
+	  '  BENCH_FT_OPTS       Options for bench / bench-light' \
+	  '  BENCH_FT_FULL_OPTS  Options for bench-full'
 
 $(BINDIR):
 	mkdir -p $@
@@ -76,125 +94,27 @@ test: $(TARGET)
 	$(TARGET)
 
 bench-light: $(BENCH)
-	@echo "== light ftable bench (flow4, q=1, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 1 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=2, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 2 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=4, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 4 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=8, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 8 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=16, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 16 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=32, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 32 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=64, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 64 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=128, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 128 flow4 1048576 60
-	@echo "== light ftable bench (flow4, q=256, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_OPTS) --query 256 flow4 1048576 60
-
-bench-small: $(BENCH)
-	@echo "== small ftable bench (flow4, q=1, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 1 flow4 1048576 60
-	@echo "== small ftable bench (flow4, q=2, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 2 flow4 1048576 60
-	@echo "== small ftable bench (flow4, q=3, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 3 flow4 1048576 60
-	@echo "== small ftable bench (flow4, q=4, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 4 flow4 1048576 60
-	@echo "== small ftable bench (flow4, q=6, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 6 flow4 1048576 60
-	@echo "== small ftable bench (flow4, q=8, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 8 flow4 1048576 60
-	@echo "== small ftable bench (flow4, q=12, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 12 flow4 1048576 60
-	@echo "== small ftable bench (flow4, q=16, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_OPTS) --query 16 flow4 1048576 60
-
-bench-small-debug: $(BENCH)
-	@echo "== small debug ftable bench (flow4, q=1, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 1 flow4 1048576 60
-	@echo "== small debug ftable bench (flow4, q=2, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 2 flow4 1048576 60
-	@echo "== small debug ftable bench (flow4, q=4, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 4 flow4 1048576 60
-	@echo "== small debug ftable bench (flow4, q=8, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 8 flow4 1048576 60
-	@echo "== small debug ftable bench (flow4, q=16, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_DEBUG_OPTS) --query 16 flow4 1048576 60
-
-bench-small-perf: $(BENCH)
-	@echo "== small perf ftable bench (flow4, q=1, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 1 flow4 1048576 60
-	@echo "== small perf ftable bench (flow4, q=2, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 2 flow4 1048576 60
-	@echo "== small perf ftable bench (flow4, q=4, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 4 flow4 1048576 60
-	@echo "== small perf ftable bench (flow4, q=8, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 8 flow4 1048576 60
-	@echo "== small perf ftable bench (flow4, q=16, 1M @ fill=60%) =="
-	$(BENCH) $(BENCH_FT_SMALL_PERF_OPTS) --query 16 flow4 1048576 60
+	@for q in $(BENCH_QUERIES); do \
+		echo "== light ftable bench ($(BENCH_LIGHT_FAMILY), q=$$q, 1M @ fill=$(BENCH_LIGHT_FILL)%) =="; \
+		$(BENCH) $(BENCH_FT_OPTS) --query $$q $(BENCH_LIGHT_FAMILY) 1048576 $(BENCH_LIGHT_FILL); \
+	done
 
 bench: bench-light
 
-bench-maint: $(BENCH)
-	@echo "== ftable maintain bench (1M, fill=50%, perf metrics) =="
-	$(BENCH) $(BENCH_FT_OPTS) --maint flow4 1048576 50
-	$(BENCH) $(BENCH_FT_OPTS) --maint flow6 1048576 50
-	$(BENCH) $(BENCH_FT_OPTS) --maint flowu 1048576 50
-
 bench-full: $(BENCH)
-	@echo "== full ftable bench (1M baseline, cold bulk datapath sweep + grow@60%) =="
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow4 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow4 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow4 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow4 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow4 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow4 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow4 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow4 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow4 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow4 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow4 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow4 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow4 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow4 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow4 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --grow flow4 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow6 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow6 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow6 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow6 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow6 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow6 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow6 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow6 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow6 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow6 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow6 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow6 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flow6 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flow6 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flow6 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --grow flow6 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flowu 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flowu 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flowu 1048576 40
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flowu 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flowu 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flowu 1048576 50
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flowu 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flowu 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flowu 1048576 60
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flowu 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flowu 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flowu 1048576 80
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 1 flowu 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 32 flowu 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --query 256 flowu 1048576 90
-	$(BENCH) $(BENCH_FT_FULL_OPTS) --grow flowu 1048576 60
+	@echo "== full ftable bench (query sweep + maintain + grow) =="
+	@for family in $(BENCH_FULL_FAMILIES); do \
+		for fill in $(BENCH_FULL_FILLS); do \
+			for q in $(BENCH_QUERIES); do \
+				echo "== full ftable bench ($$family, q=$$q, 1M @ fill=$$fill%) =="; \
+				$(BENCH) $(BENCH_FT_FULL_OPTS) --query $$q $$family 1048576 $$fill; \
+			done; \
+		done; \
+		echo "== full ftable maintain bench ($$family, 1M @ fill=$(BENCH_MAINT_FILL)%) =="; \
+		$(BENCH) $(BENCH_FT_FULL_OPTS) --maint $$family 1048576 $(BENCH_MAINT_FILL); \
+		echo "== full ftable grow bench ($$family, 1M @ fill=$(BENCH_GROW_FILL)%) =="; \
+		$(BENCH) $(BENCH_FT_FULL_OPTS) --grow $$family 1048576 $(BENCH_GROW_FILL); \
+	done
 
 clean:
 	rm -rf $(BINDIR) *~ core core.*
