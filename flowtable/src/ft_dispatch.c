@@ -9,7 +9,7 @@
 
 #include <rix/rix_hash_arch.h>
 
-#include "ft_ops.h"
+#include "flow_dispatch.h"
 
 /*===========================================================================
  * Maintain arch-variant declarations

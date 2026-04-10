@@ -268,7 +268,10 @@ Public headers:
 - `flowtable/include/flow4_table.h`
 - `flowtable/include/flow6_table.h`
 - `flowtable/include/flowu_table.h`
-- `flowtable/include/ft_table_common.h` — shared types and helpers
+- `flowtable/include/flow_common.h` — shared types and helpers
+
+Private implementation headers live under `flowtable/src/`, and bench-only
+helpers live under `flowtable/test/`.
 
 Primary APIs (shown for `flow4`; `flow6` and `flowu` are identical):
 
@@ -531,17 +534,20 @@ flowtable/
     flow4_table.h
     flow6_table.h
     flowu_table.h
-    ft_table_common.h
+    flow_common.h
   src/
     flow4.c
     flow6.c
     flowu.c
+    flow_core.h
+    flow_hash.h
     ft_dispatch.c
     ft_maintain.c
-    ft_ops.h
-    ft_table_generate.h
+    flow_dispatch.h
+    flow_table_generate.h
   test/
     Makefile
     bench_flow_table.c
+    bench_scope.h
     test_flow_table.c
 ```

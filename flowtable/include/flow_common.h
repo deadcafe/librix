@@ -5,26 +5,17 @@
  * All rights reserved.
  */
 
-#ifndef _FT_TABLE_COMMON_H_
-#define _FT_TABLE_COMMON_H_
+#ifndef _FLOW_COMMON_H_
+#define _FLOW_COMMON_H_
 
 #include <stddef.h>
 #include <stdint.h>
 
 #include <rix/rix_hash.h>
 #include <rix/rix_queue.h>
-#include "flow_core.h"
 
 #ifndef FT_TABLE_CACHE_LINE_SIZE
 #define FT_TABLE_CACHE_LINE_SIZE 64u
-#endif
-
-#ifndef FT_FLOW_FAMILY_IPV4
-#define FT_FLOW_FAMILY_IPV4 4u
-#endif
-
-#ifndef FT_FLOW_FAMILY_IPV6
-#define FT_FLOW_FAMILY_IPV6 6u
 #endif
 
 /*===========================================================================
@@ -231,6 +222,38 @@ ft_table_bucket_mem_size(unsigned nb_bk)
     return (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
 }
 
+/*===========================================================================
+ * Shared datapath statistics
+ *===========================================================================*/
+struct flow_stats {
+    u64 lookups;
+    u64 hits;
+    u64 misses;
+    u64 adds;
+    u64 add_existing;
+    u64 add_failed;
+    u64 dels;
+    u64 del_miss;
+};
+
+struct flow_status {
+    u32 entries;
+    u32 kickouts;
+    u32 add_bk0;
+    u32 add_bk1;
+};
+
+static inline void
+flow_status_reset(struct flow_status *status, u32 entries)
+{
+    if (status == NULL)
+        return;
+    status->entries = entries;
+    status->kickouts = 0u;
+    status->add_bk0 = 0u;
+    status->add_bk1 = 0u;
+}
+
 struct ft_table_stats {
     struct flow_stats core;
     u64 grow_execs;
@@ -390,4 +413,4 @@ unsigned ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
  */
 void ft_arch_init(unsigned arch_enable);
 
-#endif /* _FT_TABLE_COMMON_H_ */
+#endif /* _FLOW_COMMON_H_ */

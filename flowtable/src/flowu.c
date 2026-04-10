@@ -10,6 +10,8 @@
 #include <rix/rix_hash_slot.h>
 
 #include "flowu_table.h"
+#include "flow_hash.h"
+#include "flow_core.h"
 
 #define ft_flowu_hash_fn flowu_key_hash
 #define ft_flowu_cmp     flowu_key_cmp
@@ -76,7 +78,9 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flowu_ht, flowu_entry,
     key, meta.cur_hash, meta.slot, ft_flowu_cmp, ft_flowu_hash_fn)
 
 #define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
-    fcore_flowu_layout_entry_ptr_((owner), (idx))
+    ((struct flowu_entry *)(void *)fcore_record_member_ptr_nonnull(           \
+        (owner)->pool_base, (owner)->pool_stride, (idx),                      \
+        (owner)->pool_entry_offset, _Alignof(struct flowu_entry)))
 
 #define FCORE_LAYOUT_ENTRY_INDEX(owner, entry) \
     fcore_flowu_layout_entry_idx_((owner), (entry))
@@ -117,13 +121,7 @@ FCORE_GENERATE(flowu, ft_table, fcore_flowu_ht,
 #define FTG_LAYOUT_ENTRY_INDEX(ft, entry)                                      \
     ft_flowu_layout_entry_idx_((ft), (entry))
 
-#define FTG_LAYOUT_ENTRY_AT(ft, off0)                                          \
-    ft_flowu_layout_entry_ptr_((ft), (unsigned)(off0) + 1u)
-
 #define FTG_ENTRY_TYPE(p) struct flowu_entry
-#define FTG_ENTRY_IS_ACTIVE(entry, flag_active) ((entry)->meta.cur_hash != 0u)
-#define FTG_ON_INSERT_SUCCESS(entry, flag_active) ((void)(entry))
-#define FTG_ENTRY_META_CLEAR_TAIL(entry) ((void)(entry))
 
 #undef RIX_HASH_SLOT_DEFINE_INDEXERS
 #define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
@@ -146,12 +144,12 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flowu_ht, flowu_entry, key,
                                  meta.cur_hash, meta.slot,
                                  ft_flowu_cmp, ft_flowu_hash_fn)
 
-#include "ft_table_generate.h"
+#include "flow_table_generate.h"
 
-FT_TABLE_GENERATE(flowu, 0u, ft_flowu_hash_fn, ft_flowu_cmp)
+FT_TABLE_GENERATE(flowu, ft_flowu_hash_fn, ft_flowu_cmp)
 
 #ifdef FT_ARCH_SUFFIX
-#include "ft_ops.h"
+#include "flow_dispatch.h"
 FT_OPS_TABLE(flowu, FT_ARCH_SUFFIX);
 #endif
 

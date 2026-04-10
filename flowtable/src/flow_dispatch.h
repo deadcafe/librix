@@ -5,8 +5,8 @@
  * All rights reserved.
  */
 
-#ifndef _FT_OPS_H_
-#define _FT_OPS_H_
+#ifndef _FLOW_DISPATCH_H_
+#define _FLOW_DISPATCH_H_
 
 #include "flow_table.h"
 
@@ -102,4 +102,4 @@ do {                                                                           \
 #define _FT_OPS_SELECT_BODY(prefix, arch_enable, out_ops) (void)(arch_enable)
 #endif
 
-#endif /* _FT_OPS_H_ */
+#endif /* _FLOW_DISPATCH_H_ */

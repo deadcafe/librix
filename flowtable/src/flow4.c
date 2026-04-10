@@ -10,6 +10,8 @@
 #include <rix/rix_hash_slot.h>
 
 #include "flow4_table.h"
+#include "flow_hash.h"
+#include "flow_core.h"
 
 #define ft_flow4_hash_fn flow4_key_hash
 #define ft_flow4_cmp     flow4_key_cmp
@@ -76,7 +78,9 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
     key, meta.cur_hash, meta.slot, ft_flow4_cmp, ft_flow4_hash_fn)
 
 #define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
-    fcore_flow4_layout_entry_ptr_((owner), (idx))
+    ((struct flow4_entry *)(void *)fcore_record_member_ptr_nonnull(           \
+        (owner)->pool_base, (owner)->pool_stride, (idx),                      \
+        (owner)->pool_entry_offset, _Alignof(struct flow4_entry)))
 
 #define FCORE_LAYOUT_ENTRY_INDEX(owner, entry) \
     fcore_flow4_layout_entry_idx_((owner), (entry))
@@ -126,11 +130,7 @@ FCORE_GENERATE(flow4, ft_table, fcore_flow4_ht,
 #define FTG_LAYOUT_ENTRY_INDEX(ft, entry)                                      \
     ft_flow4_layout_entry_idx_((ft), (entry))
 
-#define FTG_LAYOUT_ENTRY_AT(ft, off0)                                          \
-    ft_flow4_layout_entry_ptr_((ft), (unsigned)(off0) + 1u)
-
 #define FTG_ENTRY_TYPE(p) struct flow4_entry
-#define FTG_ENTRY_META_CLEAR_TAIL(entry) ((void)(entry))
 
 #define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
@@ -152,12 +152,12 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flow4_ht, flow4_entry, key,
                                  meta.cur_hash, meta.slot,
                                  ft_flow4_cmp, ft_flow4_hash_fn)
 
-#include "ft_table_generate.h"
+#include "flow_table_generate.h"
 
-FT_TABLE_GENERATE(flow4, 0u, ft_flow4_hash_fn, ft_flow4_cmp)
+FT_TABLE_GENERATE(flow4, ft_flow4_hash_fn, ft_flow4_cmp)
 
 #ifdef FT_ARCH_SUFFIX
-#include "ft_ops.h"
+#include "flow_dispatch.h"
 FT_OPS_TABLE(flow4, FT_ARCH_SUFFIX);
 #endif
 

@@ -14,8 +14,9 @@
  *
  * Usage in variant .c files:
  *
- *   // 1. Include owner header (which includes this via common.h)
+ *   // 1. Include owner header and this internal core header
  *   #include "flow4_table.h"
+ *   #include "flow_core.h"
  *
  *   // 2. Define hash/cmp functions
  *   static inline union rix_hash_hash_u
@@ -76,35 +77,21 @@
 #include "flow_key.h"
 
 /*===========================================================================
- * Shared datapath statistics
+ * Private layout helpers
  *===========================================================================*/
-struct flow_stats {
-    u64 lookups;
-    u64 hits;
-    u64 misses;
-    u64 adds;
-    u64 add_existing;
-    u64 add_failed;
-    u64 dels;
-    u64 del_miss;
-};
-
-struct flow_status {
-    u32 entries;
-    u32 kickouts;
-    u32 add_bk0;
-    u32 add_bk1;
-};
-
-static inline void
-flow_status_reset(struct flow_status *status, u32 entries)
+static inline void *
+fcore_record_member_ptr_nonnull(void *base,
+                                size_t stride,
+                                unsigned idx,
+                                size_t member_offset,
+                                size_t member_align)
 {
-    if (status == NULL)
-        return;
-    status->entries = entries;
-    status->kickouts = 0u;
-    status->add_bk0 = 0u;
-    status->add_bk1 = 0u;
+    RIX_ASSERT(idx != RIX_NIL);
+    return __builtin_assume_aligned(
+        FT_BYTE_PTR_ADD(FT_BYTE_PTR_ADD(base,
+                                        RIX_IDX_TO_OFF0(idx) * stride),
+                        member_offset),
+        member_align);
 }
 
 /*===========================================================================

@@ -264,7 +264,10 @@ helper 関数:
 - `flowtable/include/flow4_table.h`
 - `flowtable/include/flow6_table.h`
 - `flowtable/include/flowu_table.h`
-- `flowtable/include/ft_table_common.h` — 共通型と helper
+- `flowtable/include/flow_common.h` — 共通型と helper
+
+private 実装 header は `flowtable/src/`、bench 専用 helper は
+`flowtable/test/` に置く。
 
 主要 API（`flow4` で示す。`flow6`、`flowu` も同一）:
 
@@ -520,17 +523,20 @@ flowtable/
     flow4_table.h
     flow6_table.h
     flowu_table.h
-    ft_table_common.h
+    flow_common.h
   src/
     flow4.c
     flow6.c
     flowu.c
+    flow_core.h
+    flow_hash.h
     ft_dispatch.c
     ft_maintain.c
-    ft_ops.h
-    ft_table_generate.h
+    flow_dispatch.h
+    flow_table_generate.h
   test/
     Makefile
     bench_flow_table.c
+    bench_scope.h
     test_flow_table.c
 ```
