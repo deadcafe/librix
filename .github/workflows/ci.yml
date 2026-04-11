@@ -27,6 +27,6 @@ jobs:
       - name: Run full test suite
         run: make test CC=${{ matrix.cc }} SIMD=${{ matrix.simd }}
 
-      - name: Run flow-cache benchmark smoke test
+      - name: Run flowtable benchmark smoke test
         if: matrix.simd == 'avx2'
-        run: make -C samples/test bench CC=${{ matrix.cc }} SIMD=${{ matrix.simd }}
+        run: make -C flowtable/test bench CC=${{ matrix.cc }}
