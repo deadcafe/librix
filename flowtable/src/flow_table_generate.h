@@ -111,13 +111,13 @@
                                                                                \
 /* --- Internal helpers -------------------------------------------------- */ \
                                                                                \
-static inline _FTG_ENTRY_T(p) *                                               \
+static RIX_UNUSED RIX_FORCE_INLINE _FTG_ENTRY_T(p) *                          \
 _FTG_INT(p, hash_base_)(_FTG_TABLE_T(p) *ft)                                  \
 {                                                                             \
     return (_FTG_ENTRY_T(p) *)(void *)ft;                                     \
 }                                                                             \
                                                                                \
-static inline void                                                            \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 _FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
 {                                                                             \
     entry->meta.cur_hash = 0u;                                                \
@@ -126,14 +126,14 @@ _FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
     entry->meta.reserved0 = 0u;                                               \
 }                                                                             \
                                                                                \
-static inline size_t                                                          \
+static RIX_UNUSED RIX_FORCE_INLINE size_t                                     \
 _FTG_INT(p, bucket_bytes_)(unsigned nb_bk)                                    \
 {                                                                             \
     return (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);                  \
 }                                                                             \
                                                                                \
 /* find_hashed_: single-key lookup using precomputed hash */                  \
-static inline _FTG_ENTRY_T(p) *                                               \
+static RIX_UNUSED RIX_FORCE_INLINE _FTG_ENTRY_T(p) *                          \
 _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
                           const _FTG_KEY_T(p) *key,                           \
                           union rix_hash_hash_u h)                            \
@@ -174,7 +174,7 @@ _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
     return NULL;                                                              \
 }                                                                             \
                                                                                \
-static inline void                                                            \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
                          const _FTG_KEY_T(p) *keys,                           \
                          unsigned nb_keys,                                    \
@@ -247,7 +247,7 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
 }                                                                             \
                                                                                \
 /* insert_hashed_: insert pre-hashed entry into hash table */                 \
-static inline int                                                             \
+static RIX_UNUSED int                                                         \
 _FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
                             _FTG_ENTRY_T(p) *entry,                           \
                             const union rix_hash_hash_u h,                    \
@@ -274,7 +274,7 @@ _FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
 }                                                                             \
                                                                                \
 /* rehash_insert_hashed_: for grow_2x, insert into new bucket array */        \
-static inline int                                                             \
+static RIX_UNUSED int                                                         \
 _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
                                    struct rix_hash_bucket_s *buckets,         \
                                    _FTG_TABLE_T(p) *ft,                       \

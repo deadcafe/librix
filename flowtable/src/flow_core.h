@@ -83,16 +83,20 @@ static inline void *
 fcore_record_member_ptr_nonnull(void *base,
                                 size_t stride,
                                 unsigned idx,
-                                size_t member_offset,
-                                size_t member_align)
+                                size_t member_offset)
 {
     RIX_ASSERT(idx != RIX_NIL);
-    return __builtin_assume_aligned(
-        FT_BYTE_PTR_ADD(FT_BYTE_PTR_ADD(base,
-                                        RIX_IDX_TO_OFF0(idx) * stride),
-                        member_offset),
-        member_align);
+    return FT_BYTE_PTR_ADD(FT_BYTE_PTR_ADD(base,
+                                           RIX_IDX_TO_OFF0(idx) * stride),
+                           member_offset);
 }
+
+#define FCORE_RECORD_MEMBER_PTR_NONNULL_ALIGNED(type, base, stride, idx,     \
+                                                member_offset)               \
+    ((type *)__builtin_assume_aligned(                                        \
+        fcore_record_member_ptr_nonnull((base), (stride), (idx),             \
+                                        (member_offset)),                     \
+        _Alignof(type)))
 
 /*===========================================================================
  * Pipeline tuning defaults

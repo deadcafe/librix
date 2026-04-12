@@ -78,9 +78,9 @@ RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow6_ht, flow6_entry,
     key, meta.cur_hash, meta.slot, ft_flow6_cmp, ft_flow6_hash_fn)
 
 #define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
-    ((struct flow6_entry *)(void *)fcore_record_member_ptr_nonnull(           \
+    FCORE_RECORD_MEMBER_PTR_NONNULL_ALIGNED(struct flow6_entry,               \
         (owner)->pool_base, (owner)->pool_stride, (idx),                      \
-        (owner)->pool_entry_offset, _Alignof(struct flow6_entry)))
+        (owner)->pool_entry_offset)
 
 #define FCORE_LAYOUT_ENTRY_INDEX(owner, entry) \
     fcore_flow6_layout_entry_idx_((owner), (entry))
