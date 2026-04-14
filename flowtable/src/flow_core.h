@@ -375,7 +375,7 @@ _FCORE_INT(p, add_idx_small_)(_FCORE_OT(ot) *owner,                          \
                 RIX_ASSUME_NONNULL(_node);                                    \
                 if (RIX_UNLIKELY(cmp_fn(&entry->key, &_node->key) == 0)) {    \
                     FLOW_STATS(owner).add_existing++;                         \
-                    if (policy == FT_ADD_UPDATE) {                            \
+                    if ((unsigned)policy & 1u) {                              \
                         _ctx.bk[0]->idx[_bit] = _eidx;                        \
                         entry->meta.cur_hash = _ctx.hash.val32[0];            \
                         entry->meta.slot =                                    \
@@ -406,7 +406,7 @@ _FCORE_INT(p, add_idx_small_)(_FCORE_OT(ot) *owner,                          \
                 RIX_ASSUME_NONNULL(_node);                                    \
                 if (RIX_UNLIKELY(cmp_fn(&entry->key, &_node->key) == 0)) {    \
                     FLOW_STATS(owner).add_existing++;                         \
-                    if (policy == FT_ADD_UPDATE) {                            \
+                    if ((unsigned)policy & 1u) {                              \
                         _ctx.bk[1]->idx[_bit] = _eidx;                        \
                         entry->meta.cur_hash = _ctx.hash.val32[1];            \
                         entry->meta.slot =                                    \
@@ -463,7 +463,7 @@ _FCORE_INT(p, add_idx_small_)(_FCORE_OT(ot) *owner,                          \
                 FLOW_STATUS(owner).add_bk0++;                                 \
         } else if (RIX_UNLIKELY(_ret_idx != _eidx)) {                         \
             FLOW_STATS(owner).add_existing++;                                 \
-            if (policy == FT_ADD_UPDATE) {                                    \
+            if ((unsigned)policy & 1u) {                                      \
                 _FCORE_ENTRY_T(p) *_node =                                    \
                     FCORE_LAYOUT_ENTRY_PTR(owner, _ret_idx);                  \
                 u32 _ins_idx;                                                 \
@@ -487,11 +487,59 @@ _FCORE_INT(p, add_idx_small_)(_FCORE_OT(ot) *owner,                          \
                 entry_idxv[_idx] = _ret_idx;                                  \
                 unused_idxv[free_count++] = _eidx;                            \
             }                                                                 \
-        } else {                                                              \
+        } else if (RIX_LIKELY(!((unsigned)policy & 2u))) {                    \
             FCORE_CLEAR_TIMESTAMP(entry);                                     \
             FLOW_STATS(owner).add_failed++;                                   \
             entry_idxv[_idx] = 0u;                                            \
             unused_idxv[free_count++] = _eidx;                                \
+        } else {                                                              \
+            u64 _now_enc = flow_timestamp_encode(                             \
+                now, FCORE_TIMESTAMP_SHIFT(owner));                           \
+            u64 _max_elapsed = 0u;                                            \
+            unsigned _victim_bki = 0u;                                        \
+            unsigned _victim_slot = 0u;                                       \
+            u32 _victim_idx = 0u;                                             \
+            for (unsigned _bki = 0u; _bki < 2u; _bki++) {                     \
+                struct rix_hash_bucket_s *_vbk = _ctx.bk[_bki];               \
+                for (unsigned _s = 0u; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) { \
+                    u32 _nidx = _vbk->idx[_s];                                \
+                    _FCORE_ENTRY_T(p) *_node;                                 \
+                    u64 _ts, _elapsed;                                        \
+                    if (_nidx == (u32)RIX_NIL)                                \
+                        continue;                                             \
+                    _node = FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);             \
+                    RIX_ASSUME_NONNULL(_node);                                \
+                    _ts = flow_timestamp_get(&_node->meta);                   \
+                    if (_ts == 0u)                                            \
+                        continue;                                             \
+                    _elapsed = flow_timestamp_elapsed(_now_enc, _ts);         \
+                    if (_elapsed >= _max_elapsed) {                           \
+                        _max_elapsed = _elapsed;                              \
+                        _victim_bki = _bki;                                   \
+                        _victim_slot = _s;                                    \
+                        _victim_idx = _nidx;                                  \
+                    }                                                         \
+                }                                                             \
+            }                                                                 \
+            if (RIX_LIKELY(_victim_idx != 0u)) {                              \
+                _FCORE_ENTRY_T(p) *_victim =                                  \
+                    FCORE_LAYOUT_ENTRY_PTR(owner, _victim_idx);               \
+                RIX_ASSUME_NONNULL(_victim);                                  \
+                _ctx.bk[_victim_bki]->hash[_victim_slot] = _ctx.fp;           \
+                _ctx.bk[_victim_bki]->idx[_victim_slot] = _eidx;              \
+                entry->meta.cur_hash = _ctx.hash.val32[_victim_bki];          \
+                entry->meta.slot =                                            \
+                    (__typeof__(entry->meta.slot))_victim_slot;               \
+                FCORE_INIT_TIMESTAMP(owner, entry, now);                      \
+                FCORE_CLEAR_TIMESTAMP(_victim);                               \
+                unused_idxv[free_count++] = _victim_idx;                      \
+                FLOW_STATS(owner).force_expired++;                            \
+            } else {                                                          \
+                FCORE_CLEAR_TIMESTAMP(entry);                                 \
+                FLOW_STATS(owner).add_failed++;                               \
+                entry_idxv[_idx] = 0u;                                        \
+                unused_idxv[free_count++] = _eidx;                            \
+            }                                                                 \
         }                                                                     \
 _fcore_add_small_next_: ;                                                     \
     }                                                                         \
@@ -625,7 +673,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         if (RIX_UNLIKELY(cmp_fn(&entry->key, &_node->key)     \
                                          == 0)) {                             \
                             FLOW_STATS(owner).add_existing++;                \
-                            if (policy == FT_ADD_UPDATE) {                    \
+                            if ((unsigned)policy & 1u) {                      \
                                 _ctxp->bk[0]->idx[_bit] = _eidx;              \
                                 entry->meta.cur_hash =                        \
                                     _ctxp->hash.val32[0];                     \
@@ -658,7 +706,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         if (RIX_UNLIKELY(cmp_fn(&entry->key, &_node->key)     \
                                          == 0)) {                             \
                             FLOW_STATS(owner).add_existing++;                \
-                            if (policy == FT_ADD_UPDATE) {                    \
+                            if ((unsigned)policy & 1u) {                      \
                                 _ctxp->bk[1]->idx[_bit] = _eidx;              \
                                 entry->meta.cur_hash =                        \
                                     _ctxp->hash.val32[1];                     \
@@ -720,7 +768,7 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         FLOW_STATUS(owner).add_bk0++;                        \
                 } else if (RIX_UNLIKELY(_ret_idx != _eidx)) {                 \
                     FLOW_STATS(owner).add_existing++;                        \
-                    if (policy == FT_ADD_UPDATE) {                            \
+                    if ((unsigned)policy & 1u) {                              \
                         _FCORE_ENTRY_T(p) *_node =                            \
                             FCORE_LAYOUT_ENTRY_PTR(owner, _ret_idx);          \
                         u32 _ins_idx;                                    \
@@ -744,11 +792,64 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         entry_idxv[_idx] = _ret_idx;                          \
                         unused_idxv[free_count++] = _eidx;                    \
                     }                                                         \
-                } else {                                                      \
+                } else if (RIX_LIKELY(!((unsigned)policy & 2u))) {            \
                     FCORE_CLEAR_TIMESTAMP(entry);                             \
                     FLOW_STATS(owner).add_failed++;                          \
                     entry_idxv[_idx] = 0u;                                    \
                     unused_idxv[free_count++] = _eidx;                        \
+                } else {                                                      \
+                    u64 _now_enc = flow_timestamp_encode(                     \
+                        now, FCORE_TIMESTAMP_SHIFT(owner));                   \
+                    u64 _max_elapsed = 0u;                                    \
+                    unsigned _victim_bki = 0u;                                \
+                    unsigned _victim_slot = 0u;                               \
+                    u32 _victim_idx = 0u;                                     \
+                    for (unsigned _bki = 0u; _bki < 2u; _bki++) {             \
+                        struct rix_hash_bucket_s *_vbk = _ctxp->bk[_bki];     \
+                        for (unsigned _s = 0u;                                \
+                             _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) {           \
+                            u32 _nidx = _vbk->idx[_s];                        \
+                            _FCORE_ENTRY_T(p) *_node;                         \
+                            u64 _ts, _elapsed;                                \
+                            if (_nidx == (u32)RIX_NIL)                        \
+                                continue;                                     \
+                            _node = FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);     \
+                            RIX_ASSUME_NONNULL(_node);                        \
+                            _ts = flow_timestamp_get(&_node->meta);           \
+                            if (_ts == 0u)                                    \
+                                continue;                                     \
+                            _elapsed = flow_timestamp_elapsed(                \
+                                _now_enc, _ts);                               \
+                            if (_elapsed >= _max_elapsed) {                   \
+                                _max_elapsed = _elapsed;                      \
+                                _victim_bki = _bki;                           \
+                                _victim_slot = _s;                            \
+                                _victim_idx = _nidx;                          \
+                            }                                                 \
+                        }                                                     \
+                    }                                                         \
+                    if (RIX_LIKELY(_victim_idx != 0u)) {                      \
+                        _FCORE_ENTRY_T(p) *_victim =                          \
+                            FCORE_LAYOUT_ENTRY_PTR(owner, _victim_idx);       \
+                        RIX_ASSUME_NONNULL(_victim);                          \
+                        _ctxp->bk[_victim_bki]->hash[_victim_slot] =          \
+                            _ctxp->fp;                                        \
+                        _ctxp->bk[_victim_bki]->idx[_victim_slot] =           \
+                            _eidx;                                            \
+                        entry->meta.cur_hash =                                \
+                            _ctxp->hash.val32[_victim_bki];                   \
+                        entry->meta.slot =                                    \
+                            (__typeof__(entry->meta.slot))_victim_slot;       \
+                        FCORE_INIT_TIMESTAMP(owner, entry, now);              \
+                        FCORE_CLEAR_TIMESTAMP(_victim);                       \
+                        unused_idxv[free_count++] = _victim_idx;              \
+                        FLOW_STATS(owner).force_expired++;                    \
+                    } else {                                                  \
+                        FCORE_CLEAR_TIMESTAMP(entry);                         \
+                        FLOW_STATS(owner).add_failed++;                       \
+                        entry_idxv[_idx] = 0u;                                \
+                        unused_idxv[free_count++] = _eidx;                    \
+                    }                                                         \
                 }                                                             \
 _fcore_add_idx_next_: ;                                                      \
             }                                                                 \

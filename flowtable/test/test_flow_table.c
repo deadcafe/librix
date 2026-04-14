@@ -19,6 +19,11 @@
 #define TEST_NOW_FIND  UINT64_C(0x202)
 #define TEST_NOW_DUP   UINT64_C(0x303)
 
+enum {
+    TEST_FORCE_EXPIRE_BUCKET_ENTRIES = 62000u,
+    TEST_FORCE_EXPIRE_PHASE1_ENTRIES = 70000u,
+};
+
 static void *
 test_aligned_calloc(size_t count, size_t size, size_t align)
 {
@@ -288,6 +293,10 @@ struct test_variant_ops {
     size_t cookie_offset;
     int (*init)(void *ft, void *records, unsigned max_entries,
                 const struct ft_table_config *cfg);
+    int (*init_with_bucket_entries)(void *ft, void *records,
+                                    unsigned max_entries,
+                                    unsigned bucket_entries,
+                                    const struct ft_table_config *cfg);
     void (*destroy)(void *ft);
     void (*flush)(void *ft);
     unsigned (*nb_entries)(const void *ft);
@@ -341,10 +350,31 @@ testv_init_##tag(void *ft, void *records, unsigned max_entries,            \
 {                                                                          \
     size_t bsz = ft_table_bucket_size(max_entries);                        \
     void *bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);                 \
+    int rc;                                                                \
     if (bk == NULL) return -1;                                             \
-    return init_fn((struct ft_table *)ft, (variant_id), records,           \
-                   max_entries, sizeof(record_t),                           \
-                   offsetof(record_t, entry), bk, bsz, cfg);              \
+    rc = init_fn((struct ft_table *)ft, (variant_id), records,             \
+                 max_entries, sizeof(record_t),                            \
+                 offsetof(record_t, entry), bk, bsz, cfg);                 \
+    if (rc != 0)                                                           \
+        free(bk);                                                          \
+    return rc;                                                             \
+}                                                                          \
+static int                                                                 \
+testv_init_with_bucket_entries_##tag(void *ft, void *records,              \
+                                     unsigned max_entries,                 \
+                                     unsigned bucket_entries,              \
+                                     const struct ft_table_config *cfg)    \
+{                                                                          \
+    size_t bsz = ft_table_bucket_size(bucket_entries);                     \
+    void *bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);                 \
+    int rc;                                                                \
+    if (bk == NULL) return -1;                                             \
+    rc = init_fn((struct ft_table *)ft, (variant_id), records,             \
+                 max_entries, sizeof(record_t),                            \
+                 offsetof(record_t, entry), bk, bsz, cfg);                 \
+    if (rc != 0)                                                           \
+        free(bk);                                                          \
+    return rc;                                                             \
 }                                                                          \
 static void                                                                 \
 testv_destroy_##tag(void *ft)                                              \
@@ -484,6 +514,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .meta_offset = offsetof(entry_t, meta),                                 \
     .cookie_offset = offsetof(record_t, cookie),                            \
     .init = testv_init_##tag,                                               \
+    .init_with_bucket_entries = testv_init_with_bucket_entries_##tag,       \
     .destroy = testv_destroy_##tag,                                         \
     .flush = testv_flush_##tag,                                             \
     .nb_entries = testv_nb_entries_##tag,                                   \
@@ -1303,6 +1334,385 @@ test_kickout_safety(void)
     printf("  phase1=%u lost=%u\n", phase1_count, lost);
     if (lost != 0u)
         FAILF("kickout caused %u victim(s) to become unreachable", lost);
+
+    ft_flow4_table_destroy(&ft);
+    free(bk);
+    free(pool);
+    return 0;
+}
+
+/*
+ * force_expire basic: fill the table until kickout fails, then use
+ * FT_ADD_IGNORE_FORCE_EXPIRE to insert new entries.  Verifies:
+ *  - the new entry is registered (not add_failed)
+ *  - the new entry is findable
+ *  - force_expired stat is incremented
+ *  - entry count stays the same (replace, not add)
+ *
+ * With 4096 minimum buckets (65536 slots), we need ~60000 entries
+ * to trigger cuckoo exhaustion.
+ */
+static int
+test_force_expire_basic(void)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 64u;
+    struct ft_table_config cfg = test_cfg();
+    struct ft_table ft;
+    struct test_user_record *pool;
+    void *bk;
+    size_t bsz = ft_table_bucket_size(bucket_entries);
+    unsigned inserted = 0u;
+    unsigned add_failed_before = 0u;
+    struct ft_table_stats stats;
+
+    printf("[T] flow4 table force_expire basic\n");
+    pool = test_aligned_calloc(phase1_entries + overflow + 1u, sizeof(*pool),
+                               FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, phase1_entries + overflow,
+                                  struct test_user_record, entry,
+                                  bk, bsz, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < phase1_entries; i++) {
+        struct flow4_key key = test_key(i + 40000u);
+        u32 idx = test_add_idx_key(&ft, i + 1u, &key);
+
+        if (idx != 0u)
+            inserted++;
+    }
+    printf("  phase1: inserted %u / %u\n", inserted, phase1_entries);
+    ft_flow4_table_stats(&ft, &stats);
+    add_failed_before = (unsigned)stats.core.add_failed;
+    if (add_failed_before == 0u)
+        FAIL("expected some add failures at high fill");
+
+    unsigned nb_before = ft_flow4_table_nb_entries(&ft);
+
+    {
+        for (unsigned i = 0; i < overflow; i++) {
+            struct flow4_key key = test_key(phase1_entries + i + 40000u);
+            struct flow4_entry *entry;
+            u32 entry_idxv[1];
+            u32 unused_idxv[1];
+
+            entry_idxv[0] = phase1_entries + i + 1u;
+            entry = ft_flow4_table_entry_ptr(&ft, entry_idxv[0]);
+            if (entry == NULL)
+                FAIL("entry_ptr NULL");
+            entry->key = key;
+
+            ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 1u,
+                                        FT_ADD_IGNORE_FORCE_EXPIRE,
+                                        TEST_NOW_ADD, unused_idxv);
+            if (entry_idxv[0] == 0u)
+                FAILF("force_expire add failed at i=%u", i);
+            if (FT4_FIND(&ft, &key) != entry_idxv[0])
+                FAILF("force_expire entry not findable at i=%u", i);
+        }
+    }
+
+    ft_flow4_table_stats(&ft, &stats);
+    printf("  force_expired=%llu add_failed=%llu\n",
+           (unsigned long long)stats.core.force_expired,
+           (unsigned long long)stats.core.add_failed);
+    if (stats.core.force_expired == 0u)
+        FAIL("force_expired should be > 0");
+
+    {
+        unsigned nb_after = ft_flow4_table_nb_entries(&ft);
+        unsigned fe = (unsigned)(stats.core.force_expired);
+        unsigned expected = nb_before + overflow - fe;
+        if (nb_after != expected)
+            FAILF("entry count mismatch: %u (expected %u)", nb_after, expected);
+    }
+
+    ft_flow4_table_destroy(&ft);
+    free(bk);
+    free(pool);
+    return 0;
+}
+
+/*
+ * force_expire with permanent entries: entries with ts=0 are never evicted.
+ * Fill the table until kickout failure occurs, using now=0 so all entries
+ * get ts=0 (permanent).  Then attempt FT_ADD_IGNORE_FORCE_EXPIRE with
+ * multiple entries.  No permanent entries should be evicted: the force_expire
+ * path must fall back to add_failed for any entry whose kickout chain fails.
+ */
+static int
+test_force_expire_permanent_skip(void)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 128u;
+    struct ft_table_config cfg = test_cfg();
+    struct ft_table ft;
+    struct test_user_record *pool;
+    void *bk;
+    size_t bsz = ft_table_bucket_size(bucket_entries);
+    unsigned inserted = 0u;
+    struct ft_table_stats stats;
+
+    printf("[T] flow4 table force_expire permanent skip\n");
+    pool = test_aligned_calloc(phase1_entries + overflow + 1u, sizeof(*pool),
+                               FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, phase1_entries + overflow,
+                                  struct test_user_record, entry,
+                                  bk, bsz, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < phase1_entries; i++) {
+        struct flow4_entry *entry;
+        struct flow4_key key = test_key(i + 50000u);
+        u32 entry_idxv[1] = { i + 1u };
+        u32 unused_idxv[1];
+
+        entry = ft_flow4_table_entry_ptr(&ft, i + 1u);
+        if (entry == NULL)
+            break;
+        entry->key = key;
+        ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 1u, FT_ADD_IGNORE,
+                                    0u, unused_idxv);
+        if (entry_idxv[0] != 0u)
+            inserted++;
+    }
+    printf("  filled %u permanent entries\n", inserted);
+
+    ft_flow4_table_stats(&ft, &stats);
+    if (stats.core.add_failed == 0u)
+        FAIL("expected some add failures at high fill");
+
+    u64 add_failed_before = stats.core.add_failed;
+
+    for (unsigned i = 0; i < overflow; i++) {
+        struct flow4_key key = test_key(phase1_entries + i + 50000u);
+        struct flow4_entry *entry;
+        u32 entry_idxv[1] = { phase1_entries + i + 1u };
+        u32 unused_idxv[1] = { 0u };
+
+        entry = ft_flow4_table_entry_ptr(&ft, phase1_entries + i + 1u);
+        if (entry == NULL)
+            FAIL("entry_ptr NULL for overflow");
+        entry->key = key;
+        ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 1u,
+                                    FT_ADD_IGNORE_FORCE_EXPIRE,
+                                    0u, unused_idxv);
+    }
+
+    ft_flow4_table_stats(&ft, &stats);
+    printf("  add_failed: %llu -> %llu, force_expired=%llu\n",
+           (unsigned long long)add_failed_before,
+           (unsigned long long)stats.core.add_failed,
+           (unsigned long long)stats.core.force_expired);
+
+    if (stats.core.force_expired != 0u)
+        FAILF("force_expired should be 0 with all permanent, got %llu",
+               (unsigned long long)stats.core.force_expired);
+    if (stats.core.add_failed <= add_failed_before)
+        FAIL("expected add_failed to increase (some kickouts should fail)");
+
+    ft_flow4_table_destroy(&ft);
+    free(bk);
+    free(pool);
+    return 0;
+}
+
+/*
+ * force_expire bulk: exercise the bulk pipeline (nb_keys >= 4) with
+ * FT_ADD_UPDATE_FORCE_EXPIRE.
+ */
+static int
+test_force_expire_bulk(void)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 8u;
+    struct ft_table_config cfg = test_cfg();
+    struct ft_table ft;
+    struct test_user_record *pool;
+    void *bk;
+    size_t bsz = ft_table_bucket_size(bucket_entries);
+    unsigned inserted = 0u;
+    struct ft_table_stats stats;
+
+    printf("[T] flow4 table force_expire bulk\n");
+    pool = test_aligned_calloc(phase1_entries + overflow + 1u, sizeof(*pool),
+                               FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, phase1_entries + overflow,
+                                  struct test_user_record, entry,
+                                  bk, bsz, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < phase1_entries; i++) {
+        struct flow4_key key = test_key(i + 60000u);
+        u32 idx = test_add_idx_key(&ft, i + 1u, &key);
+
+        if (idx != 0u)
+            inserted++;
+    }
+    printf("  filled %u entries\n", inserted);
+    ft_flow4_table_stats(&ft, &stats);
+    if (stats.core.add_failed == 0u)
+        FAIL("expected some add failures at high fill");
+
+    unsigned nb_before = ft_flow4_table_nb_entries(&ft);
+
+    {
+        u32 entry_idxv[8];
+        u32 unused_idxv[8];
+
+        for (unsigned i = 0; i < overflow; i++) {
+            struct flow4_key key = test_key(phase1_entries + i + 60000u);
+            struct flow4_entry *entry;
+
+            entry_idxv[i] = phase1_entries + i + 1u;
+            entry = ft_flow4_table_entry_ptr(&ft, entry_idxv[i]);
+            if (entry == NULL)
+                FAIL("entry_ptr NULL");
+            entry->key = key;
+        }
+        FT4_ADD_IDX_BULK(&ft, entry_idxv, overflow,
+                         FT_ADD_UPDATE_FORCE_EXPIRE,
+                         unused_idxv);
+        for (unsigned i = 0; i < overflow; i++) {
+            struct flow4_key key = test_key(phase1_entries + i + 60000u);
+
+            if (entry_idxv[i] == 0u)
+                FAILF("bulk force_expire add failed at i=%u", i);
+            if (FT4_FIND(&ft, &key) == 0u)
+                FAILF("bulk force_expire entry not findable at i=%u", i);
+        }
+    }
+
+    ft_flow4_table_stats(&ft, &stats);
+    printf("  force_expired=%llu\n",
+           (unsigned long long)stats.core.force_expired);
+    if (stats.core.force_expired == 0u)
+        FAIL("force_expired should be > 0");
+
+    {
+        unsigned nb_after = ft_flow4_table_nb_entries(&ft);
+        unsigned fe = (unsigned)(stats.core.force_expired);
+        unsigned expected = nb_before + overflow - fe;
+        if (nb_after != expected)
+            FAILF("entry count mismatch: %u (expected %u)", nb_after, expected);
+    }
+
+    ft_flow4_table_destroy(&ft);
+    free(bk);
+    free(pool);
+    return 0;
+}
+
+/*
+ * force_expire evicts the oldest entry: insert entries with increasing
+ * timestamps, fill the table, then try multiple FORCE_EXPIRE adds until
+ * one triggers eviction.  Verify the evicted entry's timestamp was cleared
+ * and the entry is no longer findable.
+ */
+static int
+test_force_expire_evicts_oldest(void)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 128u;
+    struct ft_table_config cfg = test_cfg();
+    struct ft_table ft;
+    struct test_user_record *pool;
+    void *bk;
+    size_t bsz = ft_table_bucket_size(bucket_entries);
+    unsigned inserted = 0u;
+    u64 base_now = UINT64_C(0x10000);
+    struct ft_table_stats stats;
+
+    printf("[T] flow4 table force_expire evicts oldest\n");
+    pool = test_aligned_calloc(phase1_entries + overflow + 1u, sizeof(*pool),
+                               FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    bk = aligned_alloc(FT_TABLE_BUCKET_ALIGN, bsz);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, phase1_entries + overflow,
+                                  struct test_user_record, entry,
+                                  bk, bsz, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0; i < phase1_entries; i++) {
+        struct flow4_entry *entry;
+        struct flow4_key key = test_key(i + 70000u);
+        u32 entry_idxv[1] = { i + 1u };
+        u32 unused_idxv[1];
+        u64 now = base_now + (u64)i * 256u;
+
+        entry = ft_flow4_table_entry_ptr(&ft, i + 1u);
+        if (entry == NULL)
+            break;
+        entry->key = key;
+        ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 1u,
+                                    FT_ADD_IGNORE, now, unused_idxv);
+        if (entry_idxv[0] != 0u)
+            inserted++;
+    }
+    printf("  filled %u entries with progressive timestamps\n", inserted);
+    ft_flow4_table_stats(&ft, &stats);
+    if (stats.core.add_failed == 0u)
+        FAIL("expected some add failures at high fill");
+
+    {
+        int eviction_found = 0;
+
+        for (unsigned i = 0; i < overflow; i++) {
+            struct flow4_key key = test_key(phase1_entries + i + 70000u);
+            struct flow4_entry *entry;
+            u32 entry_idxv[1] = { phase1_entries + i + 1u };
+            u32 unused_idxv[1] = { 0u };
+            u64 now = base_now + (u64)(phase1_entries + i) * 256u;
+
+            entry = ft_flow4_table_entry_ptr(&ft, phase1_entries + i + 1u);
+            if (entry == NULL)
+                FAIL("entry_ptr NULL");
+            entry->key = key;
+            ft_flow4_table_add_idx_bulk(&ft, entry_idxv, 1u,
+                                        FT_ADD_IGNORE_FORCE_EXPIRE, now,
+                                        unused_idxv);
+
+            if (unused_idxv[0] == 0u)
+                continue;
+
+            u32 evicted_idx = unused_idxv[0];
+            printf("  evicted idx=%u at attempt %u\n", evicted_idx, i);
+
+            struct flow4_entry *evicted =
+                ft_flow4_table_entry_ptr(&ft, evicted_idx);
+            if (evicted == NULL)
+                FAIL("evicted entry_ptr NULL");
+            if (!flow_timestamp_is_zero(&evicted->meta))
+                FAIL("evicted entry timestamp not cleared");
+
+            if (FT4_FIND(&ft, &key) == 0u)
+                FAIL("new entry not findable after force_expire");
+
+            struct flow4_key evicted_key =
+                test_key(evicted_idx - 1u + 70000u);
+            if (FT4_FIND(&ft, &evicted_key) != 0u)
+                FAIL("evicted entry should not be findable");
+
+            eviction_found = 1;
+            break;
+        }
+        if (!eviction_found)
+            FAIL("no force_expire eviction triggered in overflow entries");
+    }
 
     ft_flow4_table_destroy(&ft);
     free(bk);
@@ -2522,6 +2932,323 @@ testv_permanent_timestamp(const struct test_variant_ops *ops)
 }
 
 static int
+testv_force_expire_basic(const struct test_variant_ops *ops)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 64u;
+    struct ft_table_config cfg = test_cfg();
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(phase1_entries + overflow + 1u,
+                                     ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    union test_any_key key;
+    struct ft_table_stats stats;
+    unsigned inserted = 0u;
+    unsigned add_failed_before;
+
+    printf("[T] %s table force_expire basic\n", ops->name);
+    if (pool == NULL)
+        FAIL("alloc failed");
+    if (ops->init_with_bucket_entries(&ft, pool, phase1_entries + overflow,
+                                      bucket_entries, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0u; i < phase1_entries; i++) {
+        ops->make_key(&key, i + 40000u);
+        if (testv_add_idx_key(ops, &ft, i + 1u, &key) != 0u)
+            inserted++;
+    }
+    printf("  phase1: inserted %u / %u\n", inserted, phase1_entries);
+    ops->stats(&ft, &stats);
+    add_failed_before = (unsigned)stats.core.add_failed;
+    if (add_failed_before == 0u)
+        FAIL("expected some add failures at high fill");
+
+    {
+        unsigned nb_before = ops->nb_entries(&ft);
+
+        for (unsigned i = 0u; i < overflow; i++) {
+            u32 entry_idxv[1] = { phase1_entries + i + 1u };
+            u32 unused_idxv[1] = { 0u };
+
+            ops->make_key(&key, phase1_entries + i + 40000u);
+            testv_bind_key(ops, &ft, entry_idxv[0], &key);
+            ops->add_idx_bulk(&ft, entry_idxv, 1u,
+                              FT_ADD_IGNORE_FORCE_EXPIRE,
+                              TEST_NOW_ADD, unused_idxv);
+            if (entry_idxv[0] == 0u)
+                FAILF("force_expire add failed at i=%u", i);
+            if (TEST_OPS_FIND(ops, &ft, &key) != entry_idxv[0])
+                FAILF("force_expire entry not findable at i=%u", i);
+        }
+
+        ops->stats(&ft, &stats);
+        printf("  force_expired=%llu add_failed=%llu\n",
+               (unsigned long long)stats.core.force_expired,
+               (unsigned long long)stats.core.add_failed);
+        if (stats.core.force_expired == 0u)
+            FAIL("force_expired should be > 0");
+
+        {
+            unsigned nb_after = ops->nb_entries(&ft);
+            unsigned fe = (unsigned)stats.core.force_expired;
+            unsigned expected = nb_before + overflow - fe;
+
+            if (nb_after != expected)
+                FAILF("entry count mismatch: %u (expected %u)",
+                      nb_after, expected);
+        }
+    }
+
+    ops->destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_force_expire_permanent_skip(const struct test_variant_ops *ops)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 128u;
+    struct ft_table_config cfg = test_cfg();
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(phase1_entries + overflow + 1u,
+                                     ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    union test_any_key key;
+    struct ft_table_stats stats;
+    unsigned inserted = 0u;
+    u64 add_failed_before;
+
+    printf("[T] %s table force_expire permanent skip\n", ops->name);
+    if (pool == NULL)
+        FAIL("alloc failed");
+    if (ops->init_with_bucket_entries(&ft, pool, phase1_entries + overflow,
+                                      bucket_entries, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0u; i < phase1_entries; i++) {
+        u32 entry_idxv[1] = { i + 1u };
+        u32 unused_idxv[1] = { 0u };
+
+        ops->make_key(&key, i + 50000u);
+        testv_bind_key(ops, &ft, entry_idxv[0], &key);
+        ops->add_idx_bulk(&ft, entry_idxv, 1u, FT_ADD_IGNORE, 0u,
+                          unused_idxv);
+        if (entry_idxv[0] != 0u)
+            inserted++;
+    }
+    printf("  filled %u permanent entries\n", inserted);
+
+    ops->stats(&ft, &stats);
+    if (stats.core.add_failed == 0u)
+        FAIL("expected some add failures at high fill");
+    add_failed_before = stats.core.add_failed;
+
+    for (unsigned i = 0u; i < overflow; i++) {
+        u32 entry_idxv[1] = { phase1_entries + i + 1u };
+        u32 unused_idxv[1] = { 0u };
+
+        ops->make_key(&key, phase1_entries + i + 50000u);
+        testv_bind_key(ops, &ft, entry_idxv[0], &key);
+        ops->add_idx_bulk(&ft, entry_idxv, 1u,
+                          FT_ADD_IGNORE_FORCE_EXPIRE,
+                          0u, unused_idxv);
+    }
+
+    ops->stats(&ft, &stats);
+    printf("  add_failed: %llu -> %llu, force_expired=%llu\n",
+           (unsigned long long)add_failed_before,
+           (unsigned long long)stats.core.add_failed,
+           (unsigned long long)stats.core.force_expired);
+    if (stats.core.force_expired != 0u)
+        FAILF("force_expired should be 0 with all permanent, got %llu",
+              (unsigned long long)stats.core.force_expired);
+    if (stats.core.add_failed <= add_failed_before)
+        FAIL("expected add_failed to increase (some kickouts should fail)");
+
+    ops->destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_force_expire_bulk(const struct test_variant_ops *ops)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 8u;
+    struct ft_table_config cfg = test_cfg();
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(phase1_entries + overflow + 1u,
+                                     ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(overflow, ops->key_size);
+    struct ft_table_stats stats;
+    unsigned inserted = 0u;
+
+    printf("[T] %s table force_expire bulk\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init_with_bucket_entries(&ft, pool, phase1_entries + overflow,
+                                      bucket_entries, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0u; i < phase1_entries; i++) {
+        ops->make_key(TEST_KEY_AT(keys, ops, 0u), i + 60000u);
+        if (testv_add_idx_key(ops, &ft, i + 1u, TEST_KEY_AT(keys, ops, 0u))
+            != 0u)
+            inserted++;
+    }
+    printf("  filled %u entries\n", inserted);
+    ops->stats(&ft, &stats);
+    if (stats.core.add_failed == 0u)
+        FAIL("expected some add failures at high fill");
+
+    {
+        unsigned nb_before = ops->nb_entries(&ft);
+        u32 entry_idxv[8];
+        u32 unused_idxv[8];
+
+        for (unsigned i = 0u; i < overflow; i++) {
+            entry_idxv[i] = phase1_entries + i + 1u;
+            ops->make_key(TEST_KEY_AT(keys, ops, i),
+                          phase1_entries + i + 60000u);
+            testv_bind_key(ops, &ft, entry_idxv[i], TEST_KEY_AT(keys, ops, i));
+        }
+        TEST_OPS_ADD_IDX_BULK(ops, &ft, entry_idxv, overflow,
+                              FT_ADD_UPDATE_FORCE_EXPIRE,
+                              unused_idxv);
+        for (unsigned i = 0u; i < overflow; i++) {
+            if (entry_idxv[i] == 0u)
+                FAILF("bulk force_expire add failed at i=%u", i);
+            if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, i)) == 0u)
+                FAILF("bulk force_expire entry not findable at i=%u", i);
+        }
+
+        ops->stats(&ft, &stats);
+        printf("  force_expired=%llu\n",
+               (unsigned long long)stats.core.force_expired);
+        if (stats.core.force_expired == 0u)
+            FAIL("force_expired should be > 0");
+
+        {
+            unsigned nb_after = ops->nb_entries(&ft);
+            unsigned fe = (unsigned)stats.core.force_expired;
+            unsigned expected = nb_before + overflow - fe;
+
+            if (nb_after != expected)
+                FAILF("entry count mismatch: %u (expected %u)",
+                      nb_after, expected);
+        }
+    }
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_force_expire_evicts_oldest(const struct test_variant_ops *ops)
+{
+    const unsigned bucket_entries = TEST_FORCE_EXPIRE_BUCKET_ENTRIES;
+    const unsigned phase1_entries = TEST_FORCE_EXPIRE_PHASE1_ENTRIES;
+    const unsigned overflow = 128u;
+    struct ft_table_config cfg = test_cfg();
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(phase1_entries + overflow + 1u,
+                                     ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    union test_any_key key, evicted_key;
+    struct ft_table_stats stats;
+    unsigned inserted = 0u;
+    u64 base_now = UINT64_C(0x10000);
+
+    printf("[T] %s table force_expire evicts oldest\n", ops->name);
+    if (pool == NULL)
+        FAIL("alloc failed");
+    if (ops->init_with_bucket_entries(&ft, pool, phase1_entries + overflow,
+                                      bucket_entries, &cfg) != 0)
+        FAIL("init failed");
+
+    for (unsigned i = 0u; i < phase1_entries; i++) {
+        u32 entry_idxv[1] = { i + 1u };
+        u32 unused_idxv[1] = { 0u };
+        u64 now = base_now + (u64)i * 256u;
+
+        ops->make_key(&key, i + 70000u);
+        testv_bind_key(ops, &ft, entry_idxv[0], &key);
+        ops->add_idx_bulk(&ft, entry_idxv, 1u, FT_ADD_IGNORE, now,
+                          unused_idxv);
+        if (entry_idxv[0] != 0u)
+            inserted++;
+    }
+    printf("  filled %u entries with progressive timestamps\n", inserted);
+    ops->stats(&ft, &stats);
+    if (stats.core.add_failed == 0u)
+        FAIL("expected some add failures at high fill");
+
+    {
+        int eviction_found = 0;
+
+        for (unsigned i = 0u; i < overflow; i++) {
+            u32 entry_idxv[1] = { phase1_entries + i + 1u };
+            u32 unused_idxv[1] = { 0u };
+            u64 now = base_now + (u64)(phase1_entries + i) * 256u;
+            u32 evicted_idx;
+            struct flow_entry_meta *evicted_meta;
+
+            ops->make_key(&key, phase1_entries + i + 70000u);
+            testv_bind_key(ops, &ft, entry_idxv[0], &key);
+            ops->add_idx_bulk(&ft, entry_idxv, 1u,
+                              FT_ADD_IGNORE_FORCE_EXPIRE, now, unused_idxv);
+            if (unused_idxv[0] == 0u)
+                continue;
+
+            evicted_idx = unused_idxv[0];
+            printf("  evicted idx=%u at attempt %u\n", evicted_idx, i);
+            evicted_meta = testv_meta_ptr(ops, &ft, evicted_idx);
+            if (evicted_meta == NULL)
+                FAIL("evicted meta ptr NULL");
+            if (!flow_timestamp_is_zero(evicted_meta))
+                FAIL("evicted entry timestamp not cleared");
+            if (TEST_OPS_FIND(ops, &ft, &key) == 0u)
+                FAIL("new entry not findable after force_expire");
+
+            ops->make_key(&evicted_key, evicted_idx - 1u + 70000u);
+            if (TEST_OPS_FIND(ops, &ft, &evicted_key) != 0u)
+                FAIL("evicted entry should not be findable");
+
+            eviction_found = 1;
+            break;
+        }
+        if (!eviction_found)
+            FAIL("no force_expire eviction triggered in overflow entries");
+    }
+
+    ops->destroy(&ft);
+    free(pool);
+    return 0;
+}
+
+static int
+test_variant_force_expire_suite(const struct test_variant_ops *ops)
+{
+    if (testv_force_expire_basic(ops) != 0)
+        return 1;
+    if (testv_force_expire_permanent_skip(ops) != 0)
+        return 1;
+    if (testv_force_expire_bulk(ops) != 0)
+        return 1;
+    if (testv_force_expire_evicts_oldest(ops) != 0)
+        return 1;
+    return 0;
+}
+
+static int
 testv_maintain_idx_bulk(const struct test_variant_ops *ops)
 {
     struct ft_table_config cfg = test_cfg();
@@ -3021,9 +3748,21 @@ main(void)
         return 1;
     if (test_kickout_safety() != 0)
         return 1;
+    if (test_force_expire_basic() != 0)
+        return 1;
+    if (test_force_expire_permanent_skip() != 0)
+        return 1;
+    if (test_force_expire_bulk() != 0)
+        return 1;
+    if (test_force_expire_evicts_oldest() != 0)
+        return 1;
     if (test_fuzz(3237998097u, 512u, 64u, 200000u) != 0)
         return 1;
     if (test_fuzz(3237998097u, 1000u, 64u, 500000u) != 0)
+        return 1;
+    if (test_variant_force_expire_suite(&test_ops_flow6) != 0)
+        return 1;
+    if (test_variant_force_expire_suite(&test_ops_flowu) != 0)
         return 1;
     if (test_variant_suite(&test_ops_flow4) != 0)
         return 1;

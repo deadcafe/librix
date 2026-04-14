@@ -153,8 +153,10 @@ struct ft_table_result {
 };
 
 enum ft_add_policy {
-    FT_ADD_IGNORE = 0u,
-    FT_ADD_UPDATE = 1u,
+    FT_ADD_IGNORE              = 0u,
+    FT_ADD_UPDATE              = 1u,
+    FT_ADD_IGNORE_FORCE_EXPIRE = 2u,
+    FT_ADD_UPDATE_FORCE_EXPIRE = 3u,
 };
 
 struct ft_table_config {
@@ -232,6 +234,7 @@ struct flow_stats {
     u64 adds;
     u64 add_existing;
     u64 add_failed;
+    u64 force_expired;
     u64 dels;
     u64 del_miss;
 };
