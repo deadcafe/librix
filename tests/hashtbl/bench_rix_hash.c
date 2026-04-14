@@ -2,10 +2,17 @@
  *  rix_hash.h lookup performance benchmark
  *  Metric: CPU cycles per 256 lookups
  *
- *  Usage: ./hash_bench [table_n [nb_bk [repeat]]]
- *    table_n : number of table entries  (default: 100,000,000)
- *    nb_bk   : number of buckets       (default: auto - ~50% fill of table_n)
- *    repeat  : number of iterations    (default: 2000)
+ *  Usage:
+ *    ./hash_bench [table_n [nb_bk [repeat [rand_keys]]]]
+ *      table_n   : number of table entries  (default: 100,000,000)
+ *      nb_bk     : number of buckets       (default: auto - ~50% fill)
+ *      repeat    : number of iterations    (default: 2000)
+ *      rand_keys : 0=sequential, 1=random  (default: 0)
+ *
+ *    ./hash_bench hash [repeat [key_n [mask]]]
+ *      repeat : number of iterations       (default: 2000)
+ *      key_n  : number of resident keys    (default: 65536)
+ *      mask   : bucket mask                (default: 65535)
  *
  *  Cache-cold measurement:
  *    repeat x 256 random keys are pre-generated; each iteration accesses
@@ -114,6 +121,26 @@ static struct rix_hash_find_ctx_s g_ctx[BENCH_N];
 static struct mynode             *g_res[BENCH_N];
 static struct mynode_keyonly        *g_res_keyonly[BENCH_N];
 static struct mynode_slot        *g_res_slot[BENCH_N];
+static volatile u32               g_hash_sink;
+
+struct hash24_key {
+    u32 v[6];
+};
+
+static struct hash24_key
+hash24_key_make(unsigned i)
+{
+    struct hash24_key key;
+
+    key.v[0] = UINT32_C(0x0a000000) | (i & UINT32_C(0x00ffffff));
+    key.v[1] = UINT32_C(0x14000000)
+             | ((i * UINT32_C(2654435761)) & UINT32_C(0x00ffffff));
+    key.v[2] = UINT32_C(0x00010000) | (i & UINT32_C(0x0000ffff));
+    key.v[3] = UINT32_C(0x00020000) | ((i >> 5) & UINT32_C(0x0000ffff));
+    key.v[4] = UINT32_C(0x00000006) | ((i & 1u) << 8);
+    key.v[5] = UINT32_C(0x01000000) ^ (i * UINT32_C(2246822519));
+    return key;
+}
 
 /* ================================================================== */
 /* xorshift64 PRNG (for key pool generation)                          */
@@ -185,6 +212,131 @@ free_results(struct bench_result_s *result, unsigned n)
         result[i].samples = NULL;
         result[i].sample_count = 0u;
     }
+}
+
+/* ================================================================== */
+/* bench_hash_only                                                    */
+/* ================================================================== */
+static void
+bench_hash_only(unsigned repeat,
+                unsigned key_n,
+                u32 mask)
+{
+    size_t key_mem = (size_t)key_n * sizeof(struct hash24_key);
+    size_t pool_len = (size_t)repeat * BENCH_N;
+    size_t pool_mem = pool_len * sizeof(void *);
+    struct hash24_key *keys;
+    const struct hash24_key **key_pool;
+    struct bench_result_s result[] = {
+        { "GEN direct         ", UINT64_MAX, 0, NULL, 0u, BENCH_N },
+#if defined(__x86_64__) && defined(__SSE4_2__)
+        { "CRC32 direct       ", UINT64_MAX, 0, NULL, 0u, BENCH_N },
+        { "fast dispatch(AUTO)", UINT64_MAX, 0, NULL, 0u, BENCH_N },
+#else
+        { "fast dispatch(AUTO)", UINT64_MAX, 0, NULL, 0u, BENCH_N },
+#endif
+    };
+    const unsigned nr = (unsigned)(sizeof(result) / sizeof(result[0]));
+
+    keys = (struct hash24_key *)mmap(NULL, key_mem,
+                                     PROT_READ | PROT_WRITE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (keys == MAP_FAILED) {
+        perror("mmap hash keys");
+        exit(1);
+    }
+    madvise(keys, key_mem, MADV_HUGEPAGE);
+    for (unsigned i = 0u; i < key_n; i++)
+        keys[i] = hash24_key_make(i + 1u);
+
+    key_pool = (const struct hash24_key **)malloc(pool_mem);
+    if (key_pool == NULL) {
+        perror("malloc hash key_pool");
+        exit(1);
+    }
+    for (size_t i = 0u; i < pool_len; i++)
+        key_pool[i] = &keys[(unsigned)(xorshift64() % key_n)];
+
+    for (unsigned i = 0u; i < nr; i++) {
+        result[i].samples = (u64 *)calloc(repeat, sizeof(result[i].samples[0]));
+        if (result[i].samples == NULL) {
+            perror("calloc hash samples");
+            exit(1);
+        }
+        result[i].sample_count = repeat;
+    }
+
+    printf("[HASH] key_bytes=%zu key_n=%u mask=%u repeat=%u\n",
+           sizeof(*keys), key_n, mask, repeat);
+    printf("  memory : keys=%.1f MB  key_pool=%.1f MB\n",
+           key_mem / 1e6, pool_mem / 1e6);
+
+    rix_hash_arch_init(0u);
+    for (unsigned r = 0u; r < repeat; r++) {
+        const struct hash24_key **ik = key_pool + (size_t)r * BENCH_N;
+        u32 sink = 0u;
+        u64 t0 = tsc_start();
+        for (int i = 0; i < BENCH_N; i++) {
+            union rix_hash_hash_u h =
+                rix_hash_bytes_GEN(ik[i], sizeof(*ik[i]), mask);
+            sink ^= h.val32[0] ^ h.val32[1];
+        }
+        record_result(&result[0], r, tsc_end() - t0);
+        g_hash_sink ^= sink;
+    }
+
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    for (unsigned r = 0u; r < repeat; r++) {
+        const struct hash24_key **ik = key_pool + (size_t)r * BENCH_N;
+        u32 sink = 0u;
+        u64 t0 = tsc_start();
+        for (int i = 0; i < BENCH_N; i++) {
+            union rix_hash_hash_u h =
+                rix_hash_bytes_CRC32(ik[i], sizeof(*ik[i]), mask);
+            sink ^= h.val32[0] ^ h.val32[1];
+        }
+        record_result(&result[1], r, tsc_end() - t0);
+        g_hash_sink ^= sink;
+    }
+#endif
+
+    rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
+    for (unsigned r = 0u; r < repeat; r++) {
+        const struct hash24_key **ik = key_pool + (size_t)r * BENCH_N;
+        u32 sink = 0u;
+        u64 t0 = tsc_start();
+        for (int i = 0; i < BENCH_N; i++) {
+            union rix_hash_hash_u h =
+                rix_hash_bytes_fast(ik[i], sizeof(*ik[i]), mask);
+            sink ^= h.val32[0] ^ h.val32[1];
+        }
+#if defined(__x86_64__) && defined(__SSE4_2__)
+        record_result(&result[2], r, tsc_end() - t0);
+#else
+        record_result(&result[1], r, tsc_end() - t0);
+#endif
+        g_hash_sink ^= sink;
+    }
+
+    printf("  %-20s  %10s  %10s  %10s  %10s\n",
+           "pattern", "min/256", "med/256", "min/key", "med/key");
+    printf("  %-20s  %10s  %10s  %10s  %10s\n",
+           "--------------------", "----------", "----------",
+           "----------", "----------");
+    for (unsigned i = 0u; i < nr; i++) {
+        double med = result_median_cy(&result[i]);
+        printf("  %-20s  %10llu  %10llu  %10.2f  %10.2f\n",
+               result[i].label,
+               (unsigned long long)result[i].min_cy,
+               (unsigned long long)med,
+               (double)result[i].min_cy / result[i].ops,
+               med / result[i].ops);
+    }
+    printf("  sink=%u\n\n", g_hash_sink);
+
+    free_results(result, nr);
+    free(key_pool);
+    munmap(keys, key_mem);
 }
 
 /* ================================================================== */
@@ -1237,6 +1389,22 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat, int rand_keys)
 int
 main(int argc, char **argv)
 {
+    if (argc >= 2 && strcmp(argv[1], "hash") == 0) {
+        unsigned repeat = 2000u;
+        unsigned key_n = 65536u;
+        u32 mask = 65535u;
+
+        if (argc >= 3)
+            repeat = (unsigned)strtoul(argv[2], NULL, 10);
+        if (argc >= 4)
+            key_n = (unsigned)strtoul(argv[3], NULL, 10);
+        if (argc >= 5)
+            mask = (u32)strtoul(argv[4], NULL, 10);
+
+        bench_hash_only(repeat, key_n, mask);
+        return 0;
+    }
+
     unsigned table_n  = 100000000u; /* 100M */
     unsigned nb_bk    = 0;
     unsigned repeat   = 2000;

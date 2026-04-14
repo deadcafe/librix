@@ -146,12 +146,15 @@ created. That is the resize-safe contract:
 
 For the saved hash pair, the intended invariants are:
 
-- `hash0 != 0`
-- `hash1 != 0`
 - for the fixed `start_mask`,
   `(hash0 & start_mask) != (hash1 & start_mask)`
 - therefore, for every later active table mask `mask = 2^n - 1`,
   `(hash0 & mask) != (hash1 & mask)`
+- therefore `fp = hash0 ^ hash1` is also non-zero for every active mask
+
+`hash0` and `hash1` themselves may be zero. What matters is that the masked
+bucket pair stays distinct, so the derived fingerprint used in the bucket
+array is never zero.
 
 The last condition is what makes bucket-table-only resize possible. The
 entry carries enough information to derive a valid candidate bucket pair for

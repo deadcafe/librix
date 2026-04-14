@@ -490,6 +490,466 @@ test_walk(void)
 }
 
 /* ================================================================== */
+/* Generic bytes-hash pair spread regression                          */
+/* ================================================================== */
+struct hash24_key {
+    u32 v[6];
+};
+
+typedef union rix_hash_hash_u
+(*hash_u32_fn_t)(u32 key, u32 mask);
+
+typedef union rix_hash_hash_u
+(*hash_u64_fn_t)(u64 key, u32 mask);
+
+static struct hash24_key
+hash24_key_make(unsigned i)
+{
+    struct hash24_key key;
+
+    key.v[0] = UINT32_C(0x0a000000) | (i & UINT32_C(0x00ffffff));
+    key.v[1] = UINT32_C(0x14000000)
+             | ((i * UINT32_C(2654435761)) & UINT32_C(0x00ffffff));
+    key.v[2] = UINT32_C(0x00010000) | (i & UINT32_C(0x0000ffff));
+    key.v[3] = UINT32_C(0x00020000) | ((i >> 5) & UINT32_C(0x0000ffff));
+    key.v[4] = UINT32_C(0x00000006) | ((i & 1u) << 8);
+    key.v[5] = UINT32_C(0x01000000) ^ (i * UINT32_C(2246822519));
+    return key;
+}
+
+static u64
+hash_u64_key_make(unsigned i)
+{
+    return ((u64)i << 32)
+         ^ ((u64)i * UINT64_C(0x9e3779b97f4a7c15));
+}
+
+static void
+test_u32_hash_pair_spread_impl(const char *label,
+                               hash_u32_fn_t hash_fn,
+                               unsigned min_unique_pairs,
+                               unsigned min_outdeg)
+{
+    enum {
+        NB_BK = 32u,
+        MASK = NB_BK - 1u,
+        SAMPLES = 4096u,
+    };
+    unsigned char pair_seen[NB_BK][NB_BK];
+    unsigned unique_pairs = 0u;
+    unsigned min_seen_outdeg = NB_BK;
+    unsigned max_seen_outdeg = 0u;
+
+    printf("[T] %s\n", label);
+    memset(pair_seen, 0, sizeof(pair_seen));
+
+    for (unsigned i = 0u; i < SAMPLES; i++) {
+        union rix_hash_hash_u h = hash_fn((u32)i, MASK);
+        unsigned bk0 = h.val32[0] & MASK;
+        unsigned bk1 = h.val32[1] & MASK;
+
+        if (bk0 == bk1)
+            FAILF("%s chose identical buckets for sample %u", label, i);
+        if ((h.val32[0] ^ h.val32[1]) == 0u)
+            FAILF("%s produced zero fp for sample %u", label, i);
+        if (!pair_seen[bk0][bk1]) {
+            pair_seen[bk0][bk1] = 1u;
+            unique_pairs++;
+        }
+    }
+
+    for (unsigned bk = 0u; bk < NB_BK; bk++) {
+        unsigned outdeg = 0u;
+
+        for (unsigned other = 0u; other < NB_BK; other++) {
+            if (other == bk)
+                continue;
+            if (pair_seen[bk][other])
+                outdeg++;
+        }
+        if (outdeg < min_seen_outdeg)
+            min_seen_outdeg = outdeg;
+        if (outdeg > max_seen_outdeg)
+            max_seen_outdeg = outdeg;
+    }
+
+    printf("  unique_pairs=%u min_outdeg=%u max_outdeg=%u\n",
+           unique_pairs, min_seen_outdeg, max_seen_outdeg);
+    if (unique_pairs < min_unique_pairs) {
+        FAILF("%s pair spread too narrow: unique_pairs=%u (< %u)",
+              label, unique_pairs, min_unique_pairs);
+    }
+    if (min_seen_outdeg < min_outdeg) {
+        FAILF("%s out-degree too narrow: min_outdeg=%u (< %u)",
+              label, min_seen_outdeg, min_outdeg);
+    }
+}
+
+static void
+test_u64_hash_pair_spread_impl(const char *label,
+                               hash_u64_fn_t hash_fn,
+                               unsigned min_unique_pairs,
+                               unsigned min_outdeg)
+{
+    enum {
+        NB_BK = 32u,
+        MASK = NB_BK - 1u,
+        SAMPLES = 4096u,
+    };
+    unsigned char pair_seen[NB_BK][NB_BK];
+    unsigned unique_pairs = 0u;
+    unsigned min_seen_outdeg = NB_BK;
+    unsigned max_seen_outdeg = 0u;
+
+    printf("[T] %s\n", label);
+    memset(pair_seen, 0, sizeof(pair_seen));
+
+    for (unsigned i = 0u; i < SAMPLES; i++) {
+        union rix_hash_hash_u h = hash_fn(hash_u64_key_make(i), MASK);
+        unsigned bk0 = h.val32[0] & MASK;
+        unsigned bk1 = h.val32[1] & MASK;
+
+        if (bk0 == bk1)
+            FAILF("%s chose identical buckets for sample %u", label, i);
+        if ((h.val32[0] ^ h.val32[1]) == 0u)
+            FAILF("%s produced zero fp for sample %u", label, i);
+        if (!pair_seen[bk0][bk1]) {
+            pair_seen[bk0][bk1] = 1u;
+            unique_pairs++;
+        }
+    }
+
+    for (unsigned bk = 0u; bk < NB_BK; bk++) {
+        unsigned outdeg = 0u;
+
+        for (unsigned other = 0u; other < NB_BK; other++) {
+            if (other == bk)
+                continue;
+            if (pair_seen[bk][other])
+                outdeg++;
+        }
+        if (outdeg < min_seen_outdeg)
+            min_seen_outdeg = outdeg;
+        if (outdeg > max_seen_outdeg)
+            max_seen_outdeg = outdeg;
+    }
+
+    printf("  unique_pairs=%u min_outdeg=%u max_outdeg=%u\n",
+           unique_pairs, min_seen_outdeg, max_seen_outdeg);
+    if (unique_pairs < min_unique_pairs) {
+        FAILF("%s pair spread too narrow: unique_pairs=%u (< %u)",
+              label, unique_pairs, min_unique_pairs);
+    }
+    if (min_seen_outdeg < min_outdeg) {
+        FAILF("%s out-degree too narrow: min_outdeg=%u (< %u)",
+              label, min_seen_outdeg, min_outdeg);
+    }
+}
+
+static void
+test_generic_hash_pair_spread(void)
+{
+    enum {
+        NB_BK = 32u,
+        MASK = NB_BK - 1u,
+        SAMPLES = 4096u,
+        MIN_UNIQUE_PAIRS = 128u,
+    };
+    unsigned char pair_seen[NB_BK][NB_BK];
+    unsigned unique_pairs = 0u;
+    unsigned min_outdeg = NB_BK;
+    unsigned max_outdeg = 0u;
+
+    printf("[T] generic bytes hash pair spread\n");
+    memset(pair_seen, 0, sizeof(pair_seen));
+
+    for (unsigned i = 0u; i < SAMPLES; i++) {
+        struct hash24_key key = hash24_key_make(i + 1u);
+        union rix_hash_hash_u h =
+            rix_hash_bytes_GEN(&key, sizeof(key), MASK);
+        unsigned bk0 = h.val32[0] & MASK;
+        unsigned bk1 = h.val32[1] & MASK;
+        unsigned lo;
+        unsigned hi;
+
+        if (bk0 == bk1)
+            FAILF("generic hash chose identical buckets for sample %u", i);
+        if ((h.val32[0] ^ h.val32[1]) == 0u)
+            FAILF("generic hash produced zero fp for sample %u", i);
+
+        lo = (bk0 < bk1) ? bk0 : bk1;
+        hi = (bk0 < bk1) ? bk1 : bk0;
+        if (!pair_seen[lo][hi]) {
+            pair_seen[lo][hi] = 1u;
+            unique_pairs++;
+        }
+    }
+
+    for (unsigned bk = 0u; bk < NB_BK; bk++) {
+        unsigned outdeg = 0u;
+
+        for (unsigned other = 0u; other < NB_BK; other++) {
+            if (other == bk)
+                continue;
+            if (pair_seen[bk < other ? bk : other]
+                         [bk < other ? other : bk]) {
+                outdeg++;
+            }
+        }
+        if (outdeg < min_outdeg)
+            min_outdeg = outdeg;
+        if (outdeg > max_outdeg)
+            max_outdeg = outdeg;
+    }
+
+    printf("  unique_pairs=%u min_outdeg=%u max_outdeg=%u\n",
+           unique_pairs, min_outdeg, max_outdeg);
+    if (unique_pairs < MIN_UNIQUE_PAIRS) {
+        FAILF("generic hash pair spread too narrow: unique_pairs=%u (< %u)",
+              unique_pairs, MIN_UNIQUE_PAIRS);
+    }
+    if (min_outdeg < 4u)
+        FAILF("generic hash out-degree too narrow: min_outdeg=%u", min_outdeg);
+}
+
+static void
+test_generic_hash_u32_pair_spread(void)
+{
+    test_u32_hash_pair_spread_impl("generic u32 hash pair spread",
+                                   rix_hash_u32_GEN, 32u, 1u);
+}
+
+static void
+test_generic_hash_u64_pair_spread(void)
+{
+    test_u64_hash_pair_spread_impl("generic u64 hash pair spread",
+                                   rix_hash_u64_GEN, 128u, 4u);
+}
+
+static void
+test_hash_bytes_fast_dispatch(void)
+{
+    enum { MASK = 31u };
+    struct hash24_key key = hash24_key_make(0x1234u);
+    union rix_hash_hash_u fast_hash;
+    union rix_hash_hash_u expect_hash;
+
+    printf("[T] hash bytes fast dispatch\n");
+
+    rix_hash_arch_init(0u);
+    fast_hash = rix_hash_bytes_fast(&key, sizeof(key), MASK);
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    expect_hash = rix_hash_bytes_CRC32(&key, sizeof(key), MASK);
+    if (rix_hash_arch->hash_bytes != rix_hash_bytes_CRC32)
+        FAIL("arch_init(0) did not bind hash_bytes to CRC32");
+#else
+    expect_hash = rix_hash_bytes_GEN(&key, sizeof(key), MASK);
+    if (rix_hash_arch->hash_bytes != rix_hash_bytes_GEN)
+        FAIL("arch_init(0) did not bind hash_bytes to GEN");
+#endif
+    if (fast_hash.val32[0] != expect_hash.val32[0]
+        || fast_hash.val32[1] != expect_hash.val32[1]) {
+        FAILF("arch_init(0) dispatch mismatch: fast=(%u,%u) expect=(%u,%u)",
+              fast_hash.val32[0], fast_hash.val32[1],
+              expect_hash.val32[0], expect_hash.val32[1]);
+    }
+
+    rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
+    fast_hash = rix_hash_bytes_fast(&key, sizeof(key), MASK);
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    expect_hash = rix_hash_bytes_CRC32(&key, sizeof(key), MASK);
+    if (rix_hash_arch->hash_bytes != rix_hash_bytes_CRC32)
+        FAIL("arch_init(AUTO) did not bind hash_bytes to CRC32");
+#else
+    expect_hash = rix_hash_bytes_GEN(&key, sizeof(key), MASK);
+    if (rix_hash_arch->hash_bytes != rix_hash_bytes_GEN)
+        FAIL("arch_init(AUTO) did not bind hash_bytes to GEN");
+#endif
+    if (fast_hash.val32[0] != expect_hash.val32[0]
+        || fast_hash.val32[1] != expect_hash.val32[1]) {
+        FAILF("arch_init(AUTO) dispatch mismatch: fast=(%u,%u) expect=(%u,%u)",
+              fast_hash.val32[0], fast_hash.val32[1],
+              expect_hash.val32[0], expect_hash.val32[1]);
+    }
+}
+
+static void
+test_hash_u32_fast_dispatch(void)
+{
+    enum { MASK = 31u };
+    u32 key = UINT32_C(0x12345678);
+    union rix_hash_hash_u fast_hash;
+    union rix_hash_hash_u expect_hash;
+
+    printf("[T] hash u32 fast dispatch\n");
+
+    rix_hash_arch_init(0u);
+    fast_hash = rix_hash_arch->hash_u32(key, MASK);
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    expect_hash = rix_hash_u32_CRC32(key, MASK);
+    if (rix_hash_arch->hash_u32 != rix_hash_u32_CRC32)
+        FAIL("arch_init(0) did not bind hash_u32 to CRC32");
+#else
+    expect_hash = rix_hash_u32_GEN(key, MASK);
+    if (rix_hash_arch->hash_u32 != rix_hash_u32_GEN)
+        FAIL("arch_init(0) did not bind hash_u32 to GEN");
+#endif
+    if (fast_hash.val32[0] != expect_hash.val32[0]
+        || fast_hash.val32[1] != expect_hash.val32[1]) {
+        FAILF("arch_init(0) u32 dispatch mismatch: fast=(%u,%u) expect=(%u,%u)",
+              fast_hash.val32[0], fast_hash.val32[1],
+              expect_hash.val32[0], expect_hash.val32[1]);
+    }
+
+    rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
+    fast_hash = rix_hash_arch->hash_u32(key, MASK);
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    expect_hash = rix_hash_u32_CRC32(key, MASK);
+    if (rix_hash_arch->hash_u32 != rix_hash_u32_CRC32)
+        FAIL("arch_init(AUTO) did not bind hash_u32 to CRC32");
+#else
+    expect_hash = rix_hash_u32_GEN(key, MASK);
+    if (rix_hash_arch->hash_u32 != rix_hash_u32_GEN)
+        FAIL("arch_init(AUTO) did not bind hash_u32 to GEN");
+#endif
+    if (fast_hash.val32[0] != expect_hash.val32[0]
+        || fast_hash.val32[1] != expect_hash.val32[1]) {
+        FAILF("arch_init(AUTO) u32 dispatch mismatch: fast=(%u,%u) expect=(%u,%u)",
+              fast_hash.val32[0], fast_hash.val32[1],
+              expect_hash.val32[0], expect_hash.val32[1]);
+    }
+}
+
+static void
+test_hash_u64_fast_dispatch(void)
+{
+    enum { MASK = 31u };
+    u64 key = UINT64_C(0x123456789abcdef0);
+    union rix_hash_hash_u fast_hash;
+    union rix_hash_hash_u expect_hash;
+
+    printf("[T] hash u64 fast dispatch\n");
+
+    rix_hash_arch_init(0u);
+    fast_hash = rix_hash_arch->hash_u64(key, MASK);
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    expect_hash = rix_hash_u64_CRC32(key, MASK);
+    if (rix_hash_arch->hash_u64 != rix_hash_u64_CRC32)
+        FAIL("arch_init(0) did not bind hash_u64 to CRC32");
+#else
+    expect_hash = rix_hash_u64_GEN(key, MASK);
+    if (rix_hash_arch->hash_u64 != rix_hash_u64_GEN)
+        FAIL("arch_init(0) did not bind hash_u64 to GEN");
+#endif
+    if (fast_hash.val32[0] != expect_hash.val32[0]
+        || fast_hash.val32[1] != expect_hash.val32[1]) {
+        FAILF("arch_init(0) u64 dispatch mismatch: fast=(%u,%u) expect=(%u,%u)",
+              fast_hash.val32[0], fast_hash.val32[1],
+              expect_hash.val32[0], expect_hash.val32[1]);
+    }
+
+    rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
+    fast_hash = rix_hash_arch->hash_u64(key, MASK);
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    expect_hash = rix_hash_u64_CRC32(key, MASK);
+    if (rix_hash_arch->hash_u64 != rix_hash_u64_CRC32)
+        FAIL("arch_init(AUTO) did not bind hash_u64 to CRC32");
+#else
+    expect_hash = rix_hash_u64_GEN(key, MASK);
+    if (rix_hash_arch->hash_u64 != rix_hash_u64_GEN)
+        FAIL("arch_init(AUTO) did not bind hash_u64 to GEN");
+#endif
+    if (fast_hash.val32[0] != expect_hash.val32[0]
+        || fast_hash.val32[1] != expect_hash.val32[1]) {
+        FAILF("arch_init(AUTO) u64 dispatch mismatch: fast=(%u,%u) expect=(%u,%u)",
+              fast_hash.val32[0], fast_hash.val32[1],
+              expect_hash.val32[0], expect_hash.val32[1]);
+    }
+}
+
+#if defined(__x86_64__) && defined(__SSE4_2__)
+static void
+test_crc32_hash_pair_spread(void)
+{
+    enum {
+        NB_BK = 32u,
+        MASK = NB_BK - 1u,
+        SAMPLES = 4096u,
+        MIN_UNIQUE_PAIRS = 128u,
+    };
+    unsigned char pair_seen[NB_BK][NB_BK];
+    unsigned unique_pairs = 0u;
+    unsigned min_outdeg = NB_BK;
+    unsigned max_outdeg = 0u;
+
+    printf("[T] crc32 bytes hash pair spread\n");
+    memset(pair_seen, 0, sizeof(pair_seen));
+
+    for (unsigned i = 0u; i < SAMPLES; i++) {
+        struct hash24_key key = hash24_key_make(i + 1u);
+        union rix_hash_hash_u h =
+            rix_hash_bytes_CRC32(&key, sizeof(key), MASK);
+        unsigned bk0 = h.val32[0] & MASK;
+        unsigned bk1 = h.val32[1] & MASK;
+        unsigned lo;
+        unsigned hi;
+
+        if (bk0 == bk1)
+            FAILF("crc32 hash chose identical buckets for sample %u", i);
+        if ((h.val32[0] ^ h.val32[1]) == 0u)
+            FAILF("crc32 hash produced zero fp for sample %u", i);
+
+        lo = (bk0 < bk1) ? bk0 : bk1;
+        hi = (bk0 < bk1) ? bk1 : bk0;
+        if (!pair_seen[lo][hi]) {
+            pair_seen[lo][hi] = 1u;
+            unique_pairs++;
+        }
+    }
+
+    for (unsigned bk = 0u; bk < NB_BK; bk++) {
+        unsigned outdeg = 0u;
+
+        for (unsigned other = 0u; other < NB_BK; other++) {
+            if (other == bk)
+                continue;
+            if (pair_seen[bk < other ? bk : other]
+                         [bk < other ? other : bk]) {
+                outdeg++;
+            }
+        }
+        if (outdeg < min_outdeg)
+            min_outdeg = outdeg;
+        if (outdeg > max_outdeg)
+            max_outdeg = outdeg;
+    }
+
+    printf("  unique_pairs=%u min_outdeg=%u max_outdeg=%u\n",
+           unique_pairs, min_outdeg, max_outdeg);
+    if (unique_pairs < MIN_UNIQUE_PAIRS) {
+        FAILF("crc32 hash pair spread too narrow: unique_pairs=%u (< %u)",
+              unique_pairs, MIN_UNIQUE_PAIRS);
+    }
+    if (min_outdeg < 4u)
+        FAILF("crc32 hash out-degree too narrow: min_outdeg=%u", min_outdeg);
+}
+
+static void
+test_crc32_hash_u32_pair_spread(void)
+{
+    test_u32_hash_pair_spread_impl("crc32 u32 hash pair spread",
+                                   rix_hash_u32_CRC32, 900u, 28u);
+}
+
+static void
+test_crc32_hash_u64_pair_spread(void)
+{
+    test_u64_hash_pair_spread_impl("crc32 u64 hash pair spread",
+                                   rix_hash_u64_CRC32, 900u, 28u);
+}
+#endif
+
+/* ================================================================== */
 /* Fuzz test                                                           */
 /* ================================================================== */
 static unsigned xr_fuzz;
@@ -1752,6 +2212,17 @@ main(int argc, char **argv)
     test_remove_miss();
     test_staged_find();
     test_walk();
+    test_generic_hash_pair_spread();
+    test_generic_hash_u32_pair_spread();
+    test_generic_hash_u64_pair_spread();
+    test_hash_bytes_fast_dispatch();
+    test_hash_u32_fast_dispatch();
+    test_hash_u64_fast_dispatch();
+#if defined(__x86_64__) && defined(__SSE4_2__)
+    test_crc32_hash_pair_spread();
+    test_crc32_hash_u32_pair_spread();
+    test_crc32_hash_u64_pair_spread();
+#endif
     test_fuzz(seed, N, nb_bk, ops);
     test_slot_insert_find_remove();
     test_slot_duplicate();

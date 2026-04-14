@@ -147,12 +147,15 @@ resize で変わるのは bucket 選択だけである。
 
 保存される hash pair には、少なくとも次の条件が必要である。
 
-- `hash0 != 0`
-- `hash1 != 0`
 - 固定 `start_mask` に対して
   `(hash0 & start_mask) != (hash1 & start_mask)`
 - したがって、その後の任意の有効 table mask `mask = 2^n - 1` に対しても
   `(hash0 & mask) != (hash1 & mask)`
+- したがって `fp = hash0 ^ hash1` も各 active mask に対して non-zero になる
+
+`hash0` と `hash1` 自体は zero を取り得る。重要なのは、mask 後の bucket
+pair が常に異なり、その結果 bucket 配列に保存される fingerprint が zero
+にならないことである。
 
 最後の条件により、bucket-table-only resize が可能になる。entry が
 旧/new table の両方で有効な candidate bucket pair を導出できるだけの

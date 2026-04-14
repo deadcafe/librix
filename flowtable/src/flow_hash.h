@@ -16,7 +16,7 @@
  * flow4 key hash / cmp
  *
  * 24B key: 3x CRC32C unrolled on x86+SSE4.2, fallback to
- * rix_hash_bytes_fast.  Non-zero guaranteed by rix_hash layer.
+ * rix_hash_bytes_fast.
  *===========================================================================*/
 static inline union rix_hash_hash_u
 flow4_key_hash(const struct flow4_key *key, u32 mask)
@@ -24,7 +24,7 @@ flow4_key_hash(const struct flow4_key *key, u32 mask)
 #if defined(__x86_64__) && defined(__SSE4_2__)
     union rix_hash_hash_u r;
     u64 w0, w1, w2;
-    u32 h0, bk0, seed, h1;
+    u32 h0, bk0, h1, inc;
 
     memcpy(&w0, (const char *)key,       8u);
     memcpy(&w1, (const char *)key + 8u,  8u);
@@ -32,16 +32,16 @@ flow4_key_hash(const struct flow4_key *key, u32 mask)
     h0  = (u32)__builtin_ia32_crc32di(0ULL, w0);
     h0  = (u32)__builtin_ia32_crc32di((u64)h0, w1);
     h0  = (u32)__builtin_ia32_crc32di((u64)h0, w2);
-    h0 |= !h0;
+    h1  = (u32)__builtin_ia32_crc32di(UINT64_C(0x9e3779b97f4a7c15), w0);
+    h1  = (u32)__builtin_ia32_crc32di((u64)h1, w1);
+    h1  = (u32)__builtin_ia32_crc32di((u64)h1, w2);
+    h1  = rix_hash_retry_mix32(h1, UINT32_C(0x85ebca6b));
     bk0  = h0 & mask;
-    seed = ~h0;
-    do {
-        h1   = (u32)__builtin_ia32_crc32di((u64)seed, w0);
-        h1   = (u32)__builtin_ia32_crc32di((u64)h1, w1);
-        h1   = (u32)__builtin_ia32_crc32di((u64)h1, w2);
-        h1 |= !h1;
-        seed = (u32)__builtin_ia32_crc32di((u64)seed, (u64)h0);
-    } while ((h1 & mask) == bk0);
+    inc = 1u;
+    while ((h1 & mask) == bk0) {
+        h1 = rix_hash_retry_mix32(h1, inc);
+        inc++;
+    }
 
     r.val32[0] = h0;
     r.val32[1] = h1;

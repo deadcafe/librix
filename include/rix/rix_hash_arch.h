@@ -216,6 +216,19 @@ rix_hash_find_u64x16_GEN(const u64 *arr,
  *
  * All variants guarantee (val32[0] & mask) != (val32[1] & mask).
  *===========================================================================*/
+static RIX_FORCE_INLINE u32
+rix_hash_retry_mix32(u32 h,
+                     u32 salt)
+{
+    h ^= salt + UINT32_C(0x9e3779b9);
+    h ^= h >> 16;
+    h *= UINT32_C(0x7feb352d);
+    h ^= h >> 15;
+    h *= UINT32_C(0x846ca68b);
+    h ^= h >> 16;
+    return h;
+}
+
 static RIX_FORCE_INLINE union rix_hash_hash_u
 rix_hash_u32_GEN(u32 key,
                  u32 mask)
@@ -223,10 +236,10 @@ rix_hash_u32_GEN(u32 key,
     union rix_hash_hash_u r;
     u32 h0  = key * 2654435761u;
     u32 bk0 = h0 & mask;
-    u32 h1  = (key ^ h0) * 2246822519u;
+    u32 h1  = (key ^ UINT32_C(0x9e3779b9)) * UINT32_C(2246822519);
     u32 inc = 1u;
     while ((h1 & mask) == bk0) {
-        h1  = (h1 ^ inc) * 2246822519u;
+        h1 = rix_hash_retry_mix32(h1, inc);
         inc++;
     }
     r.val32[0] = h0;
@@ -243,10 +256,12 @@ rix_hash_u64_GEN(u64 key,
     u32 hi  = (u32)(key >> 32);
     u32 h0  = (lo ^ (hi * 2654435761u)) * 2246822519u;
     u32 bk0 = h0 & mask;
-    u32 h1  = (hi ^ (lo * 2246822519u)) * 2654435761u ^ h0;
+    u32 h1  = (hi ^ UINT32_C(0x9e3779b9))
+            * UINT32_C(2654435761)
+            ^ ((lo ^ UINT32_C(0x85ebca6b)) * UINT32_C(2246822519));
     u32 inc = 1u;
     while ((h1 & mask) == bk0) {
-        h1  = (h1 ^ inc) * 2246822519u;
+        h1 = rix_hash_retry_mix32(h1, inc);
         inc++;
     }
     r.val32[0] = h0;
@@ -263,18 +278,17 @@ rix_hash_bytes_GEN(const void *key,
     const u8 *p = (const u8 *)key;
     /* FNV-1a */
     u32 h0 = 2166136261u;
+    u32 h1 = UINT32_C(2166136261) ^ UINT32_C(0x9e3779b9);
     for (size_t i = 0u; i < key_bytes; i++) {
         h0 ^= p[i];
         h0 *= 16777619u;
+        h1 ^= p[i];
+        h1 *= UINT32_C(374761393);
     }
-    h0 |= !h0;
     u32 bk0 = h0 & mask;
-    u32 h1  = (h0 ^ 0x5bd1e995u) * 2246822519u;
     u32 inc = 1u;
-    h1 |= !h1;
     while ((h1 & mask) == bk0) {
-        h1  = (h1 ^ inc) * 2246822519u;
-        h1 |= !h1;
+        h1 = rix_hash_retry_mix32(h1, inc);
         inc++;
     }
     r.val32[0] = h0;
@@ -335,16 +349,48 @@ rix_hash_bytes_CRC32(const void *key,
                      u32 mask)
 {
     union rix_hash_hash_u r;
-    u32 h0   = rix_crc32_bytes(0u, key, key_bytes);
-    h0       |= !h0;
-    u32 bk0  = h0 & mask;
-    u32 seed = ~h0;
-    u32 h1;
-    do {
-        h1   = rix_crc32_bytes(seed, key, key_bytes);
-        h1 |= !h1;
-        seed = (u32)__builtin_ia32_crc32di((u64)seed, (u64)h0);
-    } while ((h1 & mask) == bk0);
+    const u8 *p = (const u8 *)key;
+    size_t rem = key_bytes;
+    u32 h0 = 0u;
+    u32 h1 = UINT32_C(0x9e3779b9);
+    u32 bk0;
+    u32 inc = 1u;
+
+    while (rem >= 8u) {
+        u64 w;
+        memcpy(&w, p, 8u);
+        h0 = (u32)__builtin_ia32_crc32di((u64)h0, w);
+        h1 = (u32)__builtin_ia32_crc32di((u64)h1, w);
+        p += 8u;
+        rem -= 8u;
+    }
+    if (rem >= 4u) {
+        u32 w;
+        memcpy(&w, p, 4u);
+        h0 = (u32)__builtin_ia32_crc32si(h0, w);
+        h1 = (u32)__builtin_ia32_crc32si(h1, w);
+        p += 4u;
+        rem -= 4u;
+    }
+    if (rem >= 2u) {
+        u16 w;
+        memcpy(&w, p, 2u);
+        h0 = (u32)__builtin_ia32_crc32hi(h0, (unsigned short)w);
+        h1 = (u32)__builtin_ia32_crc32hi(h1, (unsigned short)w);
+        p += 2u;
+        rem -= 2u;
+    }
+    if (rem >= 1u) {
+        h0 = (u32)__builtin_ia32_crc32qi(h0, (unsigned char)*p);
+        h1 = (u32)__builtin_ia32_crc32qi(h1, (unsigned char)*p);
+    }
+
+    h1 = rix_hash_retry_mix32(h1, UINT32_C(0x85ebca6b));
+    bk0 = h0 & mask;
+    while ((h1 & mask) == bk0) {
+        h1 = rix_hash_retry_mix32(h1, inc);
+        inc++;
+    }
     r.val32[0] = h0;
     r.val32[1] = h1;
     return r;
@@ -355,16 +401,16 @@ rix_hash_u32_CRC32(u32 key,
                    u32 mask)
 {
     union rix_hash_hash_u r;
-    u32 h0   = (u32)__builtin_ia32_crc32si(0u, key);
-    h0      |= !h0;
-    u32 bk0  = h0 & mask;
-    u32 seed = ~h0;
-    u32 h1;
-    do {
-        seed = (u32)__builtin_ia32_crc32si(seed, ~key);
-        h1   = (u32)__builtin_ia32_crc32si(seed, key);
-        h1  |= !h1;
-    } while ((h1 & mask) == bk0);
+    u32 h0 = (u32)__builtin_ia32_crc32si(0u, key);
+    u32 h1 = (u32)__builtin_ia32_crc32si(UINT32_C(0x9e3779b9), key);
+    h1 = rix_hash_retry_mix32(h1, UINT32_C(0x85ebca6b));
+    u32 bk0 = h0 & mask;
+    u32 inc = 1u;
+
+    while ((h1 & mask) == bk0) {
+        h1 = rix_hash_retry_mix32(h1, inc);
+        inc++;
+    }
     r.val32[0] = h0;
     r.val32[1] = h1;
     return r;
@@ -375,16 +421,16 @@ rix_hash_u64_CRC32(u64 key,
                    u32 mask)
 {
     union rix_hash_hash_u r;
-    u32 h0   = (u32)__builtin_ia32_crc32di(0ULL, key);
-    h0      |= !h0;
-    u32 bk0  = h0 & mask;
-    u32 seed = ~h0;
-    u32 h1;
-    do {
-        seed = (u32)__builtin_ia32_crc32di((u64)seed, ~key);
-        h1   = (u32)__builtin_ia32_crc32di((u64)seed, key);
-        h1  |= !h1;
-    } while ((h1 & mask) == bk0);
+    u32 h0 = (u32)__builtin_ia32_crc32di(0ULL, key);
+    u32 h1 = (u32)__builtin_ia32_crc32di(UINT64_C(0x9e3779b97f4a7c15), key);
+    h1 = rix_hash_retry_mix32(h1, UINT32_C(0x85ebca6b));
+    u32 bk0 = h0 & mask;
+    u32 inc = 1u;
+
+    while ((h1 & mask) == bk0) {
+        h1 = rix_hash_retry_mix32(h1, inc);
+        inc++;
+    }
     r.val32[0] = h0;
     r.val32[1] = h1;
     return r;
