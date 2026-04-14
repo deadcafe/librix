@@ -335,6 +335,7 @@ struct ft_maint_ctx {
     struct ft_table_stats    *stats;
     size_t                    pool_stride;
     size_t                    meta_off;
+    unsigned                  max_entries;
     unsigned                  rhh_mask;
     u8                   ts_shift;
 };
@@ -373,10 +374,11 @@ unsigned ft_table_maintain(const struct ft_maint_ctx *ctx,
 /**
  * @brief Evict expired entries from buckets derived from a list of entry indices.
  *
- * For each entry in @p entry_idxv, reads its flow_entry_meta to determine
- * the owning bucket, then scans that bucket for expired entries.  Uses a
- * three-stage software pipeline (meta prefetch -> bucket identification
- * + bucket prefetch -> bucket scan) to hide memory latency.
+ * For each entry in @p entry_idxv, reads its flow_entry_meta and validates
+ * that the referenced bucket/slot still owns the index before scanning that
+ * bucket for expired entries. Uses a three-stage software pipeline
+ * (meta prefetch -> bucket identification + bucket prefetch -> bucket scan)
+ * to hide memory latency. Stale or already-freed indices are skipped.
  *
  * @param ctx            Maintenance context (pool layout, buckets, stats).
  * @param entry_idxv     Array of entry indices whose buckets are to be scanned.

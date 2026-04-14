@@ -58,6 +58,30 @@ ft_maint_bucket_of_meta_(const struct ft_maint_ctx *ctx,
     return meta->cur_hash & ctx->rhh_mask;
 }
 
+static inline int
+ft_maint_live_bucket_of_idx_(const struct ft_maint_ctx *ctx,
+                             unsigned entry_idx,
+                             const struct flow_entry_meta *meta,
+                             unsigned *bk_out)
+{
+    unsigned slot;
+    unsigned bk;
+
+    if (!RIX_IDX_IS_VALID(entry_idx, ctx->max_entries))
+        return 0;
+
+    slot = (unsigned)meta->slot;
+    if (slot >= RIX_HASH_BUCKET_ENTRY_SZ)
+        return 0;
+
+    bk = ft_maint_bucket_of_meta_(ctx, meta);
+    if (ctx->buckets[bk].idx[slot] != entry_idx)
+        return 0;
+
+    *bk_out = bk;
+    return 1;
+}
+
 /*
  * Scan one bucket once, derive occupancy via used_bits/popcount, and when the
  * occupancy threshold is met remove expired entries.
@@ -250,8 +274,12 @@ ft_maint_idx_bulk_loop_(const struct ft_maint_ctx *ctx,
             unsigned n = (i + FT_MAINT_HIT_STEP <= nb_idx)
                        ? FT_MAINT_HIT_STEP : (nb_idx - i);
 
-            for (unsigned j = 0u; j < n; j++)
-                __builtin_prefetch(ft_maint_meta_(ctx, entry_idxv[i + j]), 0, 3);
+            for (unsigned j = 0u; j < n; j++) {
+                unsigned entry_idx = entry_idxv[i + j];
+
+                if (RIX_IDX_IS_VALID(entry_idx, ctx->max_entries))
+                    __builtin_prefetch(ft_maint_meta_(ctx, entry_idx), 0, 3);
+            }
         }
 
         if (i >= FT_MAINT_HIT_AHEAD && i - FT_MAINT_HIT_AHEAD < nb_idx) {
@@ -260,16 +288,23 @@ ft_maint_idx_bulk_loop_(const struct ft_maint_ctx *ctx,
                        ? FT_MAINT_HIT_STEP : (nb_idx - base);
 
             for (unsigned j = 0u; j < n; j++) {
+                unsigned entry_idx = entry_idxv[base + j];
                 unsigned pos = (base + j) & 15u;
-                const struct flow_entry_meta *meta =
-                    ft_maint_meta_(ctx, entry_idxv[base + j]);
+                const struct flow_entry_meta *meta;
 
-                meta_ring[pos] = meta;
-                if (meta->cur_hash == 0u) {
+                if (!RIX_IDX_IS_VALID(entry_idx, ctx->max_entries)) {
+                    meta_ring[pos] = NULL;
                     valid_ring[pos] = 0u;
                     continue;
                 }
-                bk_ring[pos] = ft_maint_bucket_of_meta_(ctx, meta);
+
+                meta = ft_maint_meta_(ctx, entry_idx);
+                meta_ring[pos] = meta;
+                if (!ft_maint_live_bucket_of_idx_(ctx, entry_idx, meta,
+                                                  &bk_ring[pos])) {
+                    valid_ring[pos] = 0u;
+                    continue;
+                }
                 valid_ring[pos] = 1u;
                 rix_hash_prefetch_bucket_indices_of_idx(ctx->buckets,
                                                         bk_ring[pos]);

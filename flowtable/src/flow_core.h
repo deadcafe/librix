@@ -472,7 +472,6 @@ _FCORE_INT(p, add_idx_small_)(_FCORE_OT(ot) *owner,                          \
                 RIX_ASSERT(_FCORE_HT(ht, remove)(                             \
                                head, buckets, hash_base, _node)               \
                            != NULL);                                          \
-                _node->meta.cur_hash = 0u;                                    \
                 FCORE_CLEAR_TIMESTAMP(_node);                                 \
                 _ins_idx = _FCORE_HT(ht, insert_hashed_idx)(                  \
                     head, buckets, hash_base, entry, _ctx.hash);              \
@@ -730,7 +729,6 @@ _FCORE_INT(p, add_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                         RIX_ASSERT(_FCORE_HT(ht, remove)(                      \
                                        head, buckets, hash_base, _node)       \
                                    != NULL);                                  \
-                        _node->meta.cur_hash = 0u;                            \
                         FCORE_CLEAR_TIMESTAMP(_node);                         \
                         _ins_idx = _FCORE_HT(ht, insert_hashed_idx)(          \
                             head, buckets, hash_base, entry, _ctxp->hash);    \
@@ -816,13 +814,19 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 if (RIX_LIKELY(_eidx != 0u && _eidx <= owner->max_entries)) { \
                     _FCORE_ENTRY_T(p) *_e =                                   \
                         FCORE_LAYOUT_ENTRY_PTR(owner, _eidx);                \
+                    unsigned _slot;                                           \
                     RIX_ASSUME_NONNULL(_e);                                   \
-                    unsigned _bk =                                            \
-                        (unsigned)(_e->meta.cur_hash & head->rhh_mask);      \
-                    _dctx[_idx & ctx_mask].eidx = _eidx;                      \
-                    _dctx[_idx & ctx_mask].bk   = _bk;                        \
-                    _dctx[_idx & ctx_mask].slot  = (unsigned)_e->meta.slot;   \
-                    rix_hash_prefetch_bucket_of(buckets + _bk);              \
+                    _slot = (unsigned)_e->meta.slot;                          \
+                    if (RIX_LIKELY(_slot < RIX_HASH_BUCKET_ENTRY_SZ)) {       \
+                        unsigned _bk =                                        \
+                            (unsigned)(_e->meta.cur_hash & head->rhh_mask);   \
+                        _dctx[_idx & ctx_mask].eidx = _eidx;                  \
+                        _dctx[_idx & ctx_mask].bk   = _bk;                    \
+                        _dctx[_idx & ctx_mask].slot = _slot;                  \
+                        rix_hash_prefetch_bucket_of(buckets + _bk);           \
+                    } else {                                                  \
+                        _dctx[_idx & ctx_mask].eidx = 0u;                     \
+                    }                                                         \
                 } else {                                                      \
                     _dctx[_idx & ctx_mask].eidx = 0u;                         \
                 }                                                             \
@@ -837,11 +841,13 @@ _FCORE_INT(p, del_idx_bulk_)(_FCORE_OT(ot) *owner,                           \
                 unsigned _idx = _base + _j;                                   \
                 u32 _eidx = _dctx[_idx & ctx_mask].eidx;                 \
                 if (RIX_LIKELY(_eidx != 0u)) {                                \
-                    if (_FCORE_HT(ht, remove_at)(                             \
-                            head, buckets,                                    \
-                            _dctx[_idx & ctx_mask].bk,                        \
-                            _dctx[_idx & ctx_mask].slot) !=                   \
-                        (unsigned)RIX_NIL) {                                  \
+                    unsigned _bk = _dctx[_idx & ctx_mask].bk;                 \
+                    unsigned _slot = _dctx[_idx & ctx_mask].slot;             \
+                    struct rix_hash_bucket_s *_dbk = buckets + _bk;           \
+                    if (RIX_LIKELY(_slot < RIX_HASH_BUCKET_ENTRY_SZ)           \
+                        && _dbk->idx[_slot] == _eidx                          \
+                        && _FCORE_HT(ht, remove_at)(                          \
+                               head, buckets, _bk, _slot) == _eidx) {         \
                         FLOW_STATS(owner).dels++;                            \
                         FLOW_STATUS(owner).entries--;                        \
                         unused_idxv[_count++] = _eidx;                        \
@@ -928,7 +934,6 @@ _FCORE_INT(p, del_key_bulk_)(_FCORE_OT(ot) *owner,                           \
                     u32 _eidx = FCORE_LAYOUT_ENTRY_INDEX(owner, entry);  \
                     if (_FCORE_HT(ht, remove)(                                \
                             head, buckets, hash_base, entry) != NULL) {      \
-                        entry->meta.cur_hash = 0u;                            \
                         dels++;                                               \
                         RIX_ASSERT(FLOW_STATUS(owner).entries != 0u);        \
                         FLOW_STATUS(owner).entries--;                        \
@@ -973,18 +978,6 @@ static RIX_UNUSED void                                                        \
 _FCORE_INT(p, flush_)(_FCORE_OT(ot) *owner)                                  \
 {                                                                             \
     unsigned _nb_bk = owner->ht_head.rhh_mask + 1u;                           \
-    for (unsigned _b = 0; _b < _nb_bk; _b++) {                                \
-        struct rix_hash_bucket_s *_bk = &owner->buckets[_b];                  \
-        for (unsigned _s = 0; _s < RIX_HASH_BUCKET_ENTRY_SZ; _s++) {          \
-            unsigned _nidx = _bk->idx[_s];                                    \
-            if (_nidx == (unsigned)RIX_NIL)                                   \
-                continue;                                                     \
-            _FCORE_ENTRY_T(p) *entry =                                        \
-                FCORE_LAYOUT_ENTRY_PTR(owner, _nidx);                         \
-            RIX_ASSUME_NONNULL(entry);                                        \
-            entry->meta.cur_hash = 0u;                                        \
-        }                                                                     \
-    }                                                                         \
     /* Clear all buckets */                                                   \
     memset(owner->buckets, 0,                                                 \
            (size_t)_nb_bk * sizeof(struct rix_hash_bucket_s));                \

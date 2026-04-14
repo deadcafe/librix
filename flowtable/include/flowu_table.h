@@ -226,6 +226,7 @@ ft_flowu_table_maintain(struct ft_table *ft,
         .pool_stride  = ft->pool_stride,
         .meta_off     = ft->pool_entry_offset +
                         offsetof(struct flowu_entry, meta),
+        .max_entries  = ft->max_entries,
         .ts_shift     = ft->ts_shift,
         .stats        = &ft->stats,
     };
@@ -252,6 +253,7 @@ ft_flowu_table_maintain_idx_bulk(struct ft_table *ft,
         .pool_stride  = ft->pool_stride,
         .meta_off     = ft->pool_entry_offset +
                         offsetof(struct flowu_entry, meta),
+        .max_entries  = ft->max_entries,
         .ts_shift     = ft->ts_shift,
         .stats        = &ft->stats,
     };

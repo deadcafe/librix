@@ -120,8 +120,6 @@ _FTG_INT(p, hash_base_)(_FTG_TABLE_T(p) *ft)                                  \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 _FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
 {                                                                             \
-    entry->meta.cur_hash = 0u;                                                \
-    entry->meta.slot = 0u;                                                    \
     flow_timestamp_clear(&entry->meta);                                       \
     entry->meta.reserved0 = 0u;                                               \
 }                                                                             \

@@ -1367,6 +1367,61 @@ test_del_idx(void)
 }
 
 static int
+test_del_idx_stale_meta_safe(void)
+{
+    struct ft_table_config cfg = test_cfg();
+    struct ft_table ft;
+    struct test_user_record *pool;
+    void *bk;
+    struct flow4_key key1;
+    struct flow4_key key2;
+    struct flow4_entry *entry1;
+    struct flow4_entry *entry2;
+
+    printf("[T] flow4 table del_idx stale meta safe\n");
+    pool = test_aligned_calloc(128u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    bk = test_alloc_buckets(128u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 128u,
+                                  struct test_user_record, entry,
+                                  bk, ft_table_bucket_size(128u), &cfg) != 0)
+        FAIL("init failed");
+
+    key1 = test_key(41000u);
+    key2 = test_key(41001u);
+    if (test_add_idx_key(&ft, 1u, &key1) != 1u)
+        FAIL("add key1 failed");
+    if (test_add_idx_key(&ft, 2u, &key2) != 2u)
+        FAIL("add key2 failed");
+
+    entry1 = ft_flow4_table_entry_ptr(&ft, 1u);
+    entry2 = ft_flow4_table_entry_ptr(&ft, 2u);
+    if (entry1 == NULL || entry2 == NULL)
+        FAIL("entry ptr failed");
+
+    if (ft_flow4_table_del_idx(&ft, 1u) != 1u)
+        FAIL("initial del_idx failed");
+    if (FT4_FIND(&ft, &key1) != 0u)
+        FAIL("deleted key1 still found");
+
+    entry1->meta.cur_hash = entry2->meta.cur_hash;
+    entry1->meta.slot = entry2->meta.slot;
+
+    if (ft_flow4_table_del_idx(&ft, 1u) != 0u)
+        FAIL("stale-metadata del_idx should miss");
+    if (FT4_FIND(&ft, &key2) != 2u)
+        FAIL("stale-metadata del_idx removed the wrong entry");
+    if (ft_flow4_table_nb_entries(&ft) != 1u)
+        FAIL("stale-metadata del_idx changed entry count");
+
+    ft_flow4_table_destroy(&ft);
+    free(bk);
+    free(pool);
+    return 0;
+}
+
+static int
 test_maintain_basic(void)
 {
     struct ft_table_config cfg = test_cfg();
@@ -1410,13 +1465,6 @@ test_maintain_basic(void)
         FAIL("override maintain should remove all entries");
 
     for (unsigned i = 0; i < 8u; i++) {
-        struct flow4_entry *e = ft_flow4_table_entry_ptr(&ft, i + 1u);
-
-        if (e == NULL)
-            FAIL("entry ptr failed");
-        e->meta.cur_hash = 0u;
-        e->meta.slot = 0u;
-        flow_timestamp_clear(&e->meta);
         if (test_add_idx_key(&ft, i + 1u, &keys[i]) != i + 1u)
             FAILF("re-add failed at %u", i);
     }
@@ -1463,15 +1511,6 @@ test_maintain_basic(void)
      * Contract: maintain() returns expired idx to the user, and after user
      * reclaim/reset that same idx can be reused.
      */
-    {
-        struct flow4_entry *entry = ft_flow4_table_entry_ptr(&ft, 1u);
-
-        if (entry == NULL)
-            FAIL("entry_ptr NULL after maintain");
-        entry->meta.cur_hash = 0u;
-        entry->meta.slot = 0u;
-        flow_timestamp_clear(&entry->meta);
-    }
     new_key = test_key(90000u);
     if (test_add_idx_key(&ft, 1u, &new_key) != 1u)
         FAIL("same-idx reuse add failed");
@@ -1603,6 +1642,86 @@ test_maintain_partial_and_limit(void)
             FAIL("maint_bucket_checks should be > 0");
     }
 
+    ft_flow4_table_destroy(&ft);
+    free(bk);
+    free(pool);
+    return 0;
+}
+
+static int
+test_maintain_idx_bulk_stale_meta_safe(void)
+{
+    struct ft_table_config cfg = test_cfg();
+    const u64 expire_tsc = UINT64_C(100000);
+    struct ft_table ft;
+    struct test_user_record *pool;
+    void *bk;
+    struct flow4_key keys[256];
+    u32 expired_idxv[4] = { 0u };
+    u32 *first_idx_by_bk = NULL;
+    unsigned nb_bk;
+    unsigned free_idx = 0u;
+    unsigned live_idx = 0u;
+    unsigned evicted;
+
+    printf("[T] flow4 table maintain_idx_bulk stale meta safe\n");
+    pool = test_aligned_calloc(256u, sizeof(*pool), FT_TABLE_CACHE_LINE_SIZE);
+    if (pool == NULL)
+        FAIL("calloc pool");
+    bk = test_alloc_buckets(256u);
+    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, pool, 256u,
+                                  struct test_user_record, entry,
+                                  bk, ft_table_bucket_size(256u), &cfg) != 0)
+        FAIL("init failed");
+
+    nb_bk = ft_flow4_table_nb_bk(&ft);
+    first_idx_by_bk = calloc(nb_bk, sizeof(*first_idx_by_bk));
+    if (first_idx_by_bk == NULL)
+        FAIL("calloc bucket tracker failed");
+
+    for (unsigned i = 0u; i < 256u; i++) {
+        struct flow4_entry *entry;
+        unsigned idx = i + 1u;
+        unsigned cur_bk;
+
+        keys[i] = test_key(92000u + i);
+        if (test_add_idx_key(&ft, idx, &keys[i]) != idx)
+            FAILF("seed add failed at %u", i);
+        entry = ft_flow4_table_entry_ptr(&ft, idx);
+        if (entry == NULL)
+            FAIL("entry ptr failed");
+        cur_bk = entry->meta.cur_hash & (nb_bk - 1u);
+        if (first_idx_by_bk[cur_bk] == 0u) {
+            first_idx_by_bk[cur_bk] = idx;
+            continue;
+        }
+        free_idx = first_idx_by_bk[cur_bk];
+        live_idx = idx;
+        break;
+    }
+
+    if (free_idx == 0u || live_idx == 0u)
+        FAIL("failed to find bucket with multiple entries");
+    if (ft_flow4_table_del_idx(&ft, free_idx) != free_idx)
+        FAIL("del_idx free_idx failed");
+
+    {
+        struct flow4_entry *live = ft_flow4_table_entry_ptr(&ft, live_idx);
+
+        if (live == NULL)
+            FAIL("live entry ptr failed");
+        flow_timestamp_store(&live->meta, UINT64_C(16), ft.ts_shift);
+    }
+
+    evicted = ft_flow4_table_maintain_idx_bulk(&ft, &free_idx, 1u,
+                                               UINT64_C(200000), expire_tsc,
+                                               expired_idxv, 4u, 0u, 0);
+    if (evicted != 0u)
+        FAIL("stale free idx should not evict from maintain_idx_bulk");
+    if (FT4_FIND(&ft, &keys[live_idx - 1u]) != live_idx)
+        FAIL("stale free idx expired the wrong live entry");
+
+    free(first_idx_by_bk);
     ft_flow4_table_destroy(&ft);
     free(bk);
     free(pool);
@@ -2864,6 +2983,8 @@ main(void)
         return 1;
     if (test_del_idx() != 0)
         return 1;
+    if (test_del_idx_stale_meta_safe() != 0)
+        return 1;
 
     /* walk / flush / stats */
     if (test_walk_early_stop() != 0)
@@ -2885,6 +3006,8 @@ main(void)
 
     /* maintain */
     if (test_maintain_basic() != 0)
+        return 1;
+    if (test_maintain_idx_bulk_stale_meta_safe() != 0)
         return 1;
     if (test_maintain_partial_and_limit() != 0)
         return 1;
