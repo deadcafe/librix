@@ -40,6 +40,15 @@ struct ft_##prefix##_ops {                                                     \
                              enum ft_add_policy policy,                        \
                              u64 now,                                          \
                              u32 *unused_idxv);                                \
+    unsigned (*add_idx_bulk_maint)(struct ft_table *ft,                        \
+                                   u32 *entry_idxv,                            \
+                                   unsigned nb_keys,                           \
+                                   enum ft_add_policy policy,                  \
+                                   u64 now,                                    \
+                                   u64 timeout,                                \
+                                   u32 *unused_idxv,                           \
+                                   unsigned max_unused,                        \
+                                   unsigned min_bk_used);                      \
     unsigned (*del_key_bulk)(struct ft_table *ft,                              \
                              const struct prefix##_key *keys,                  \
                              unsigned nb_keys,                                 \

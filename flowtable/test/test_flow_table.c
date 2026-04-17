@@ -315,6 +315,14 @@ struct test_variant_ops {
                              enum ft_add_policy policy,
                              u64 now,
                              u32 *unused_idxv);
+    unsigned (*add_idx_bulk_maint)(void *ft, u32 *entry_idxv,
+                                   unsigned nb_keys,
+                                   enum ft_add_policy policy,
+                                   u64 now,
+                                   u64 timeout,
+                                   u32 *unused_idxv,
+                                   unsigned max_unused,
+                                   unsigned min_bk_used);
     int (*set_permanent_idx)(void *ft, u32 entry_idx);
     unsigned (*del_idx_bulk)(void *ft, const u32 *entry_idxv,
                                unsigned nb_keys, u32 *unused_idxv);
@@ -339,6 +347,7 @@ struct test_variant_ops {
                               stats_fn, status_fn, find_fn, add_idx_fn,        \
                               del_key_fn, del_idx_fn, find_bulk_fn,       \
                               add_idx_bulk_fn,                                 \
+                              add_idx_bulk_maint_fn,                           \
                               del_idx_bulk_fn,                           \
                               walk_fn, migrate_fn,                              \
                               maintain_idx_bulk_fn,                             \
@@ -451,6 +460,20 @@ testv_add_idx_bulk_##tag(void *ft, u32 *entry_idxv,                   \
     return add_idx_bulk_fn((struct ft_table *)ft,                           \
                            entry_idxv, nb_keys, policy, now, unused_idxv);  \
 }                                                                          \
+static unsigned                                                             \
+testv_add_idx_bulk_maint_##tag(void *ft, u32 *entry_idxv,                   \
+                               unsigned nb_keys,                             \
+                               enum ft_add_policy policy,                    \
+                               u64 now,                                      \
+                               u64 timeout,                                  \
+                               u32 *unused_idxv,                             \
+                               unsigned max_unused,                          \
+                               unsigned min_bk_used)                         \
+{                                                                          \
+    return add_idx_bulk_maint_fn((struct ft_table *)ft,                      \
+                                 entry_idxv, nb_keys, policy, now, timeout, \
+                                 unused_idxv, max_unused, min_bk_used);     \
+}                                                                          \
 static int                                                                  \
 testv_set_permanent_idx_##tag(void *ft, u32 entry_idx)                 \
 {                                                                          \
@@ -527,6 +550,7 @@ static const struct test_variant_ops test_ops_##tag = {                     \
     .del_idx = testv_del_idx_##tag,                             \
     .find_bulk = testv_find_bulk_##tag,                                     \
     .add_idx_bulk = testv_add_idx_bulk_##tag,                               \
+    .add_idx_bulk_maint = testv_add_idx_bulk_maint_##tag,                   \
     .set_permanent_idx = testv_set_permanent_idx_##tag,                     \
     .del_idx_bulk = testv_del_idx_bulk_##tag,                   \
     .walk = testv_walk_##tag,                                               \
@@ -546,6 +570,7 @@ TEST_VARIANT_WRAPPERS(flow4, flow4, FT_TABLE_VARIANT_FLOW4,
                       ft_flow4_table_find, ft_table_add_idx,
                       ft_flow4_table_del_key_bulk, ft_table_del_idx,
                       ft_flow4_table_find_bulk, ft_table_add_idx_bulk,
+                      ft_table_add_idx_bulk_maint,
                       ft_table_del_idx_bulk, ft_table_walk,
                       ft_table_migrate,
                       ft_flow4_table_maintain_idx_bulk,
@@ -561,6 +586,7 @@ TEST_VARIANT_WRAPPERS(flow6, flow6, FT_TABLE_VARIANT_FLOW6,
                       ft_flow6_table_find, ft_table_add_idx,
                       ft_flow6_table_del_key_bulk, ft_table_del_idx,
                       ft_flow6_table_find_bulk, ft_table_add_idx_bulk,
+                      ft_table_add_idx_bulk_maint,
                       ft_table_del_idx_bulk, ft_table_walk,
                       ft_table_migrate,
                       ft_flow6_table_maintain_idx_bulk,
@@ -576,6 +602,7 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, FT_TABLE_VARIANT_FLOWU,
                       ft_flowu_table_find, ft_table_add_idx,
                       ft_flowu_table_del_key_bulk, ft_table_del_idx,
                       ft_flowu_table_find_bulk, ft_table_add_idx_bulk,
+                      ft_table_add_idx_bulk_maint,
                       ft_table_del_idx_bulk, ft_table_walk,
                       ft_table_migrate,
                       ft_flowu_table_maintain_idx_bulk,
@@ -604,6 +631,12 @@ TEST_VARIANT_WRAPPERS(flowu, flowu, FT_TABLE_VARIANT_FLOWU,
 #define TEST_OPS_ADD_IDX_BULK(ops, ft, entry_idxv, nb_keys, policy, unused_idxv) \
     ((ops)->add_idx_bulk((ft), (entry_idxv), (nb_keys), (policy),            \
                          TEST_NOW_ADD, (unused_idxv)))
+#define TEST_OPS_ADD_IDX_BULK_MAINT(ops, ft, entry_idxv, nb_keys, policy,     \
+                                    now, timeout, unused_idxv, max_unused,    \
+                                    min_bk_used)                              \
+    ((ops)->add_idx_bulk_maint((ft), (entry_idxv), (nb_keys), (policy),       \
+                               (now), (timeout), (unused_idxv),               \
+                               (max_unused), (min_bk_used)))
 
 static u32
 test_add_idx_key(struct ft_table *ft, u32 entry_idx,
@@ -2357,6 +2390,82 @@ testv_add_idx_key(const struct test_variant_ops *ops, void *ft,
 }
 
 static int
+testv_prepare_bucket_for_add_maint(const struct test_variant_ops *ops,
+                                   void *ft,
+                                   void *keys,
+                                   unsigned seed_cap,
+                                   unsigned key_base,
+                                   u32 *live_idx_out,
+                                   u32 *old_idxv,
+                                   unsigned *old_count_out,
+                                   unsigned *inserted_out)
+{
+    unsigned nb_bk = ops->nb_bk(ft);
+    unsigned mask = nb_bk - 1u;
+    unsigned *bucket_counts = calloc(nb_bk, sizeof(*bucket_counts));
+    unsigned inserted = 0u;
+    unsigned target_bk = UINT_MAX;
+    int rc = -1;
+
+    if (bucket_counts == NULL)
+        return -1;
+
+    for (unsigned i = 0u; i < seed_cap; i++) {
+        struct flow_entry_meta *meta;
+        unsigned bk;
+
+        ops->make_key(TEST_KEY_AT(keys, ops, i), key_base + i);
+        testv_bind_key(ops, ft, i + 1u, TEST_KEY_AT(keys, ops, i));
+        if (TEST_OPS_ADD_IDX(ops, ft, i + 1u) != i + 1u)
+            goto out;
+        meta = testv_meta_ptr(ops, ft, i + 1u);
+        if (meta == NULL)
+            goto out;
+        bk = meta->cur_hash & mask;
+        bucket_counts[bk]++;
+        inserted = i + 1u;
+        if (bucket_counts[bk] >= 2u) {
+            target_bk = bk;
+            break;
+        }
+    }
+    if (target_bk == UINT_MAX)
+        goto out;
+
+    *live_idx_out = 0u;
+    *old_count_out = 0u;
+    for (unsigned idx = 1u; idx <= inserted; idx++) {
+        struct flow_entry_meta *meta = testv_meta_ptr(ops, ft, idx);
+
+        if (meta == NULL)
+            goto out;
+        if ((meta->cur_hash & mask) != target_bk)
+            continue;
+        if (*live_idx_out == 0u) {
+            *live_idx_out = idx;
+            flow_timestamp_store(meta, UINT64_C(200000),
+                                 FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        } else {
+            if (*old_count_out >= 16u)
+                goto out;
+            old_idxv[*old_count_out] = idx;
+            (*old_count_out)++;
+            flow_timestamp_store(meta, UINT64_C(16),
+                                 FLOW_TIMESTAMP_DEFAULT_SHIFT);
+        }
+    }
+    if (*live_idx_out == 0u || *old_count_out == 0u)
+        goto out;
+
+    if (inserted_out != NULL)
+        *inserted_out = inserted;
+    rc = 0;
+out:
+    free(bucket_counts);
+    return rc;
+}
+
+static int
 testv_basic_add_find_del(const struct test_variant_ops *ops)
 {
     struct ft_table_config cfg = test_cfg();
@@ -2777,6 +2886,135 @@ testv_add_idx_bulk_policy(const struct test_variant_ops *ops)
             TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, 11u)) != 19u)
             FAIL("mixed update inserted find mismatch");
     }
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_add_idx_bulk_maint_duplicate_reclaims(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg();
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(2048u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(2048u, ops->key_size);
+    u32 old_idxv[16];
+    u32 unused_idxv[17];
+    u8 seen_old[2049];
+    u32 req_idxv[1];
+    u32 live_idx;
+    unsigned old_count;
+    unsigned inserted;
+    unsigned unused_n;
+    struct ft_table_stats stats;
+
+    printf("[T] %s table add_idx_bulk_maint duplicate reclaims\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init(&ft, pool, 2048u, &cfg) != 0)
+        FAIL("init failed");
+    if (testv_prepare_bucket_for_add_maint(ops, &ft, keys, 2048u, 12000u,
+                                           &live_idx, old_idxv, &old_count,
+                                           &inserted) != 0)
+        FAIL("failed to prepare target bucket");
+
+    req_idxv[0] = inserted + 1u;
+    testv_bind_key(ops, &ft, req_idxv[0], TEST_KEY_AT(keys, ops, live_idx - 1u));
+    memset(unused_idxv, 0, sizeof(unused_idxv));
+    memset(seen_old, 0, sizeof(seen_old));
+
+    unused_n = TEST_OPS_ADD_IDX_BULK_MAINT(ops, &ft, req_idxv, 1u,
+                                           FT_ADD_IGNORE, UINT64_C(200000),
+                                           UINT64_C(100000), unused_idxv,
+                                           1u + old_count, 1u);
+    if (unused_n != old_count + 1u)
+        FAIL("add_idx_bulk_maint unused count mismatch");
+    if (req_idxv[0] != live_idx)
+        FAIL("add_idx_bulk_maint duplicate result mismatch");
+    if (unused_idxv[0] != inserted + 1u)
+        FAIL("add_idx_bulk_maint should return request idx first");
+    for (unsigned i = 0u; i < old_count; i++) {
+        u32 idx = unused_idxv[i + 1u];
+
+        if (idx == 0u || idx > inserted)
+            FAIL("add_idx_bulk_maint expired idx invalid");
+        seen_old[idx] = 1u;
+    }
+    for (unsigned i = 0u; i < old_count; i++) {
+        if (seen_old[old_idxv[i]] == 0u)
+            FAIL("add_idx_bulk_maint missed expired idx");
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, old_idxv[i] - 1u)) != 0u)
+            FAIL("expired key should miss after add_idx_bulk_maint");
+    }
+    if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, live_idx - 1u)) != live_idx)
+        FAIL("kept key should still hit after add_idx_bulk_maint");
+
+    ops->stats(&ft, &stats);
+    if (stats.maint_calls != 1u)
+        FAIL("add_idx_bulk_maint should increment maint_calls once");
+    if (stats.maint_evictions != old_count)
+        FAIL("add_idx_bulk_maint maint_evictions mismatch");
+
+    ops->destroy(&ft);
+    free(keys);
+    free(pool);
+    return 0;
+}
+
+static int
+testv_add_idx_bulk_maint_zero_extra_skips(const struct test_variant_ops *ops)
+{
+    struct ft_table_config cfg = test_cfg();
+    union test_any_table ft;
+    void *pool = test_aligned_calloc(2048u, ops->record_size,
+                                     FT_TABLE_CACHE_LINE_SIZE);
+    void *keys = calloc(2048u, ops->key_size);
+    u32 old_idxv[16];
+    u32 unused_idxv[1];
+    u32 req_idxv[1];
+    u32 live_idx;
+    unsigned old_count;
+    unsigned inserted;
+    unsigned unused_n;
+    struct ft_table_stats stats;
+
+    printf("[T] %s table add_idx_bulk_maint zero-extra skip\n", ops->name);
+    if (pool == NULL || keys == NULL)
+        FAIL("alloc failed");
+    if (ops->init(&ft, pool, 2048u, &cfg) != 0)
+        FAIL("init failed");
+    if (testv_prepare_bucket_for_add_maint(ops, &ft, keys, 2048u, 14000u,
+                                           &live_idx, old_idxv, &old_count,
+                                           &inserted) != 0)
+        FAIL("failed to prepare target bucket");
+
+    req_idxv[0] = inserted + 1u;
+    testv_bind_key(ops, &ft, req_idxv[0], TEST_KEY_AT(keys, ops, live_idx - 1u));
+    unused_idxv[0] = 0u;
+
+    unused_n = TEST_OPS_ADD_IDX_BULK_MAINT(ops, &ft, req_idxv, 1u,
+                                           FT_ADD_IGNORE, UINT64_C(200000),
+                                           UINT64_C(100000), unused_idxv,
+                                           1u, 1u);
+    if (unused_n != 1u)
+        FAIL("zero-extra add_idx_bulk_maint should only return add-unused");
+    if (req_idxv[0] != live_idx)
+        FAIL("zero-extra add_idx_bulk_maint duplicate result mismatch");
+    if (unused_idxv[0] != inserted + 1u)
+        FAIL("zero-extra add_idx_bulk_maint unused idx mismatch");
+    for (unsigned i = 0u; i < old_count; i++) {
+        if (TEST_OPS_FIND(ops, &ft, TEST_KEY_AT(keys, ops, old_idxv[i] - 1u))
+            != old_idxv[i])
+            FAIL("zero-extra add_idx_bulk_maint should skip expiry");
+    }
+
+    ops->stats(&ft, &stats);
+    if (stats.maint_calls != 0u || stats.maint_bucket_checks != 0u
+        || stats.maint_evictions != 0u)
+        FAIL("zero-extra add_idx_bulk_maint should not touch maint stats");
 
     ops->destroy(&ft);
     free(keys);
@@ -3671,6 +3909,10 @@ test_variant_suite(const struct test_variant_ops *ops)
     if (testv_add_idx_bulk_mixed_batch(ops) != 0)
         return 1;
     if (testv_add_idx_bulk_policy(ops) != 0)
+        return 1;
+    if (testv_add_idx_bulk_maint_duplicate_reclaims(ops) != 0)
+        return 1;
+    if (testv_add_idx_bulk_maint_zero_extra_skips(ops) != 0)
         return 1;
     if (testv_timestamp_update(ops) != 0)
         return 1;

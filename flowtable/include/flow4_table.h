@@ -88,6 +88,70 @@ unsigned ft_flow4_table_add_idx_bulk(struct ft_table *ft,
                                      u64 now,
                                      u32 *unused_idxv);
 
+/**
+ * @brief Add entries with inline registered-bucket maintenance.
+ *
+ * Superset of add_idx_bulk.  After the normal add phase, scans the
+ * registered bucket of each result entry for expired entries and removes
+ * them.  Both add-unused and maint-expired indices are packed into
+ * @p unused_idxv.
+ *
+ * Two knobs control the maint cost:
+ *
+ *  - **Scan budget** = @p max_unused - @p nb_keys  (called "α").
+ *    The first @p nb_keys slots of @p unused_idxv are reserved for
+ *    add-phase results; the remaining α slots are the budget for
+ *    maint-expired entries.  When α == 0 (or @p timeout == 0) the
+ *    maint phase is skipped entirely and the function behaves
+ *    identically to add_idx_bulk.
+ *
+ *  - **Bucket occupancy threshold** (@p min_bk_used).
+ *    Before scanning a bucket for expired entries the function counts
+ *    occupied slots.  If the count is less than @p min_bk_used the
+ *    bucket is skipped — avoiding expensive per-entry meta reads on
+ *    sparse buckets.  Pass 0 to disable the filter.
+ *
+ * Tuning guide (with auto-timeout fill-target controller):
+ *
+ *    α and min_bk_used together determine expire capacity per batch.
+ *    Increasing α or decreasing min_bk_used raises the expire rate
+ *    (lowers steady-state fill) but increases per-key cost.
+ *    Recommended starting point for batch=256, target fill ≤ 75%:
+ *
+ *      max_unused  = nb_keys + 64          (α = 64)
+ *      min_bk_used = 10                    (skip buckets < 10/16)
+ *      fill-target = 65%
+ *
+ *    At 2 Mpps / 3% miss this yields ~115 cy/key total (add+maint),
+ *    compared to ~200 cy/key with separate add_idx_bulk + maintain.
+ *
+ * @param ft          Flow table.
+ * @param entry_idxv  [in/out] Entry indices.  On return each element
+ *                    is either the inserted/found index or 0 on failure.
+ * @param nb_keys     Number of entries in @p entry_idxv.
+ * @param policy      Add policy (FT_ADD_IGNORE / FT_ADD_FORCE_EXPIRE).
+ * @param now         Current timestamp (TSC or nanoseconds).
+ * @param timeout     Expiry threshold.  0 disables maint entirely.
+ * @param unused_idxv [out] Buffer for unused + expired entry indices.
+ *                    Must hold at least @p max_unused elements.
+ * @param max_unused  Capacity of @p unused_idxv.  Must be >= @p nb_keys.
+ *                    max_unused - nb_keys is the maint scan budget (α).
+ * @param min_bk_used Bucket occupancy threshold (0–16).  Buckets with
+ *                    fewer occupied slots are skipped.
+ *
+ * @return Total entries written to @p unused_idxv
+ *         (add-unused + maint-expired).
+ */
+unsigned ft_flow4_table_add_idx_bulk_maint(struct ft_table *ft,
+                                           u32 *entry_idxv,
+                                           unsigned nb_keys,
+                                           enum ft_add_policy policy,
+                                           u64 now,
+                                           u64 timeout,
+                                           u32 *unused_idxv,
+                                           unsigned max_unused,
+                                           unsigned min_bk_used);
+
 
 unsigned ft_flow4_table_del_key_bulk(struct ft_table *ft,
                                     const struct flow4_key *keys,

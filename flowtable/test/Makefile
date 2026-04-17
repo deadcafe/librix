@@ -47,14 +47,17 @@ BUILDDIR     ?= $(FTDIR)/build
 BINDIR       ?= $(BUILDDIR)/bin
 TARGET_NAME   = ft_test
 BENCH_NAME    = ft_bench
+SIM_NAME      = ft_sim_cache
 TARGET        = $(BINDIR)/$(TARGET_NAME)
 BENCH         = $(BINDIR)/$(BENCH_NAME)
+SIM           = $(BINDIR)/$(SIM_NAME)
 SRC          = test_flow_table.c
 BENCH_SRC    = bench_flow_table.c
+SIM_SRC      = sim_flow_cache.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
-DEPS         = $(TARGET).d $(BENCH).d
+DEPS         = $(TARGET).d $(BENCH).d $(SIM).d
 
-.PHONY: all help test bench bench-light bench-full clean libft FORCE
+.PHONY: all help test bench bench-light bench-full sim clean libft FORCE
 
 all: test
 
@@ -66,6 +69,7 @@ help:
 	  '  bench        Run the light benchmark set (flow4 only, q=1/8/32/256 @ fill=60%)' \
 	  '  bench-light  Same as bench' \
 	  '  bench-full   Run the full benchmark sweep (flow4/6/u query, maintain, grow)' \
+	  '  sim          Build and run the flow cache simulation' \
 	  '  clean        Remove generated binaries and dependency files' \
 	  '' \
 	  'Useful variables:' \
@@ -80,6 +84,9 @@ $(TARGET): $(SRC) $(LIBFT) | $(BINDIR)
 
 $(BENCH): $(BENCH_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SRC) $(LIBFT)
+
+$(SIM): $(SIM_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(SIM_SRC) $(LIBFT) -lm
 
 # Always enter the ftable sub-make so its own .d files can decide whether
 # header changes require rebuilding the library objects/archive.
@@ -100,6 +107,9 @@ bench-light: $(BENCH)
 	done
 
 bench: bench-light
+
+sim: $(SIM)
+	$(SIM)
 
 bench-full: $(BENCH)
 	@echo "== full ftable bench (query sweep + maintain + grow) =="

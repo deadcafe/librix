@@ -78,6 +78,18 @@ unsigned ft_flow6_table_add_idx_bulk(struct ft_table *ft,
                                      u32 *unused_idxv);
 
 
+/** @copydoc ft_flow4_table_add_idx_bulk_maint */
+unsigned ft_flow6_table_add_idx_bulk_maint(struct ft_table *ft,
+                                           u32 *entry_idxv,
+                                           unsigned nb_keys,
+                                           enum ft_add_policy policy,
+                                           u64 now,
+                                           u64 timeout,
+                                           u32 *unused_idxv,
+                                           unsigned max_unused,
+                                           unsigned min_bk_used);
+
+
 unsigned ft_flow6_table_del_key_bulk(struct ft_table *ft,
                                     const struct flow6_key *keys,
                                     unsigned nb_keys,

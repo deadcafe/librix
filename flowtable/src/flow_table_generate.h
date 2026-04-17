@@ -429,6 +429,29 @@ _FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
                                         (policy), (now), (unused_idxv));      \
 }                                                                             \
                                                                                \
+/* --- add_idx_bulk_maint ----------------------------------------------- */  \
+                                                                               \
+static unsigned                                                               \
+_FTG_API(p, add_idx_bulk_maint)(_FTG_TABLE_T(p) *ft,                          \
+                                u32 *entry_idxv,                               \
+                                unsigned nb_keys,                              \
+                                enum ft_add_policy policy,                     \
+                                u64 now,                                        \
+                                u64 timeout,                                    \
+                                u32 *unused_idxv,                              \
+                                unsigned max_unused,                            \
+                                unsigned min_bk_used)                           \
+{                                                                             \
+    if (unused_idxv == NULL)                                                  \
+        return 0u;                                                            \
+    if (ft == NULL || ft->buckets == NULL || entry_idxv == NULL)              \
+        return 0u;                                                            \
+    return _FTG_FCORE(p, add_idx_bulk_maint_)((ft), (entry_idxv), (nb_keys),  \
+                                              (policy), (now), (timeout),     \
+                                              (unused_idxv), (max_unused),    \
+                                              (min_bk_used));                 \
+}                                                                             \
+                                                                               \
 /* --- del_key_bulk ------------------------------------------------------ */ \
                                                                                \
 static unsigned                                                               \
@@ -534,22 +557,22 @@ _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
             scanned++;                                                        \
                                                                                \
             if (scanned - hashed >= _GROW_ENTRY_AHEAD + _GROW_BATCH) {        \
-                for (unsigned _b = 0u; _b < _GROW_BATCH; _b++) {              \
-                    unsigned _ri = hashed & _GROW_RING_MASK;                  \
-                    u32 _cur = ring[_ri].entry->meta.cur_hash;                \
-                    ring[_ri].h.val32[0] = _cur;                              \
-                    ring[_ri].h.val32[1] = ring[_ri].old_fp ^ _cur;           \
+                for (unsigned b = 0u; b < _GROW_BATCH; b++) {                 \
+                    unsigned ri = hashed & _GROW_RING_MASK;                   \
+                    u32 cur = ring[ri].entry->meta.cur_hash;                  \
+                    ring[ri].h.val32[0] = cur;                                \
+                    ring[ri].h.val32[1] = ring[ri].old_fp ^ cur;              \
                     rix_hash_prefetch_bucket_of(                              \
-                        &new_buckets[_cur & new_mask]);                        \
+                        &new_buckets[cur & new_mask]);                        \
                     hashed++;                                                 \
                 }                                                             \
                 if (hashed - inserted >= _GROW_INSERT_AHEAD + _GROW_BATCH) {  \
-                    for (unsigned _b = 0u; _b < _GROW_BATCH; _b++) {          \
-                        unsigned _ri = inserted & _GROW_RING_MASK;            \
+                    for (unsigned b = 0u; b < _GROW_BATCH; b++) {             \
+                        unsigned ri = inserted & _GROW_RING_MASK;             \
                         if (RIX_UNLIKELY(                                     \
                             _FTG_INT(p, rehash_insert_hashed_)(               \
                                 &new_head, new_buckets, ft,                   \
-                                ring[_ri].entry, ring[_ri].h) != 0))          \
+                                ring[ri].entry, ring[ri].h) != 0))            \
                             goto _migrate_fail;                               \
                         inserted++;                                           \
                     }                                                         \
@@ -559,20 +582,20 @@ _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
     }                                                                         \
                                                                                \
     while (hashed < scanned) {                                                \
-        unsigned _ri = hashed & _GROW_RING_MASK;                              \
-        u32 _cur = ring[_ri].entry->meta.cur_hash;                            \
-        ring[_ri].h.val32[0] = _cur;                                          \
-        ring[_ri].h.val32[1] = ring[_ri].old_fp ^ _cur;                       \
+        unsigned ri = hashed & _GROW_RING_MASK;                               \
+        u32 cur = ring[ri].entry->meta.cur_hash;                              \
+        ring[ri].h.val32[0] = cur;                                            \
+        ring[ri].h.val32[1] = ring[ri].old_fp ^ cur;                          \
         rix_hash_prefetch_bucket_of(                                          \
-            &new_buckets[_cur & new_mask]);                                   \
+            &new_buckets[cur & new_mask]);                                    \
         hashed++;                                                             \
     }                                                                         \
     while (inserted < hashed) {                                               \
-        unsigned _ri = inserted & _GROW_RING_MASK;                            \
+        unsigned ri = inserted & _GROW_RING_MASK;                             \
         if (RIX_UNLIKELY(                                                     \
             _FTG_INT(p, rehash_insert_hashed_)(                               \
                 &new_head, new_buckets, ft,                                   \
-                ring[_ri].entry, ring[_ri].h) != 0))                          \
+                ring[ri].entry, ring[ri].h) != 0))                            \
             goto _migrate_fail;                                               \
         inserted++;                                                           \
     }                                                                         \
@@ -615,6 +638,7 @@ const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
     /* hot-path */                                                             \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
     .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \
+    .add_idx_bulk_maint = _FT_OPS_FNAME(prefix, add_idx_bulk_maint),         \
     .del_key_bulk    = _FT_OPS_FNAME(prefix, del_key_bulk),                    \
     .del_idx_bulk    = _FT_OPS_FNAME(prefix, del_idx_bulk),             \
 }

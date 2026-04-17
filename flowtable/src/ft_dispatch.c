@@ -235,9 +235,9 @@ ft_##prefix##_table_find(struct ft_table *ft,                                  \
                          const struct prefix##_key *key,                       \
                          u64 now)                                              \
 {                                                                              \
-    struct ft_table_result _r = { .entry_idx = 0u };                           \
-    active_ptr->find_bulk(ft, key, 1u, now, &_r);                              \
-    return _r.entry_idx;                                                       \
+    struct ft_table_result result = { .entry_idx = 0u };                       \
+    active_ptr->find_bulk(ft, key, 1u, now, &result);                          \
+    return result.entry_idx;                                                   \
 }                                                                              \
                                                                                \
 void                                                                           \
@@ -255,9 +255,9 @@ ft_##prefix##_table_add_idx(struct ft_table *ft,                               \
                             u32 entry_idx,                                     \
                             u64 now)                                           \
 {                                                                              \
-    u32 _unused;                                                               \
+    u32 unused;                                                                \
     active_ptr->add_idx_bulk(ft, &entry_idx, 1u, FT_ADD_IGNORE, now,           \
-                             &_unused);                                        \
+                             &unused);                                         \
     return entry_idx;                                                          \
 }                                                                              \
                                                                                \
@@ -271,6 +271,22 @@ ft_##prefix##_table_add_idx_bulk(struct ft_table *ft,                          \
 {                                                                              \
     return active_ptr->add_idx_bulk(ft, entry_idxv, nb_keys, policy,          \
                                     now, unused_idxv);                        \
+}                                                                              \
+                                                                               \
+unsigned                                                                       \
+ft_##prefix##_table_add_idx_bulk_maint(struct ft_table *ft,                    \
+                                       u32 *entry_idxv,                        \
+                                       unsigned nb_keys,                       \
+                                       enum ft_add_policy policy,              \
+                                       u64 now,                                \
+                                       u64 timeout,                            \
+                                       u32 *unused_idxv,                       \
+                                       unsigned max_unused,                    \
+                                       unsigned min_bk_used)                   \
+{                                                                              \
+    return active_ptr->add_idx_bulk_maint(ft, entry_idxv, nb_keys, policy,    \
+                                          now, timeout, unused_idxv,           \
+                                          max_unused, min_bk_used);            \
 }                                                                              \
                                                                                \
 unsigned                                                                       \
@@ -492,6 +508,40 @@ ft_table_add_idx_bulk(struct ft_table *ft,
     case FT_TABLE_VARIANT_FLOWU:
         return ft_flowu_table_add_idx_bulk(ft, entry_idxv, nb_keys,
                                            policy, now, unused_idxv);
+    default:
+        return 0u;
+    }
+}
+
+unsigned
+ft_table_add_idx_bulk_maint(struct ft_table *ft,
+                            u32 *entry_idxv,
+                            unsigned nb_keys,
+                            enum ft_add_policy policy,
+                            u64 now,
+                            u64 timeout,
+                            u32 *unused_idxv,
+                            unsigned max_unused,
+                            unsigned min_bk_used)
+{
+    if (ft == NULL)
+        return 0u;
+    switch (ft->variant) {
+    case FT_TABLE_VARIANT_FLOW4:
+        return ft_flow4_table_add_idx_bulk_maint(ft, entry_idxv, nb_keys,
+                                                  policy, now, timeout,
+                                                  unused_idxv, max_unused,
+                                                  min_bk_used);
+    case FT_TABLE_VARIANT_FLOW6:
+        return ft_flow6_table_add_idx_bulk_maint(ft, entry_idxv, nb_keys,
+                                                  policy, now, timeout,
+                                                  unused_idxv, max_unused,
+                                                  min_bk_used);
+    case FT_TABLE_VARIANT_FLOWU:
+        return ft_flowu_table_add_idx_bulk_maint(ft, entry_idxv, nb_keys,
+                                                  policy, now, timeout,
+                                                  unused_idxv, max_unused,
+                                                  min_bk_used);
     default:
         return 0u;
     }

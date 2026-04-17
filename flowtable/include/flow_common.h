@@ -311,6 +311,15 @@ unsigned ft_table_add_idx_bulk(struct ft_table *ft,
                                enum ft_add_policy policy,
                                u64 now,
                                u32 *unused_idxv);
+unsigned ft_table_add_idx_bulk_maint(struct ft_table *ft,
+                                     u32 *entry_idxv,
+                                     unsigned nb_keys,
+                                     enum ft_add_policy policy,
+                                     u64 now,
+                                     u64 timeout,
+                                     u32 *unused_idxv,
+                                     unsigned max_unused,
+                                     unsigned min_bk_used);
 u32 ft_table_del_idx(struct ft_table *ft, u32 entry_idx);
 unsigned ft_table_del_idx_bulk(struct ft_table *ft,
                                const u32 *entry_idxv,

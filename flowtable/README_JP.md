@@ -98,6 +98,74 @@ timestamp が 0 の entry は permanent として扱う。
   - `maintain` / `maintain_idx_bulk` では expire しない
   - `find` や duplicate `add` でも timestamp 0 を保つ
 
+### 2.2 add と maintenance の統合
+
+`add_idx_bulk_maint(...)` は `add_idx_bulk` の上位互換である。通常の add
+フェーズの後、各結果 entry の登録先 bucket を走査して expired entry を除去する。
+これにより、別途 `maintain_idx_bulk` を呼ぶ必要がなくなり、meta-prefetch や
+bucket 解決のステージも省略できる。
+
+```c
+unsigned n = ft_flow4_table_add_idx_bulk_maint(
+    &ft, entry_idxv, nb_keys, policy,
+    now, timeout,
+    unused_idxv, max_unused, min_bk_used);
+```
+
+maint フェーズのコストを制御する 2 つのパラメータ:
+
+- **スキャン予算 (α)** = `max_unused - nb_keys`
+  `unused_idxv` の先頭 `nb_keys` スロットは add フェーズの結果
+  （duplicate で返却される index）用に予約される。残りの α スロットが
+  maint-expired entry の回収予算となる。α == 0 または `timeout` == 0 の場合、
+  maint フェーズは完全にスキップされ、`add_idx_bulk` と同一動作になる。
+
+- **Bucket 使用率閾値** (`min_bk_used`, 範囲 0–16)
+  bucket を expired entry 走査する前に、占有スロット数をカウントする。
+  カウントが `min_bk_used` 未満の場合、その bucket はスキップされる。
+  これにより、sparse な bucket での高コストな per-entry meta read を回避できる。
+  0 を渡すとフィルタを無効化する。
+
+**チューニング指針**（fill-target auto-timeout 制御との併用）:
+
+α と `min_bk_used` の組み合わせでバッチあたりの expire 能力が決まる。
+α を増やすか `min_bk_used` を下げると expire rate が上がり（定常 fill rate
+が低下する）、per-key コストが増加する。
+
+`batch=256`、目標 fill ≤ 75% での推奨初期値:
+
+| パラメータ     | 値 | 備考                         |
+|---------------|------:|------------------------------|
+| `max_unused`  | `nb_keys + 64` | α = 64              |
+| `min_bk_used` |    10 | 10/16 未満の bucket をスキップ |
+| fill-target   |   65% | auto-timeout 制御器          |
+
+2 Mpps / 3% miss rate の条件で、add + maint 合計 ~115 cy/key となる。
+分離呼び出し（`add_idx_bulk` + `maintain_idx_bulk`）の ~200 cy/key と比較して
+約 42% の削減である。
+
+例: auto-timeout と統合 maint を用いた flow cache
+
+```c
+/* バッチごとに fill rate から α を算出 */
+unsigned alpha = 0;
+if (fill_ratio > fill_target) {
+    double excess = (fill_ratio - fill_target) / (1.0 - fill_target);
+    alpha = (unsigned)(64.0 * excess);   /* 最大 α = 64 */
+}
+unsigned max_unused = nb_keys + alpha;
+
+unsigned n = ft_flow4_table_add_idx_bulk_maint(
+    &ft, entry_idxv, nb_keys, FT_ADD_FORCE_EXPIRE,
+    now_tsc, timeout_tsc,
+    unused_idxv, max_unused,
+    10u /* min_bk_used */);
+
+/* unused_idxv[0..n-1] に add-unused と maint-expired の両方が含まれる */
+for (unsigned i = 0; i < n; i++)
+    reclaim(unused_idxv[i]);
+```
+
 ## 3. ストレージモデル
 
 record array は caller が所有する。table は record を移動しない。

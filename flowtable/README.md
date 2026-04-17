@@ -87,6 +87,76 @@ Both APIs return expired entry indices to the caller. Reclaiming those
 indices back to a free list is caller responsibility. Expire time is chosen
 per API call and is not taken from table state.
 
+### 2.2 Integrated Add-with-Maintenance
+
+`add_idx_bulk_maint(...)` is a superset of `add_idx_bulk`. After the
+normal add phase it scans the registered bucket of each result entry for
+expired entries and removes them in a single call. This eliminates the
+separate `maintain_idx_bulk` call and the associated meta-prefetch /
+bucket-resolution stages.
+
+```c
+unsigned n = ft_flow4_table_add_idx_bulk_maint(
+    &ft, entry_idxv, nb_keys, policy,
+    now, timeout,
+    unused_idxv, max_unused, min_bk_used);
+```
+
+Two knobs control the cost of the maint phase:
+
+- **Scan budget (α)** = `max_unused - nb_keys`.
+  The first `nb_keys` slots of `unused_idxv` are reserved for add-phase
+  results (duplicates returned to the caller). The remaining α slots are
+  the budget for maint-expired entries. When α == 0 (or `timeout` == 0)
+  the maint phase is skipped entirely and the function behaves identically
+  to `add_idx_bulk`.
+
+- **Bucket occupancy threshold** (`min_bk_used`, range 0–16).
+  Before scanning a bucket for expired entries the function counts its
+  occupied slots. If the count is less than `min_bk_used` the bucket is
+  skipped — avoiding expensive per-entry meta reads on sparse buckets.
+  Pass 0 to disable the filter.
+
+**Tuning guide** (with a fill-target auto-timeout controller):
+
+α and `min_bk_used` together determine the expire capacity per batch.
+Increasing α or decreasing `min_bk_used` raises the expire rate (lowers
+the steady-state fill ratio) but increases per-key cost.
+
+Recommended starting point for `batch=256`, target fill ≤ 75%:
+
+| Parameter     | Value | Notes                        |
+|---------------|------:|------------------------------|
+| `max_unused`  | `nb_keys + 64` | α = 64              |
+| `min_bk_used` |    10 | skip buckets < 10/16 full    |
+| fill-target   |   65% | auto-timeout controller      |
+
+At 2 Mpps / 3% miss rate this yields ~115 cy/key total (add + maint
+combined), compared to ~200 cy/key with separate `add_idx_bulk` +
+`maintain_idx_bulk`.
+
+Example: flow cache with auto-timeout and integrated maint
+
+```c
+/* one-time: compute α from fill ratio */
+unsigned alpha = 0;
+if (fill_ratio > fill_target) {
+    double excess = (fill_ratio - fill_target) / (1.0 - fill_target);
+    alpha = (unsigned)(64.0 * excess);   /* max α = 64 */
+}
+unsigned max_unused = nb_keys + alpha;
+
+unsigned n = ft_flow4_table_add_idx_bulk_maint(
+    &ft, entry_idxv, nb_keys, FT_ADD_FORCE_EXPIRE,
+    now_tsc, timeout_tsc,
+    unused_idxv, max_unused,
+    10u /* min_bk_used */);
+
+/* unused_idxv[0..n-1] contains both add-unused and maint-expired */
+for (unsigned i = 0; i < n; i++)
+    reclaim(unused_idxv[i]);
+```
+
 Permanent entries are supported by setting the stored timestamp to zero.
 
 - `ft_flowX_table_set_permanent_idx(ft, idx)`
