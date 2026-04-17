@@ -50,9 +50,18 @@ enum {
     SIM_DEFAULT_MAINT_BUDGET      = 32u,
     SIM_MAX_BATCH           = 4096u,
     SIM_ALIGN               = 64u,
+
+    /* --ddos-burst defaults */
+    SIM_DEFAULT_LEGIT_POOL        = 600000u,
+    SIM_DEFAULT_ATTACK_PCT        = 50u,
+    SIM_DEFAULT_BURST_ON          = 5u,
+    SIM_DEFAULT_BURST_OFF         = 15u,
+    SIM_DEFAULT_DOS_THRESHOLD     = 15u,
+    SIM_DEFAULT_NORMAL_THRESHOLD  = 5u,
 };
 
-#define SIM_DEFAULT_TIMEOUT_SEC  10.0
+#define SIM_DEFAULT_TIMEOUT_SEC      10.0
+#define SIM_DEFAULT_DOS_TIMEOUT_SEC   2.0
 
 /*===========================================================================
  * Miss-rate variation profiles
@@ -63,6 +72,15 @@ enum sim_miss_vary {
     SIM_MISS_STEP,       /* alternate low/high every 10s */
     SIM_MISS_SINE,       /* sine wave, period 20s */
     SIM_MISS_BURST,      /* baseline + 2s bursts every 8s */
+};
+
+/*===========================================================================
+ * DDoS receiver mode (--ddos-burst)
+ *===========================================================================*/
+
+enum sim_dos_state {
+    SIM_DOS_NORMAL = 0,
+    SIM_DOS_ACTIVE = 1,
 };
 
 /*===========================================================================
@@ -86,6 +104,16 @@ struct sim_config {
     unsigned min_bucket_occupancy;    /* inline-maint bucket occupancy gate */
     unsigned fill_target_pct;    /* 0 = disabled (fixed TO), 1..100 = auto */
     enum sim_miss_vary miss_vary;
+
+    /* --ddos-burst */
+    int      ddos_burst;
+    unsigned legit_pool_size;
+    unsigned attack_pct;           /* attack flow % of batch during burst */
+    unsigned burst_on_sec;
+    unsigned burst_off_sec;
+    unsigned dos_threshold_pct;    /* miss rate → DoS mode */
+    unsigned normal_threshold_pct; /* miss rate → Normal mode */
+    double   dos_timeout_sec;
 };
 
 /*===========================================================================
@@ -95,7 +123,6 @@ struct sim_config {
 struct sim_record {
     struct flow4_entry entry;
     u32 active_pos;
-    RIX_SLIST_ENTRY(sim_record) free_link;
     unsigned char pad[32];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
@@ -322,6 +349,7 @@ struct sim_interval_stats {
     u64 force_expired;
     u64 add_cycles;
     u64 maint_cycles;
+    u64 attack_adds;    /* ddos-burst: attack flow insertions */
 };
 
 struct sim_total_stats {
@@ -334,6 +362,47 @@ struct sim_total_stats {
     u64 force_expired;
     u64 add_cycles;
     u64 maint_cycles;
+    u64 attack_adds;
+};
+
+/*===========================================================================
+ * Generator / receiver split
+ *===========================================================================*/
+
+struct sim_batch {
+    unsigned total_keys;
+    unsigned legit_prefix_len;
+    unsigned miss_keys;
+    int is_burst;
+};
+
+struct sim_generator {
+    const struct sim_config *cfg;
+    struct flow4_key *keys;
+    struct flow4_key *legit_keys;
+    u32 next_key_id;
+    u32 next_attack_key_id;
+    unsigned miss_count;
+    unsigned hit_count;
+};
+
+struct sim_receiver {
+    struct ft_table ft;
+    struct ft_record_allocator alloc;
+    struct sim_record *records;
+    struct active_set active;
+    void *buckets;
+    size_t bucket_size;
+    unsigned max_entries;
+    enum ft_add_policy add_policy;
+
+    u32 *new_idxv;
+    u32 *orig_idxv;
+    u32 *unused_idxv;
+    u32 *expired_idxv;
+    u32 *hit_idxv;
+    u32 *work_idxv;
+    unsigned nb_work;
 };
 
 /*===========================================================================
@@ -367,15 +436,24 @@ print_usage(FILE *out, const char *prog)
         "  --no-hugepage       disable hugepages\n"
         "  --help              show this help\n"
         "\n"
-        "Per-batch flow:\n"
-        "  1. add_idx_bulk(IGNORE) — lookup + insert in one call\n"
-        "  2. maintain_idx_bulk on result indices — on-cache expiry\n"
-        "     (min_bk_entries=8: only expire in busy buckets)\n",
+        "DDoS burst simulation (--ddos-burst):\n"
+        "  --ddos-burst        enable DDoS burst mode       [off]\n"
+        "  --legit-pool N      legitimate flow pool size     [%u]\n"
+        "  --attack-pct N      attack %% of batch in burst   [%u]\n"
+        "  --burst-on N        burst duration (seconds)      [%u]\n"
+        "  --burst-off N       gap between bursts (seconds)  [%u]\n"
+        "  --dos-threshold N   miss %% to enter DoS mode     [%u]\n"
+        "  --normal-threshold N miss %% to exit DoS mode     [%u]\n"
+        "  --dos-timeout SEC   timeout in DoS mode           [%.1f]\n",
         prog,
         SIM_DEFAULT_PPS, SIM_DEFAULT_BATCH, SIM_DEFAULT_POOL_SIZE,
         SIM_DEFAULT_MISS_PCT, SIM_DEFAULT_TIMEOUT_SEC,
         SIM_DEFAULT_DURATION, SIM_DEFAULT_MAINT_MAX_EXPIRED,
-        SIM_DEFAULT_MAINT_BUDGET);
+        SIM_DEFAULT_MAINT_BUDGET,
+        SIM_DEFAULT_LEGIT_POOL, SIM_DEFAULT_ATTACK_PCT,
+        SIM_DEFAULT_BURST_ON, SIM_DEFAULT_BURST_OFF,
+        SIM_DEFAULT_DOS_THRESHOLD, SIM_DEFAULT_NORMAL_THRESHOLD,
+        SIM_DEFAULT_DOS_TIMEOUT_SEC);
 }
 
 static unsigned
@@ -473,6 +551,14 @@ parse_options(int argc, char **argv, struct sim_config *cfg)
         { "arch",            required_argument, NULL, 'a' },
         { "pin-core",        required_argument, NULL, 'p' },
         { "no-hugepage",     no_argument,       NULL, 'H' },
+        { "ddos-burst",      no_argument,       NULL, 'D' },
+        { "legit-pool",      required_argument, NULL, 'L' },
+        { "attack-pct",      required_argument, NULL, 'A' },
+        { "burst-on",        required_argument, NULL, 'o' },
+        { "burst-off",       required_argument, NULL, 'O' },
+        { "dos-threshold",   required_argument, NULL, 'x' },
+        { "normal-threshold", required_argument, NULL, 'y' },
+        { "dos-timeout",     required_argument, NULL, 'z' },
         { "help",            no_argument,       NULL, 'h' },
         { NULL,              0,                 NULL,  0  }
     };
@@ -495,7 +581,17 @@ parse_options(int argc, char **argv, struct sim_config *cfg)
     cfg->fill_target_pct  = 0;
     cfg->miss_vary        = SIM_MISS_FIXED;
 
-    while ((opt = getopt_long(argc, argv, "P:b:n:m:V:t:d:s:k:T:WFa:p:Hh",
+    cfg->ddos_burst           = 0;
+    cfg->legit_pool_size      = SIM_DEFAULT_LEGIT_POOL;
+    cfg->attack_pct           = SIM_DEFAULT_ATTACK_PCT;
+    cfg->burst_on_sec         = SIM_DEFAULT_BURST_ON;
+    cfg->burst_off_sec        = SIM_DEFAULT_BURST_OFF;
+    cfg->dos_threshold_pct    = SIM_DEFAULT_DOS_THRESHOLD;
+    cfg->normal_threshold_pct = SIM_DEFAULT_NORMAL_THRESHOLD;
+    cfg->dos_timeout_sec      = SIM_DEFAULT_DOS_TIMEOUT_SEC;
+
+    while ((opt = getopt_long(argc, argv,
+                              "P:b:n:m:V:t:d:s:k:T:WFa:p:HDL:A:o:O:x:y:z:h",
                               long_opts, NULL)) != -1) {
         switch (opt) {
         case 'P': cfg->pps = (unsigned)strtoul(optarg, NULL, 10);      break;
@@ -538,6 +634,26 @@ parse_options(int argc, char **argv, struct sim_config *cfg)
         case 'a': cfg->arch_enable = parse_arch_flag(optarg);              break;
         case 'p': cfg->pin_core = (int)strtol(optarg, NULL, 10);          break;
         case 'H': cfg->use_hugepage = 0;                                  break;
+        case 'D': cfg->ddos_burst = 1;                                    break;
+        case 'L': cfg->legit_pool_size = (unsigned)strtoul(optarg, NULL, 10); break;
+        case 'A':
+            cfg->attack_pct = (unsigned)strtoul(optarg, NULL, 10);
+            if (cfg->attack_pct > 100u) {
+                fprintf(stderr, "attack-pct must be 0..100\n");
+                return -1;
+            }
+            break;
+        case 'o': cfg->burst_on_sec  = (unsigned)strtoul(optarg, NULL, 10); break;
+        case 'O': cfg->burst_off_sec = (unsigned)strtoul(optarg, NULL, 10); break;
+        case 'x': cfg->dos_threshold_pct = (unsigned)strtoul(optarg, NULL, 10); break;
+        case 'y': cfg->normal_threshold_pct = (unsigned)strtoul(optarg, NULL, 10); break;
+        case 'z':
+            cfg->dos_timeout_sec = strtod(optarg, NULL);
+            if (cfg->dos_timeout_sec <= 0.0) {
+                fprintf(stderr, "dos-timeout must be positive\n");
+                return -1;
+            }
+            break;
         case 'h': print_usage(stdout, argv[0]); exit(0);
         default:  print_usage(stderr, argv[0]); return -1;
         }
@@ -725,6 +841,336 @@ timeout_ctrl_update(struct sim_timeout_ctrl *tc, double hit_rate,
     return tc->ema_timeout;
 }
 
+static void
+sim_total_accumulate(struct sim_total_stats *total,
+                     const struct sim_interval_stats *intv)
+{
+    total->finds         += intv->finds;
+    total->hits          += intv->hits;
+    total->adds          += intv->adds;
+    total->add_skipped   += intv->add_skipped;
+    total->maint_expired += intv->maint_expired;
+    total->force_expired += intv->force_expired;
+    total->add_cycles    += intv->add_cycles;
+    total->maint_cycles  += intv->maint_cycles;
+    total->attack_adds   += intv->attack_adds;
+}
+
+static int
+sim_generator_init(struct sim_generator *gen, const struct sim_config *cfg)
+{
+    memset(gen, 0, sizeof(*gen));
+    gen->cfg = cfg;
+    gen->miss_count = cfg->batch_size * cfg->miss_pct / 100u;
+    gen->hit_count = cfg->batch_size - gen->miss_count;
+    gen->next_key_id = 1u;
+    gen->keys = calloc(cfg->batch_size, sizeof(*gen->keys));
+    if (gen->keys == NULL)
+        return -1;
+    if (cfg->ddos_burst) {
+        gen->legit_keys = calloc(cfg->legit_pool_size, sizeof(*gen->legit_keys));
+        if (gen->legit_keys == NULL)
+            return -1;
+        for (unsigned i = 0u; i < cfg->legit_pool_size; i++)
+            gen->legit_keys[i] = sim_make_key(i + 1u);
+        gen->next_attack_key_id = cfg->legit_pool_size + 1u;
+    }
+    return 0;
+}
+
+static void
+sim_generator_destroy(struct sim_generator *gen)
+{
+    free(gen->legit_keys);
+    free(gen->keys);
+    memset(gen, 0, sizeof(*gen));
+}
+
+static void
+sim_generator_prepare_batch(struct sim_generator *gen, double sim_sec,
+                            const struct sim_receiver *rx,
+                            struct sim_batch *batch)
+{
+    const struct sim_config *cfg = gen->cfg;
+
+    memset(batch, 0, sizeof(*batch));
+    if (cfg->ddos_burst) {
+        unsigned burst_period = cfg->burst_on_sec + cfg->burst_off_sec;
+        unsigned phase = burst_period > 0u
+                       ? (unsigned)sim_sec % burst_period : 0u;
+        unsigned attack_count;
+
+        batch->is_burst = (phase >= cfg->burst_off_sec);
+        attack_count = batch->is_burst
+                     ? (cfg->batch_size * cfg->attack_pct / 100u) : 0u;
+        batch->legit_prefix_len = cfg->batch_size - attack_count;
+        batch->total_keys = cfg->batch_size;
+
+        for (unsigned i = 0u; i < batch->legit_prefix_len; i++) {
+            unsigned pidx = (unsigned)(rng_next() % cfg->legit_pool_size);
+
+            gen->keys[i] = gen->legit_keys[pidx];
+        }
+        for (unsigned i = 0u; i < attack_count; i++)
+            gen->keys[batch->legit_prefix_len + i] =
+                sim_make_key(gen->next_attack_key_id + i);
+        gen->next_attack_key_id += attack_count;
+        return;
+    }
+
+    if (cfg->miss_vary != SIM_MISS_FIXED) {
+        unsigned cur = sim_current_miss_pct(cfg->miss_pct,
+                                            cfg->miss_vary, sim_sec);
+
+        gen->miss_count = cfg->batch_size * cur / 100u;
+        gen->hit_count  = cfg->batch_size - gen->miss_count;
+    }
+
+    batch->legit_prefix_len = 0u;
+    batch->miss_keys = (rx->active.count >= gen->hit_count)
+                     ? cfg->batch_size - gen->hit_count
+                     : cfg->batch_size - rx->active.count;
+    batch->total_keys = cfg->batch_size - batch->miss_keys + batch->miss_keys;
+
+    {
+        unsigned actual_hits = cfg->batch_size - batch->miss_keys;
+
+        for (unsigned i = 0u; i < actual_hits; i++) {
+            unsigned pos = (unsigned)(rng_next() % rx->active.count);
+            u32 idx = rx->active.indices[pos];
+
+            gen->keys[i] = rx->records[idx - 1u].entry.key;
+        }
+        for (unsigned i = 0u; i < batch->miss_keys; i++)
+            gen->keys[actual_hits + i] = sim_make_key(gen->next_key_id + i);
+        batch->total_keys = actual_hits + batch->miss_keys;
+        batch->legit_prefix_len = batch->total_keys;
+    }
+}
+
+static void
+sim_generator_advance(struct sim_generator *gen, const struct sim_batch *batch)
+{
+    if (!gen->cfg->ddos_burst)
+        gen->next_key_id += batch->miss_keys;
+}
+
+static int
+sim_receiver_init(struct sim_receiver *rx, const struct sim_config *cfg,
+                  unsigned max_entries)
+{
+    struct ft_table_config ft_cfg;
+
+    memset(rx, 0, sizeof(*rx));
+    rx->max_entries = max_entries;
+    rx->add_policy = cfg->use_force_expire
+                   ? FT_ADD_IGNORE_FORCE_EXPIRE : FT_ADD_IGNORE;
+
+    rx->bucket_size = ft_table_bucket_size(max_entries);
+    rx->buckets = sim_alloc_buckets(rx->bucket_size);
+    if (rx->buckets == NULL)
+        return -1;
+
+    rx->records = sim_alloc_zero(max_entries, sizeof(*rx->records));
+    if (FT_RECORD_ALLOCATOR_INIT_TYPED(&rx->alloc, rx->records, max_entries,
+                                       struct sim_record) != 0)
+        return -1;
+    for (unsigned i = 0u; i < max_entries; i++)
+        rx->records[i].active_pos = UINT32_MAX;
+
+    memset(&ft_cfg, 0, sizeof(ft_cfg));
+    if (FT_FLOW4_TABLE_INIT_TYPED(&rx->ft, rx->records, max_entries,
+                                  struct sim_record, entry,
+                                  rx->buckets, rx->bucket_size, &ft_cfg) != 0)
+        return -1;
+    if (active_init(&rx->active, max_entries) != 0)
+        return -1;
+
+    rx->new_idxv = calloc(cfg->batch_size, sizeof(*rx->new_idxv));
+    rx->orig_idxv = calloc(cfg->batch_size, sizeof(*rx->orig_idxv));
+    rx->hit_idxv = calloc(cfg->batch_size, sizeof(*rx->hit_idxv));
+    rx->unused_idxv = calloc(cfg->batch_size + sim_unused_extra_capacity(cfg),
+                             sizeof(*rx->unused_idxv));
+    rx->expired_idxv = calloc(cfg->maint_max_expired, sizeof(*rx->expired_idxv));
+    rx->work_idxv = calloc(cfg->batch_size, sizeof(*rx->work_idxv));
+    if (!rx->new_idxv || !rx->orig_idxv || !rx->hit_idxv
+        || !rx->unused_idxv || !rx->expired_idxv || !rx->work_idxv)
+        return -1;
+
+    return 0;
+}
+
+static void
+sim_receiver_destroy(struct sim_receiver *rx)
+{
+    for (unsigned i = 0u; i < rx->nb_work; i++) {
+        (void)FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(
+            &rx->alloc, struct sim_record, rx->work_idxv[i]);
+    }
+    free(rx->work_idxv);
+    free(rx->expired_idxv);
+    free(rx->unused_idxv);
+    free(rx->hit_idxv);
+    free(rx->orig_idxv);
+    free(rx->new_idxv);
+    active_destroy(&rx->active);
+    if (rx->ft.buckets != NULL) {
+        void *saved_bk = rx->ft.buckets;
+        size_t saved_bk_size = (size_t)rx->ft.nb_bk * FT_TABLE_BUCKET_SIZE;
+
+        ft_flow4_table_destroy(&rx->ft);
+        sim_free_buckets(saved_bk, saved_bk_size);
+    } else if (rx->buckets != NULL) {
+        sim_free_buckets(rx->buckets, rx->bucket_size);
+    }
+    if (rx->records != NULL)
+        sim_free_zero(rx->records, rx->max_entries, sizeof(*rx->records));
+    ft_record_allocator_destroy(&rx->alloc);
+    memset(rx, 0, sizeof(*rx));
+}
+
+static void
+sim_receiver_refill_work(struct sim_receiver *rx, unsigned batch_size)
+{
+    while (rx->nb_work < batch_size) {
+        u32 eidx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(
+            &rx->alloc, struct sim_record);
+
+        if (!RIX_IDX_IS_VALID(eidx, rx->alloc.capacity))
+            break;
+        rx->work_idxv[rx->nb_work++] = eidx;
+    }
+}
+
+static unsigned
+sim_receiver_stage_batch(struct sim_receiver *rx, const struct flow4_key *keys,
+                         unsigned batch_total)
+{
+    unsigned staged = 0u;
+
+    for (unsigned i = 0u; i < rx->nb_work && staged < batch_total; i++) {
+        struct flow4_entry *entry =
+            ft_flow4_table_entry_ptr(&rx->ft, rx->work_idxv[i]);
+
+        if (entry == NULL)
+            continue;
+        entry->key = keys[staged];
+        rx->orig_idxv[staged] = rx->work_idxv[i];
+        rx->new_idxv[staged] = rx->work_idxv[i];
+        staged++;
+    }
+    return staged;
+}
+
+static void
+sim_receiver_process_batch(struct sim_receiver *rx,
+                           const struct sim_config *cfg,
+                           const struct sim_batch *batch,
+                           u64 sim_time_ns,
+                           u64 timeout_ns,
+                           int auto_timeout,
+                           const struct sim_timeout_ctrl *to_ctrl,
+                           struct sim_interval_stats *intv,
+                           const struct flow4_key *keys)
+{
+    unsigned to_add = sim_receiver_stage_batch(rx, keys, batch->total_keys);
+    unsigned nb_valid = 0u;
+
+    if (to_add < batch->total_keys)
+        intv->add_skipped += batch->total_keys - to_add;
+
+    if (to_add > 0u) {
+        unsigned n_unused;
+        u64 t0, t1;
+
+        t0 = sim_rdtsc();
+        if (cfg->inline_maint) {
+            unsigned inline_budget;
+            unsigned unused_capacity = to_add;
+
+            inline_budget = sim_inline_maint_unused_budget(
+                cfg, rx->active.count, rx->max_entries, auto_timeout, to_ctrl);
+            unused_capacity += inline_budget;
+            n_unused = ft_flow4_table_add_idx_bulk_maint(
+                &rx->ft, rx->new_idxv, to_add, rx->add_policy,
+                sim_time_ns, timeout_ns,
+                rx->unused_idxv, unused_capacity,
+                cfg->min_bucket_occupancy);
+        } else {
+            n_unused = ft_flow4_table_add_idx_bulk(
+                &rx->ft, rx->new_idxv, to_add, rx->add_policy,
+                sim_time_ns, rx->unused_idxv);
+        }
+        t1 = sim_rdtsc();
+        intv->add_cycles += t1 - t0;
+        intv->finds += to_add;
+
+        for (unsigned i = 0u; i < to_add; i++) {
+            u32 ridx = rx->new_idxv[i];
+
+            if (ridx == 0u)
+                continue;
+            rx->hit_idxv[nb_valid++] = ridx;
+
+            if (ridx == rx->orig_idxv[i]) {
+                active_add(&rx->active, ridx, rx->records);
+                intv->adds++;
+                if (cfg->ddos_burst && i >= batch->legit_prefix_len)
+                    intv->attack_adds++;
+            } else {
+                intv->hits++;
+            }
+        }
+
+        rx->nb_work = 0u;
+        for (unsigned i = 0u; i < n_unused; i++) {
+            u32 uidx = rx->unused_idxv[i];
+
+            if (uidx == 0u)
+                continue;
+            if (rx->records[uidx - 1u].active_pos != UINT32_MAX) {
+                active_remove(&rx->active, uidx, rx->records);
+                if (cfg->inline_maint)
+                    intv->maint_expired++;
+                else
+                    intv->force_expired++;
+                (void)FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(
+                    &rx->alloc, struct sim_record, uidx);
+            } else {
+                rx->work_idxv[rx->nb_work++] = uidx;
+            }
+        }
+    } else {
+        rx->nb_work = 0u;
+    }
+
+    if (!cfg->inline_maint && nb_valid > 0u) {
+        unsigned maint_n = sim_separate_maint_budget(
+            cfg, nb_valid, rx->active.count, rx->max_entries,
+            auto_timeout, to_ctrl);
+        unsigned n_expired;
+        u64 t0, t1;
+
+        t0 = sim_rdtsc();
+        n_expired = ft_flow4_table_maintain_idx_bulk(
+            &rx->ft, rx->hit_idxv, maint_n,
+            sim_time_ns, timeout_ns,
+            rx->expired_idxv, cfg->maint_max_expired,
+            8u, 1 /* enable_filter */);
+        t1 = sim_rdtsc();
+        intv->maint_cycles += t1 - t0;
+        intv->maint_expired += n_expired;
+
+        for (unsigned i = 0u; i < n_expired; i++) {
+            active_remove(&rx->active, rx->expired_idxv[i], rx->records);
+            (void)FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(
+                &rx->alloc, struct sim_record, rx->expired_idxv[i]);
+        }
+    }
+
+    sim_receiver_refill_work(rx, cfg->batch_size);
+}
+
 /*===========================================================================
  * main
  *===========================================================================*/
@@ -733,37 +1179,26 @@ int
 main(int argc, char **argv)
 {
     struct sim_config cfg;
-    struct ft_table ft;
-    struct ft_table_config ft_cfg;
-    struct ft_record_allocator alloc;
-    struct sim_record *records;
-    struct active_set active;
+    struct sim_generator gen;
+    struct sim_receiver rx;
+    struct sim_batch batch;
     struct sim_total_stats total;
     struct sim_interval_stats intv;
-
-    void *buckets;
-    size_t bucket_size;
     unsigned max_entries;
-
-    struct flow4_key *keys;
-    u32 *new_idxv;
-    u32 *orig_idxv;
-    u32 *unused_idxv;
-    u32 *expired_idxv;
-    u32 *hit_idxv;
-    u32 *work_idxv;
-    unsigned nb_work;
 
     u64 sim_time_ns;
     u64 batch_interval_ns;
     u64 timeout_ns;
     u64 duration_ns;
-    u32 next_key_id;
     double next_report_sec;
-    unsigned miss_count, hit_count;
-    enum ft_add_policy add_policy;
     struct sim_timeout_ctrl to_ctrl;
     int auto_timeout;
+    u64 dos_timeout_ns = 0u;
+    enum sim_dos_state dos_state = SIM_DOS_NORMAL;
+    int rc = 1;
+
+    memset(&gen, 0, sizeof(gen));
+    memset(&rx, 0, sizeof(rx));
 
     if (parse_options(argc, argv, &cfg) != 0)
         return 1;
@@ -791,10 +1226,6 @@ main(int argc, char **argv)
     /* Derived quantities */
     batch_interval_ns = (u64)cfg.batch_size * UINT64_C(1000000000) / cfg.pps;
     duration_ns       = (u64)cfg.duration_sec * UINT64_C(1000000000);
-    miss_count        = cfg.batch_size * cfg.miss_pct / 100u;
-    hit_count         = cfg.batch_size - miss_count;
-    add_policy        = cfg.use_force_expire
-                      ? FT_ADD_IGNORE_FORCE_EXPIRE : FT_ADD_IGNORE;
     auto_timeout      = cfg.fill_target_pct > 0u;
 
     /* Auto-timeout: seed initial TO from formula */
@@ -811,19 +1242,38 @@ main(int argc, char **argv)
         memset(&to_ctrl, 0, sizeof(to_ctrl));
     }
 
+    if (sim_generator_init(&gen, &cfg) != 0) {
+        fprintf(stderr, "generator init failed\n");
+        goto cleanup;
+    }
+    if (sim_receiver_init(&rx, &cfg, max_entries) != 0) {
+        fprintf(stderr, "receiver init failed\n");
+        goto cleanup;
+    }
+    sim_receiver_refill_work(&rx, cfg.batch_size);
+
+    if (cfg.ddos_burst)
+        dos_timeout_ns = (u64)(cfg.dos_timeout_sec * 1e9);
+
     {
         unsigned batches_per_sec = cfg.pps / cfg.batch_size;
-        unsigned new_per_sec = batches_per_sec * miss_count;
+        unsigned new_per_sec = cfg.ddos_burst
+                             ? 0u : batches_per_sec * gen.miss_count;
         double effective_to = (double)timeout_ns / 1e9;
-        unsigned ss_entries = (unsigned)((double)new_per_sec * effective_to);
+        unsigned ss_entries = cfg.ddos_burst
+                            ? 0u
+                            : (unsigned)((double)new_per_sec * effective_to);
 
         printf("=== Flow Cache Simulation ===\n");
         printf("  arch:          %s%s\n", arch_label(cfg.arch_enable),
                cfg.use_hugepage ? ", hugepage" : "");
         printf("  pps:           %u\n", cfg.pps);
-        printf("  batch:         %u  (hit=%u, miss=%u)\n",
-               cfg.batch_size, hit_count, miss_count);
-        if (cfg.miss_vary != SIM_MISS_FIXED)
+        if (cfg.ddos_burst)
+            printf("  batch:         %u  (ddos-burst)\n", cfg.batch_size);
+        else
+            printf("  batch:         %u  (hit=%u, miss=%u)\n",
+                   cfg.batch_size, gen.hit_count, gen.miss_count);
+        if (!cfg.ddos_burst && cfg.miss_vary != SIM_MISS_FIXED)
             printf("  miss vary:     %s (base %u%%)\n",
                    miss_vary_label(cfg.miss_vary), cfg.miss_pct);
         printf("  pool:          %u  (rounded %u)\n", cfg.pool_size, max_entries);
@@ -843,259 +1293,72 @@ main(int argc, char **argv)
             printf("  min bucket occ:%u/16\n", cfg.min_bucket_occupancy);
         printf("  add policy:    %s\n",
                cfg.use_force_expire ? "FORCE_EXPIRE" : "IGNORE");
+        if (cfg.ddos_burst) {
+            printf("  ddos-burst:    on\n");
+            printf("  legit pool:    %u\n", cfg.legit_pool_size);
+            printf("  attack pct:    %u%%\n", cfg.attack_pct);
+            printf("  burst cycle:   %u s on / %u s off\n",
+                   cfg.burst_on_sec, cfg.burst_off_sec);
+            printf("  dos threshold: %u%% → DoS, %u%% → Normal\n",
+                   cfg.dos_threshold_pct, cfg.normal_threshold_pct);
+            printf("  dos timeout:   %.1f s\n", cfg.dos_timeout_sec);
+        }
         printf("  batch interval:%.1f us\n", (double)batch_interval_ns / 1000.0);
         printf("  batches/sec:   %u\n", batches_per_sec);
-        printf("  new flows/sec: %u\n", new_per_sec);
-        printf("  steady-state:  ~%u entries (%.1f%%)\n",
-               ss_entries, 100.0 * (double)ss_entries / (double)max_entries);
-        if (ss_entries > max_entries)
-            printf("  ** WARNING: steady-state exceeds pool!\n");
+        if (!cfg.ddos_burst) {
+            printf("  new flows/sec: %u\n", new_per_sec);
+            printf("  steady-state:  ~%u entries (%.1f%%)\n",
+                   ss_entries,
+                   100.0 * (double)ss_entries / (double)max_entries);
+            if (ss_entries > max_entries)
+                printf("  ** WARNING: steady-state exceeds pool!\n");
+        }
         printf("\n");
     }
-
-    /* Allocate table resources */
-    bucket_size = ft_table_bucket_size(max_entries);
-    buckets = sim_alloc_buckets(bucket_size);
-    if (buckets == NULL) {
-        fprintf(stderr, "bucket alloc failed (%zu bytes)\n", bucket_size);
-        return 1;
-    }
-
-    records = sim_alloc_zero(max_entries, sizeof(*records));
-    if (FT_RECORD_ALLOCATOR_INIT_TYPED(&alloc, records, max_entries,
-                                       struct sim_record, free_link) != 0) {
-        fprintf(stderr, "record allocator init failed\n");
-        return 1;
-    }
-    for (unsigned i = 0; i < max_entries; i++)
-        records[i].active_pos = UINT32_MAX;
-
-    memset(&ft_cfg, 0, sizeof(ft_cfg));
-    if (FT_FLOW4_TABLE_INIT_TYPED(&ft, records, max_entries,
-                                  struct sim_record, entry,
-                                  buckets, bucket_size, &ft_cfg) != 0) {
-        fprintf(stderr, "flow table init failed\n");
-        return 1;
-    }
-    printf("  nb_bk:         %u\n\n", ft_flow4_table_nb_bk(&ft));
-
-    if (active_init(&active, max_entries) != 0) {
-        fprintf(stderr, "active set init failed\n");
-        return 1;
-    }
-
-    /* Per-batch buffers */
-    keys         = calloc(cfg.batch_size, sizeof(*keys));
-    new_idxv     = calloc(cfg.batch_size, sizeof(*new_idxv));
-    orig_idxv    = calloc(cfg.batch_size, sizeof(*orig_idxv));
-    hit_idxv     = calloc(cfg.batch_size, sizeof(*hit_idxv));
-    unused_idxv  = calloc(cfg.batch_size + sim_unused_extra_capacity(&cfg),
-                          sizeof(*unused_idxv));
-    expired_idxv = calloc(cfg.maint_max_expired, sizeof(*expired_idxv));
-    work_idxv    = calloc(cfg.batch_size, sizeof(*work_idxv));
-    if (!keys || !new_idxv || !orig_idxv || !hit_idxv
-        || !unused_idxv || !expired_idxv || !work_idxv) {
-        fprintf(stderr, "batch buffer alloc failed\n");
-        return 1;
-    }
+    printf("  nb_bk:         %u\n\n", ft_flow4_table_nb_bk(&rx.ft));
 
     /* --- header --- */
-    printf("  %5s  %7s %6s %5s   %8s %8s %7s %7s"
-           "  %7s %9s %7s\n",
-           "sec", "entries", "fill%", "miss%",
-           "keys/s", "hit/s", "add/s", "exp/s",
-           "add_cy", "mnt_cy", "TO(s)");
-    printf("  -----  ------- ------ -----"
-           "   -------- -------- ------- -------"
-           "  ------- --------- -------\n");
+    if (cfg.ddos_burst) {
+        printf("  %5s  %7s %6s %5s %3s"
+               "   %8s %8s %7s %7s"
+               "  %7s %9s %7s\n",
+               "sec", "entries", "fill%", "miss%", "mod",
+               "keys/s", "hit/s", "add/s", "exp/s",
+               "add_cy", "mnt_cy", "TO(s)");
+        printf("  -----  ------- ------ ----- ---"
+               "   -------- -------- ------- -------"
+               "  ------- --------- -------\n");
+    } else {
+        printf("  %5s  %7s %6s %5s   %8s %8s %7s %7s"
+               "  %7s %9s %7s\n",
+               "sec", "entries", "fill%", "miss%",
+               "keys/s", "hit/s", "add/s", "exp/s",
+               "add_cy", "mnt_cy", "TO(s)");
+        printf("  -----  ------- ------ -----"
+               "   -------- -------- ------- -------"
+               "  ------- --------- -------\n");
+    }
 
     /* --- simulation --- */
     memset(&total, 0, sizeof(total));
     memset(&intv, 0, sizeof(intv));
     sim_time_ns    = UINT64_C(1000000000);   /* avoid timestamp-0 */
-    next_key_id    = 1u;
     next_report_sec = 1.0;
-
-    /* Pre-fill working area with batch_size entries */
-    nb_work = 0u;
-    for (unsigned i = 0; i < cfg.batch_size; i++) {
-        u32 eidx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(
-            &alloc, struct sim_record, free_link);
-        if (!RIX_IDX_IS_VALID(eidx, alloc.capacity))
-            break;
-        work_idxv[nb_work++] = eidx;
-    }
 
     while (sim_time_ns < UINT64_C(1000000000) + duration_ns) {
         double sim_sec = (double)(sim_time_ns - UINT64_C(1000000000)) / 1e9;
-        u64 t0, t1;
-        unsigned actual_hits, actual_misses, batch_total;
-        unsigned to_add, n_unused, n_expired;
-        unsigned nb_valid;
-
-        /* 0. Update miss/hit counts for variable miss rate */
-        if (cfg.miss_vary != SIM_MISS_FIXED) {
-            unsigned cur = sim_current_miss_pct(cfg.miss_pct,
-                                                cfg.miss_vary, sim_sec);
-            miss_count = cfg.batch_size * cur / 100u;
-            hit_count  = cfg.batch_size - miss_count;
-        }
-
-        /* 1. Generate batch keys */
-        actual_hits = (active.count >= hit_count) ? hit_count
-                    : (unsigned)active.count;
-        actual_misses = cfg.batch_size - actual_hits;
-
-        for (unsigned i = 0; i < actual_hits; i++) {
-            unsigned pos = (unsigned)(rng_next() % active.count);
-            u32 idx = active.indices[pos];
-
-            keys[i] = records[idx - 1u].entry.key;
-        }
-        for (unsigned i = 0; i < actual_misses; i++)
-            keys[actual_hits + i] = sim_make_key(next_key_id + i);
-
-        batch_total = actual_hits + actual_misses;
-
-        /* 2. Set keys on working-area entries */
-        {
-            unsigned w = 0u;
-
-            for (unsigned i = 0; i < nb_work && w < batch_total; i++) {
-                struct flow4_entry *entry =
-                    ft_flow4_table_entry_ptr(&ft, work_idxv[i]);
-
-                if (entry == NULL)
-                    continue;
-                entry->key = keys[w];
-                orig_idxv[w] = work_idxv[i];
-                new_idxv[w]  = work_idxv[i];
-                w++;
-            }
-            to_add = w;
-        }
-        if (to_add < batch_total)
-            intv.add_skipped += batch_total - to_add;
-
-        /* 3. add_idx_bulk / add_idx_bulk_maint — lookup + insert.
-         *    --inline-maint: single call does add + registered-bucket
-         *      maint; unused_idxv gets both add-unused and expired.
-         *    separate:     plain add_idx_bulk here, maintain in step 4.
-         */
-        nb_valid = 0u;
-        if (to_add > 0u) {
-            unsigned unused_capacity = to_add;
-
-            t0 = sim_rdtsc();
-            if (cfg.inline_maint) {
-                unsigned inline_budget;
-
-                /* Inline maint uses add-unused slots plus adaptive extra
-                 * headroom for maint-expired entries. */
-                inline_budget = sim_inline_maint_unused_budget(
-                    &cfg, active.count, max_entries, auto_timeout, &to_ctrl);
-                unused_capacity += inline_budget;
-
-                n_unused = ft_flow4_table_add_idx_bulk_maint(
-                    &ft, new_idxv, to_add, add_policy,
-                    sim_time_ns, timeout_ns,
-                    unused_idxv, unused_capacity,
-                    cfg.min_bucket_occupancy);
-            } else {
-                n_unused = ft_flow4_table_add_idx_bulk(
-                    &ft, new_idxv, to_add, add_policy,
-                    sim_time_ns, unused_idxv);
-            }
-            t1 = sim_rdtsc();
-            intv.add_cycles += t1 - t0;
-            intv.finds      += to_add;
-
-            /* Classify results and collect valid indices */
-            for (unsigned i = 0; i < to_add; i++) {
-                u32 ridx = new_idxv[i];
-
-                if (ridx == 0u)
-                    continue;
-                hit_idxv[nb_valid++] = ridx;
-
-                if (ridx == orig_idxv[i]) {
-                    /* Newly inserted */
-                    active_add(&active, ridx, records);
-                    intv.adds++;
-                } else {
-                    /* Duplicate found (existing entry) */
-                    intv.hits++;
-                }
-            }
-
-            /* Reclaim unused entries back into working area;
-             * free active entries (force-expire victims or
-             * maint-expired in inline-maint mode). */
-            nb_work = 0u;
-            for (unsigned i = 0; i < n_unused; i++) {
-                u32 uidx = unused_idxv[i];
-
-                if (uidx == 0u)
-                    continue;
-                if (records[uidx - 1u].active_pos != UINT32_MAX) {
-                    active_remove(&active, uidx, records);
-                    if (cfg.inline_maint)
-                        intv.maint_expired++;
-                    else
-                        intv.force_expired++;
-                    (void)FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(
-                        &alloc, struct sim_record, free_link, uidx);
-                } else {
-                    /* Our working entry returned — reuse next batch */
-                    work_idxv[nb_work++] = uidx;
-                }
-            }
-        } else {
-            nb_work = 0u;
-        }
-        next_key_id += actual_misses;
-
-        /* 4. maintain_idx_bulk on add-result indices (separate mode only).
-         *    --inline-maint: already done in step 3 via add_idx_bulk_maint.
-         *    separate:      adaptive maint_budget cap, measured separately.
-         */
-        if (!cfg.inline_maint && nb_valid > 0u) {
-            unsigned maint_n = sim_separate_maint_budget(
-                &cfg, nb_valid, active.count, max_entries,
-                auto_timeout, &to_ctrl);
-
-            t0 = sim_rdtsc();
-            n_expired = ft_flow4_table_maintain_idx_bulk(
-                &ft, hit_idxv, maint_n,
-                sim_time_ns, timeout_ns,
-                expired_idxv, cfg.maint_max_expired,
-                8u, 1 /* enable_filter */);
-            t1 = sim_rdtsc();
-            intv.maint_cycles += t1 - t0;
-            intv.maint_expired += n_expired;
-
-            for (unsigned i = 0; i < n_expired; i++) {
-                active_remove(&active, expired_idxv[i], records);
-                (void)FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(
-                    &alloc, struct sim_record, free_link, expired_idxv[i]);
-            }
-        }
-
-        /* 5. Replenish working area to batch_size from allocator */
-        while (nb_work < cfg.batch_size) {
-            u32 eidx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(
-                &alloc, struct sim_record, free_link);
-            if (!RIX_IDX_IS_VALID(eidx, alloc.capacity))
-                break;
-            work_idxv[nb_work++] = eidx;
-        }
+        sim_generator_prepare_batch(&gen, sim_sec, &rx, &batch);
+        sim_receiver_process_batch(&rx, &cfg, &batch, sim_time_ns,
+                                   timeout_ns, auto_timeout, &to_ctrl,
+                                   &intv, gen.keys);
+        sim_generator_advance(&gen, &batch);
 
         total.batches++;
 
         /* 6. Periodic report (every 1 simulated second) */
         if (sim_sec >= next_report_sec) {
-            double fill = 100.0 * (double)active.count / (double)max_entries;
-            double fill_ratio = (double)active.count / (double)max_entries;
+            double fill = 100.0 * (double)rx.active.count / (double)max_entries;
+            double fill_ratio = (double)rx.active.count / (double)max_entries;
             double add_cy = intv.finds > 0u
                           ? (double)intv.add_cycles / (double)intv.finds
                           : 0.0;
@@ -1120,24 +1383,54 @@ main(int argc, char **argv)
                       / (double)(intv.adds + intv.hits)
                     : 0.0;
 
-                printf("  %5.0f  %7u %5.1f%% %4.1f%%"
-                       "   %8" PRIu64 " %8" PRIu64
-                       " %7" PRIu64 " %7" PRIu64
-                       "  %7.1f %9.1f %7.2f\n",
-                       sim_sec, active.count, fill, actual_miss,
-                       intv.finds, intv.hits, intv.adds, total_exp,
-                       add_cy, mnt_cy,
-                       (double)timeout_ns / 1e9);
+                /* DoS state machine (--ddos-burst) */
+                if (cfg.ddos_burst) {
+                    if (dos_state == SIM_DOS_NORMAL) {
+                        if (actual_miss > (double)cfg.dos_threshold_pct) {
+                            dos_state = SIM_DOS_ACTIVE;
+                            timeout_ns = dos_timeout_ns;
+                        }
+                    } else {
+                        if (actual_miss < (double)cfg.normal_threshold_pct) {
+                            dos_state = SIM_DOS_NORMAL;
+                            if (auto_timeout)
+                                timeout_ns = (u64)(to_ctrl.ema_timeout * 1e9);
+                            else
+                                timeout_ns = (u64)(cfg.timeout_sec * 1e9);
+                        }
+                    }
+                }
+
+                if (cfg.ddos_burst) {
+                    const char *mode;
+
+                    if (dos_state == SIM_DOS_ACTIVE)
+                        mode = batch.is_burst ? "DB" : " D";
+                    else
+                        mode = batch.is_burst ? "NB" : " N";
+
+                    printf("  %5.0f  %7u %5.1f%% %4.1f%% %3s"
+                           "   %8" PRIu64 " %8" PRIu64
+                           " %7" PRIu64 " %7" PRIu64
+                           "  %7.1f %9.1f %7.2f\n",
+                           sim_sec, rx.active.count, fill, actual_miss,
+                           mode,
+                           intv.finds, intv.hits, intv.adds, total_exp,
+                           add_cy, mnt_cy,
+                           (double)timeout_ns / 1e9);
+                } else {
+                    printf("  %5.0f  %7u %5.1f%% %4.1f%%"
+                           "   %8" PRIu64 " %8" PRIu64
+                           " %7" PRIu64 " %7" PRIu64
+                           "  %7.1f %9.1f %7.2f\n",
+                           sim_sec, rx.active.count, fill, actual_miss,
+                           intv.finds, intv.hits, intv.adds, total_exp,
+                           add_cy, mnt_cy,
+                           (double)timeout_ns / 1e9);
+                }
             }
 
-            total.finds         += intv.finds;
-            total.hits          += intv.hits;
-            total.adds          += intv.adds;
-            total.add_skipped   += intv.add_skipped;
-            total.maint_expired += intv.maint_expired;
-            total.force_expired += intv.force_expired;
-            total.add_cycles    += intv.add_cycles;
-            total.maint_cycles  += intv.maint_cycles;
+            sim_total_accumulate(&total, &intv);
             memset(&intv, 0, sizeof(intv));
             next_report_sec += 1.0;
         }
@@ -1146,14 +1439,7 @@ main(int argc, char **argv)
     }
 
     /* flush remaining interval */
-    total.finds         += intv.finds;
-    total.hits          += intv.hits;
-    total.adds          += intv.adds;
-    total.add_skipped   += intv.add_skipped;
-    total.maint_expired += intv.maint_expired;
-    total.force_expired += intv.force_expired;
-    total.add_cycles    += intv.add_cycles;
-    total.maint_cycles  += intv.maint_cycles;
+    sim_total_accumulate(&total, &intv);
 
     /* --- summary --- */
     printf("\n=== Summary (%" PRIu64 " batches, %u sec) ===\n",
@@ -1164,12 +1450,14 @@ main(int argc, char **argv)
            total.finds > 0u
            ? 100.0 * (double)total.hits / (double)total.finds : 0.0);
     printf("  adds:            %" PRIu64 "\n", total.adds);
+    if (cfg.ddos_burst)
+    printf("  attack adds:     %" PRIu64 "\n", total.attack_adds);
     printf("  add skipped:     %" PRIu64 "\n", total.add_skipped);
     printf("  maint expired:   %" PRIu64 "\n", total.maint_expired);
     printf("  force expired:   %" PRIu64 "\n", total.force_expired);
     printf("  final fill:      %u / %u (%.1f%%)\n",
-           active.count, max_entries,
-           100.0 * (double)active.count / (double)max_entries);
+           rx.active.count, max_entries,
+           100.0 * (double)rx.active.count / (double)max_entries);
     if (total.finds > 0u) {
         double avg_add = (double)total.add_cycles / (double)total.finds;
         double avg_mnt = (double)total.maint_cycles / (double)total.finds;
@@ -1186,7 +1474,7 @@ main(int argc, char **argv)
     {
         struct ft_table_stats fts;
 
-        ft_flow4_table_stats(&ft, &fts);
+        ft_flow4_table_stats(&rx.ft, &fts);
         printf("\n  Table stats:\n");
         printf("    lookups:       %" PRIu64 "\n", fts.core.lookups);
         printf("    hits:          %" PRIu64 "\n", fts.core.hits);
@@ -1200,27 +1488,10 @@ main(int argc, char **argv)
         printf("    maint_bk_chk:  %" PRIu64 "\n", fts.maint_bucket_checks);
         printf("    maint_evicts:  %" PRIu64 "\n", fts.maint_evictions);
     }
+    rc = 0;
 
-    /* Cleanup */
-    {
-        void *saved_bk = ft.buckets;
-        size_t saved_bk_size = (size_t)ft.nb_bk * FT_TABLE_BUCKET_SIZE;
-
-        ft_flow4_table_destroy(&ft);
-        sim_free_buckets(saved_bk, saved_bk_size);
-    }
-    active_destroy(&active);
-    /* Return working-area entries to allocator */
-    for (unsigned i = 0; i < nb_work; i++)
-        (void)FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(
-            &alloc, struct sim_record, free_link, work_idxv[i]);
-    free(work_idxv);
-    free(expired_idxv);
-    free(unused_idxv);
-    free(hit_idxv);
-    free(orig_idxv);
-    free(new_idxv);
-    free(keys);
-    sim_free_zero(records, max_entries, sizeof(*records));
-    return 0;
+cleanup:
+    sim_receiver_destroy(&rx);
+    sim_generator_destroy(&gen);
+    return rc;
 }
