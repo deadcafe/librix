@@ -68,7 +68,6 @@ struct ftb_user_record {
         struct flowu_entry flowu;
     } entry;
     u32 cookie;
-    RIX_SLIST_ENTRY(ftb_user_record) free_link;
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
@@ -236,8 +235,7 @@ ftb_alloc_records(unsigned max_entries,
         ftb_alloc_zero(max_entries, sizeof(*records));
 
     if (FT_RECORD_ALLOCATOR_INIT_TYPED(alloc, records, max_entries,
-                                       struct ftb_user_record,
-                                       free_link) != 0) {
+                                       struct ftb_user_record) != 0) {
         fprintf(stderr, "record allocator init failed\n");
         exit(1);
     }
@@ -247,8 +245,7 @@ ftb_alloc_records(unsigned max_entries,
 static void
 ftb_reset_records(struct ft_record_allocator *alloc)
 {
-    if (FT_RECORD_ALLOCATOR_RESET_TYPED(alloc, struct ftb_user_record,
-                                        free_link) != 0) {
+    if (FT_RECORD_ALLOCATOR_RESET_TYPED(alloc, struct ftb_user_record) != 0) {
         fprintf(stderr, "record allocator reset failed\n");
         exit(1);
     }
@@ -256,8 +253,10 @@ ftb_reset_records(struct ft_record_allocator *alloc)
 
 static void
 ftb_free_records(struct ftb_user_record *records,
-                 unsigned max_entries)
+                 unsigned max_entries,
+                 struct ft_record_allocator *alloc)
 {
+    ft_record_allocator_destroy(alloc);
     ftb_free_zero(records, max_entries, sizeof(*records));
 }
 
@@ -267,7 +266,7 @@ ftb_record_alloc_idx(struct ft_record_allocator *alloc,
                      const char *phase)
 {
     u32 entry_idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(
-        alloc, struct ftb_user_record, free_link);
+        alloc, struct ftb_user_record);
 
     if (!RIX_IDX_IS_VALID(entry_idx, alloc->capacity)) {
         fprintf(stderr, "%s record alloc failed during %s\n",
@@ -285,7 +284,7 @@ ftb_record_alloc_idx_bulk(struct ft_record_allocator *alloc,
                           unsigned nb_entries)
 {
     unsigned got = FT_RECORD_ALLOCATOR_ALLOC_BULK_TYPED(
-        alloc, struct ftb_user_record, free_link, entry_idxv, nb_entries);
+        alloc, struct ftb_user_record, entry_idxv, nb_entries);
 
     if (got != nb_entries) {
         fprintf(stderr, "%s record bulk alloc failed during %s: %u/%u\n",
@@ -301,7 +300,7 @@ ftb_record_free_idx(struct ft_record_allocator *alloc,
                     u32 entry_idx)
 {
     if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(alloc, struct ftb_user_record,
-                                           free_link, entry_idx) != 0) {
+                                           entry_idx) != 0) {
         fprintf(stderr, "%s record free failed during %s: idx=%u\n",
                 variant, phase, entry_idx);
         exit(1);
@@ -1701,7 +1700,7 @@ ftb_measure_grow(const struct ftb_variant_ops *ops,
         ops->destroy(&ft);
     }
 
-    ftb_free_records(records, max_entries);
+    ftb_free_records(records, max_entries, &alloc);
     res.alloc_cpe =
         ftb_median_u64(alloc_samples, FTB_GROW_REPEAT) / (double)live;
     res.migrate_cpe =
@@ -1933,7 +1932,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         free(results);
         free(keys);
         free(expired_idxv);
-        ftb_free_records(records, max_entries);
+        ftb_free_records(records, max_entries, &alloc);
         return -1;
     }
     if (bench_scope_begin(&group) != 0) {
@@ -1943,7 +1942,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         free(results);
         free(keys);
         free(expired_idxv);
-        ftb_free_records(records, max_entries);
+        ftb_free_records(records, max_entries, &alloc);
         return -1;
     }
     if (mode == FTB_MAINT_HIT_IDX_EXPIRE) {
@@ -1977,7 +1976,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         free(results);
         free(keys);
         free(expired_idxv);
-        ftb_free_records(records, max_entries);
+        ftb_free_records(records, max_entries, &alloc);
         return -1;
     }
     bench_scope_close(&group);
@@ -1986,7 +1985,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
     free(results);
     free(keys);
     free(expired_idxv);
-    ftb_free_records(records, max_entries);
+    ftb_free_records(records, max_entries, &alloc);
     *evicted_out = total_evicted;
     return 0;
 }
@@ -2205,7 +2204,7 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
 #undef FTB_RUN_OP
 
     ops->destroy(&ft);
-    ftb_free_records(records, max_entries);
+    ftb_free_records(records, max_entries, &alloc);
 }
 
 static void

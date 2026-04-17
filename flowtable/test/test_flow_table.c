@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <rix/rix_ring.h>
+
 #include "flow_table.h"
 #include "ft_test_record_allocator.h"
 
@@ -89,9 +91,82 @@ struct test_user_recordu {
 struct test_alloc_record {
     struct flow4_entry entry;
     u32 cookie;
-    RIX_SLIST_ENTRY(test_alloc_record) free_link;
     unsigned char pad[64];
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
+
+static int
+test_rix_ring_fifo_basic(void)
+{
+    struct rix_ring ring;
+    u32 storage[8];
+    u32 idxv[8];
+    u32 input[4] = { 5u, 6u, 7u, 8u };
+    u32 n;
+
+    printf("[T] rix ring fifo basic\n");
+    rix_ring_init(&ring, storage, 8u);
+    if (!rix_ring_empty(&ring))
+        FAIL("fifo init not empty");
+    n = rix_ring_dequeue_burst(&ring, idxv, 1u);
+    if (n != 0u)
+        FAIL("fifo empty dequeue mismatch");
+    rix_ring_enqueue_seq(&ring, 1u, 4u);
+    if (rix_ring_count(&ring) != 4u)
+        FAIL("fifo seed count mismatch");
+    n = rix_ring_dequeue_burst(&ring, idxv, 2u);
+    if (n != 2u || idxv[0] != 1u || idxv[1] != 2u)
+        FAIL("fifo dequeue order mismatch");
+    n = rix_ring_enqueue_burst(&ring, input, 4u);
+    if (n != 4u)
+        FAIL("fifo enqueue_burst count mismatch");
+    if (rix_ring_full(&ring))
+        FAIL("fifo unexpectedly full");
+    n = rix_ring_dequeue_burst(&ring, idxv, 6u);
+    if (n != 6u)
+        FAIL("fifo final dequeue_burst count mismatch");
+    if (idxv[0] != 3u || idxv[1] != 4u || idxv[2] != 5u
+        || idxv[3] != 6u || idxv[4] != 7u || idxv[5] != 8u)
+        FAIL("fifo wrap order mismatch");
+    if (!rix_ring_empty(&ring))
+        FAIL("fifo final empty mismatch");
+    return 0;
+}
+
+static int
+test_rix_ring_lifo_basic(void)
+{
+    struct rix_ring ring;
+    u32 storage[8];
+    u32 idxv[8];
+    u32 input[2] = { 7u, 8u };
+    u32 n;
+
+    printf("[T] rix ring lifo basic\n");
+    rix_ring_init(&ring, storage, 8u);
+    if (!rix_ring_empty(&ring))
+        FAIL("lifo init not empty");
+    n = rix_ring_pop_burst(&ring, idxv, 1u);
+    if (n != 0u)
+        FAIL("lifo empty pop mismatch");
+    rix_ring_push_seq(&ring, 1u, 6u);
+    if (rix_ring_count(&ring) != 6u)
+        FAIL("lifo seed count mismatch");
+    n = rix_ring_pop_burst(&ring, idxv, 3u);
+    if (n != 3u || idxv[0] != 1u || idxv[1] != 2u || idxv[2] != 3u)
+        FAIL("lifo pop order mismatch");
+    n = rix_ring_push_burst(&ring, input, 2u);
+    if (n != 2u)
+        FAIL("lifo push_burst count mismatch");
+    n = rix_ring_pop_burst(&ring, idxv, 5u);
+    if (n != 5u)
+        FAIL("lifo final pop_burst count mismatch");
+    if (idxv[0] != 8u || idxv[1] != 7u || idxv[2] != 4u
+        || idxv[3] != 5u || idxv[4] != 6u)
+        FAIL("lifo pop sequence mismatch");
+    if (!rix_ring_empty(&ring))
+        FAIL("lifo final empty mismatch");
+    return 0;
+}
 
 
 union test_any_table {
@@ -118,45 +193,35 @@ test_record_allocator_basic(void)
     if (pool == NULL)
         FAIL("calloc allocator pool");
     if (FT_RECORD_ALLOCATOR_INIT_TYPED(&alloc, pool, 8u,
-                                       struct test_alloc_record,
-                                       free_link) != 0)
+                                       struct test_alloc_record) != 0)
         FAIL("allocator init failed");
-    if (RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[0]
-        || alloc.free_count != 8u)
+    if (alloc.free_count != 8u)
         FAIL("allocator init state mismatch");
     if (FT_RECORD_ALLOCATOR_RECORD_PTR_AS(&alloc, struct test_alloc_record, 3u)
         != &pool[2])
         FAIL("allocator record_ptr mismatch");
 
-    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record,
-                                              free_link);
-    if (idx != 1u || RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[1]
-        || alloc.free_count != 7u)
+    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record);
+    if (idx != 1u || alloc.free_count != 7u)
         FAIL("allocator first alloc mismatch");
-    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record,
-                                              free_link);
-    if (idx != 2u || RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[2]
-        || alloc.free_count != 6u)
+    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record);
+    if (idx != 2u || alloc.free_count != 6u)
         FAIL("allocator second alloc mismatch");
     if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
-                                           free_link, 2u) != 0)
+                                           2u) != 0)
         FAIL("allocator free failed");
-    if (RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[1]
-        || alloc.free_count != 7u)
+    if (alloc.free_count != 7u)
         FAIL("allocator free state mismatch");
-    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record,
-                                              free_link);
+    idx = FT_RECORD_ALLOCATOR_ALLOC_IDX_TYPED(&alloc, struct test_alloc_record);
     if (idx != 2u || alloc.free_count != 6u)
         FAIL("allocator reuse mismatch");
     if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
-                                           free_link, 2u) != 0)
+                                           2u) != 0)
         FAIL("allocator re-free failed");
     if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
-                                           free_link, 2u) == 0)
-        FAIL("allocator double free accepted");
-    if (FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(&alloc, struct test_alloc_record,
-                                           free_link, 0u) == 0)
+                                           0u) == 0)
         FAIL("allocator nil free accepted");
+    ft_record_allocator_destroy(&alloc);
     free(pool);
     return 0;
 }
@@ -175,12 +240,11 @@ test_record_allocator_bulk_and_reset(void)
     if (pool == NULL)
         FAIL("calloc allocator pool");
     if (FT_RECORD_ALLOCATOR_INIT_TYPED(&alloc, pool, 6u,
-                                       struct test_alloc_record,
-                                       free_link) != 0)
+                                       struct test_alloc_record) != 0)
         FAIL("allocator init failed");
 
     n = FT_RECORD_ALLOCATOR_ALLOC_BULK_TYPED(&alloc, struct test_alloc_record,
-                                             free_link, idxv, 4u);
+                                             idxv, 4u);
     if (n != 4u)
         FAIL("allocator alloc_bulk count mismatch");
     if (idxv[0] != 1u || idxv[1] != 2u || idxv[2] != 3u || idxv[3] != 4u)
@@ -188,29 +252,28 @@ test_record_allocator_bulk_and_reset(void)
     freev[0] = idxv[1];
     freev[1] = idxv[2];
     n = FT_RECORD_ALLOCATOR_FREE_BULK_TYPED(&alloc, struct test_alloc_record,
-                                            free_link, freev, 2u);
+                                            freev, 2u);
     if (n != 2u)
         FAIL("allocator free_bulk count mismatch");
-    if (RIX_SLIST_FIRST(&alloc.free_head, pool) != &pool[2]
-        || alloc.free_count != 4u)
+    if (alloc.free_count != 4u)
         FAIL("allocator free_bulk state mismatch");
     n = FT_RECORD_ALLOCATOR_ALLOC_BULK_TYPED(&alloc, struct test_alloc_record,
-                                             free_link, idxv, 4u);
+                                             idxv, 4u);
     if (n != 4u)
         FAIL("allocator second alloc_bulk count mismatch");
     if (idxv[0] != 3u || idxv[1] != 2u || idxv[2] != 5u || idxv[3] != 6u)
         FAIL("allocator second alloc_bulk order mismatch");
-    if (FT_RECORD_ALLOCATOR_RESET_TYPED(&alloc, struct test_alloc_record,
-                                        free_link) != 0)
+    if (FT_RECORD_ALLOCATOR_RESET_TYPED(&alloc, struct test_alloc_record) != 0)
         FAIL("allocator reset failed");
     n = FT_RECORD_ALLOCATOR_ALLOC_BULK_TYPED(&alloc, struct test_alloc_record,
-                                             free_link, idxv, 6u);
+                                             idxv, 6u);
     if (n != 6u)
         FAIL("allocator reset alloc_bulk count mismatch");
     for (unsigned i = 0u; i < 6u; i++) {
         if (idxv[i] != i + 1u)
             FAIL("allocator reset order mismatch");
     }
+    ft_record_allocator_destroy(&alloc);
     free(pool);
     return 0;
 }
@@ -3934,6 +3997,10 @@ test_variant_suite(const struct test_variant_ops *ops)
 int
 main(void)
 {
+    if (test_rix_ring_fifo_basic() != 0)
+        return 1;
+    if (test_rix_ring_lifo_basic() != 0)
+        return 1;
     if (test_record_allocator_basic() != 0)
         return 1;
     if (test_record_allocator_bulk_and_reset() != 0)

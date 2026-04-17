@@ -34,6 +34,10 @@
  *     RIX_TAILQ   -- doubly-linked tail queue
  *     RIX_CIRCLEQ -- circular queue
  *
+ *   Index Containers (rix/rix_ring.h)
+ *     rix_ring -- caller-supplied index buffer
+ *                enqueue/dequeue = FIFO, push/pop = LIFO
+ *
  *   Tree (rix/rix_tree.h)
  *     RIX_RB      -- red-black tree
  *
@@ -73,6 +77,7 @@
  */
 
 #  include <rix/rix_queue.h>
+#  include <rix/rix_ring.h>
 #  include <rix/rix_tree.h>
 #  include <rix/rix_hash.h>
 
