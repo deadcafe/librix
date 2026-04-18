@@ -12,6 +12,8 @@ receiver responsibilities are clearer and burst control now reacts in
 
 ## Validation status
 
+- `make test -C flowtable/test`: passed
+- `make -C flowtable/test bench`: passed
 - `make -C flowtable/test /home/tokuzo/work/deadcafe/librix/flowtable/build/bin/ft_sim_cache`: passed
 - Hugepage `ft_sim_cache` scenarios validated at `1M entry / 1M pps / batch=256`
 
