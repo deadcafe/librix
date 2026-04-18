@@ -370,15 +370,26 @@ struct sim_total_stats {
  *===========================================================================*/
 
 struct sim_batch {
+    const struct flow4_key *keys;
+    const u8 *attack_flags;
     unsigned total_keys;
-    unsigned legit_prefix_len;
     unsigned miss_keys;
     int is_burst;
+};
+
+typedef int (*sim_live_key_sample_fn)(const void *opaque, u64 rnd,
+                                      struct flow4_key *key);
+
+struct sim_live_source {
+    const void *opaque;
+    sim_live_key_sample_fn sample_key;
+    unsigned active_count;
 };
 
 struct sim_generator {
     const struct sim_config *cfg;
     struct flow4_key *keys;
+    u8 *attack_flags;
     struct flow4_key *legit_keys;
     u32 next_key_id;
     u32 next_attack_key_id;
@@ -403,6 +414,7 @@ struct sim_receiver {
     u32 *hit_idxv;
     u32 *work_idxv;
     unsigned nb_work;
+    unsigned maintain_next_bk;
 };
 
 /*===========================================================================
@@ -689,17 +701,23 @@ arch_label(unsigned enable)
 /*===========================================================================
  * Dynamic timeout controller
  *
- * Feed-forward:  T_ff = fill_target × N × ln(1 + H/r) / H
+ * Feed-forward:  T_ff = fill_setpoint × N × ln(1 + H/r) / H
  *   where H = measured hit rate, r = measured new-flow rate, N = max_entries.
  * Proportional correction on fill error:
- *   correction = 1 − kp × (fill_actual − fill_target)
+ *   correction = 1 − kp × (fill_actual − fill_setpoint)
  * EMA smoothing:  T = α × T_new + (1−α) × T_prev
  *===========================================================================*/
 
 struct sim_timeout_ctrl {
-    double fill_target;   /* e.g. 0.70 */
+    double fill_target;   /* user-visible target, e.g. 0.70 */
+    double fill_setpoint; /* control target, slightly below fill_target */
+    double fill_aggr;     /* start aggressive reclaim here */
+    double fill_emerg;    /* stronger reclaim above this */
+    double fill_critical; /* hard-cap guardrail */
     double ema_timeout;   /* smoothed timeout in seconds */
-    double kp;            /* proportional gain */
+    double guard_band;    /* keep fill below target by this ratio */
+    double kp_below;      /* proportional gain when below setpoint */
+    double kp_above;      /* proportional gain when above setpoint */
     double alpha;         /* EMA coefficient */
     double min_to;        /* minimum timeout (seconds) */
     double max_to;        /* maximum timeout (seconds) */
@@ -712,6 +730,12 @@ sim_fill_target_ratio(int auto_timeout, const struct sim_timeout_ctrl *tc)
 }
 
 static double
+sim_fill_setpoint_ratio(int auto_timeout, const struct sim_timeout_ctrl *tc)
+{
+    return auto_timeout ? tc->fill_setpoint : 0.67;
+}
+
+static double
 sim_fill_ratio(unsigned active_count, unsigned max_entries)
 {
     if (max_entries == 0u)
@@ -720,11 +744,97 @@ sim_fill_ratio(unsigned active_count, unsigned max_entries)
 }
 
 static double
-sim_fill_excess_ratio(double fill_ratio, double fill_target)
+sim_fill_pressure_ratio(double fill_ratio, double fill_arm, double fill_target)
 {
-    if (fill_ratio <= fill_target || fill_target >= 1.0)
+    double span;
+    double overshoot;
+
+    if (fill_target >= 1.0)
         return 0.0;
-    return (fill_ratio - fill_target) / (1.0 - fill_target);
+    if (fill_ratio <= fill_arm)
+        return 0.0;
+
+    span = fill_target - fill_arm;
+    if (span <= 0.0)
+        span = 0.01;
+    if (fill_ratio < fill_target)
+        return (fill_ratio - fill_arm) / span;
+
+    overshoot = (fill_ratio - fill_target) / (1.0 - fill_target);
+    return 1.0 + 2.0 * overshoot;
+}
+
+static unsigned
+sim_fill_reclaim_level(double fill_ratio, const struct sim_timeout_ctrl *tc)
+{
+    if (fill_ratio >= tc->fill_critical)
+        return 3u;
+    if (fill_ratio >= tc->fill_emerg)
+        return 2u;
+    if (fill_ratio >= tc->fill_aggr)
+        return 1u;
+    return 0u;
+}
+
+static u64
+sim_batch_timeout_ns(u64 timeout_ns,
+                     u64 dos_timeout_ns,
+                     int dos_active,
+                     double fill_ratio,
+                     const struct sim_timeout_ctrl *tc)
+{
+    u64 capped = timeout_ns;
+
+    if (fill_ratio >= tc->fill_critical) {
+        if (capped > UINT64_C(50000000))
+            capped = UINT64_C(50000000);
+    } else if (fill_ratio >= tc->fill_emerg) {
+        if (capped > UINT64_C(100000000))
+            capped = UINT64_C(100000000);
+    } else if (fill_ratio >= tc->fill_aggr) {
+        if (capped > UINT64_C(250000000))
+            capped = UINT64_C(250000000);
+    }
+    if (dos_active && fill_ratio >= tc->fill_aggr
+        && dos_timeout_ns != 0u && capped > dos_timeout_ns)
+        capped = dos_timeout_ns;
+    return capped;
+}
+
+static unsigned
+sim_emergency_scan_min_bucket_occupancy(const struct sim_timeout_ctrl *tc,
+                                        double fill_ratio)
+{
+    unsigned level = sim_fill_reclaim_level(fill_ratio, tc);
+
+    if (level >= 3u)
+        return 0u;
+    if (level == 2u)
+        return 1u;
+    if (level == 1u)
+        return 2u;
+    return 4u;
+}
+
+static unsigned
+sim_emergency_scan_budget(const struct sim_config *cfg,
+                          const struct sim_timeout_ctrl *tc,
+                          double fill_ratio)
+{
+    unsigned level = sim_fill_reclaim_level(fill_ratio, tc);
+
+    if (level >= 2u)
+        return cfg->maint_max_expired;
+    if (level == 1u) {
+        unsigned budget = cfg->maint_budget * 2u;
+
+        if (budget < cfg->maint_budget)
+            budget = cfg->maint_max_expired;
+        if (budget > cfg->maint_max_expired)
+            budget = cfg->maint_max_expired;
+        return budget;
+    }
+    return 0u;
 }
 
 static unsigned
@@ -742,15 +852,34 @@ sim_inline_maint_unused_budget(const struct sim_config *cfg,
                                const struct sim_timeout_ctrl *tc)
 {
     double fill_ratio;
+    double fill_arm;
     double fill_target;
-    double excess;
+    double pressure;
+    unsigned level;
+    unsigned budget;
 
     if (cfg->maint_budget == 0u)
         return 0u;
     fill_ratio = sim_fill_ratio(active_count, max_entries);
+    level = sim_fill_reclaim_level(fill_ratio, tc);
+    if (level >= 3u)
+        return cfg->maint_max_expired;
+    if (level == 2u)
+        return cfg->maint_budget
+             + (cfg->maint_max_expired - cfg->maint_budget) * 3u / 4u;
+    if (level == 1u)
+        return cfg->maint_budget
+             + (cfg->maint_max_expired - cfg->maint_budget) / 2u;
+
+    fill_arm = sim_fill_setpoint_ratio(auto_timeout, tc);
     fill_target = sim_fill_target_ratio(auto_timeout, tc);
-    excess = sim_fill_excess_ratio(fill_ratio, fill_target);
-    return (unsigned)((double)cfg->maint_budget * excess);
+    pressure = sim_fill_pressure_ratio(fill_ratio, fill_arm, fill_target);
+    if (pressure > 1.0)
+        pressure = 1.0;
+    budget = (unsigned)((double)cfg->maint_budget * pressure);
+    if (budget > cfg->maint_max_expired)
+        budget = cfg->maint_max_expired;
+    return budget;
 }
 
 static unsigned
@@ -762,9 +891,11 @@ sim_separate_maint_budget(const struct sim_config *cfg,
                           const struct sim_timeout_ctrl *tc)
 {
     double fill_ratio;
+    double fill_arm;
     double fill_target;
-    double excess;
+    double pressure;
     unsigned budget;
+    unsigned level;
 
     if (cfg->maint_budget == 0u || nb_valid <= cfg->maint_budget)
         return nb_valid;
@@ -772,10 +903,26 @@ sim_separate_maint_budget(const struct sim_config *cfg,
         return nb_valid;
 
     fill_ratio = sim_fill_ratio(active_count, max_entries);
+    level = sim_fill_reclaim_level(fill_ratio, tc);
+    if (level >= 3u)
+        return nb_valid;
+    if (level == 2u)
+        return nb_valid > cfg->maint_max_expired
+             ? cfg->maint_max_expired : nb_valid;
+    if (level == 1u) {
+        budget = cfg->maint_budget
+               + (cfg->maint_max_expired - cfg->maint_budget) / 2u;
+        return budget > nb_valid ? nb_valid : budget;
+    }
+
+    fill_arm = sim_fill_setpoint_ratio(auto_timeout, tc);
     fill_target = sim_fill_target_ratio(auto_timeout, tc);
-    excess = sim_fill_excess_ratio(fill_ratio, fill_target);
+    pressure = sim_fill_pressure_ratio(fill_ratio, fill_arm, fill_target);
+    if (pressure > 1.0)
+        pressure = 1.0;
     budget = cfg->maint_budget;
-    budget += (unsigned)((double)(cfg->batch_size - cfg->maint_budget) * excess);
+    budget += (unsigned)((double)(cfg->batch_size - cfg->maint_budget)
+                         * pressure);
     if (budget > nb_valid)
         budget = nb_valid;
     return budget;
@@ -786,21 +933,29 @@ timeout_ctrl_init(struct sim_timeout_ctrl *tc, double fill_target,
                   double initial_to)
 {
     tc->fill_target = fill_target;
+    tc->guard_band  = 0.01;
+    tc->fill_setpoint = fill_target - tc->guard_band;
+    if (tc->fill_setpoint < 0.05)
+        tc->fill_setpoint = 0.05;
+    tc->fill_aggr    = 0.85;
+    tc->fill_emerg   = 0.90;
+    tc->fill_critical = 0.95;
     tc->ema_timeout = initial_to;
-    tc->kp          = 2.0;
-    tc->alpha       = 0.3;
+    tc->kp_below    = 0.75;
+    tc->kp_above    = 2.5;
+    tc->alpha       = 0.25;
     tc->min_to      = 0.1;
-    tc->max_to      = 60.0;
+    tc->max_to      = 180.0;
 }
 
 /* Compute initial timeout from configured rates (before any data). */
 static double
-timeout_ctrl_seed(double fill_target, double hit_rate, double new_rate,
+timeout_ctrl_seed(double fill_setpoint, double hit_rate, double new_rate,
                   unsigned max_entries)
 {
     if (hit_rate < 1.0 || new_rate < 1.0)
         return 10.0;
-    return fill_target * (double)max_entries
+    return fill_setpoint * (double)max_entries
          * log(1.0 + hit_rate / new_rate) / hit_rate;
 }
 
@@ -810,23 +965,42 @@ timeout_ctrl_update(struct sim_timeout_ctrl *tc, double hit_rate,
                     double new_rate, double fill_ratio,
                     unsigned max_entries)
 {
-    double t_ff, correction, t_new;
+    double t_ff;
+    double fill_error;
+    double correction;
+    double t_new;
 
     if (hit_rate < 1.0 || new_rate < 1.0)
         return tc->ema_timeout;
 
     /* Feed-forward */
-    t_ff = tc->fill_target * (double)max_entries
+    t_ff = tc->fill_setpoint * (double)max_entries
          * log(1.0 + hit_rate / new_rate) / hit_rate;
 
-    /* Proportional correction on fill error */
-    correction = 1.0 - tc->kp * (fill_ratio - tc->fill_target);
-    if (correction < 0.5)
-        correction = 0.5;
-    if (correction > 2.0)
-        correction = 2.0;
+    /* Keep fill slightly below target; above-setpoint correction is stronger. */
+    fill_error = fill_ratio - tc->fill_setpoint;
+    if (fill_error > 0.0) {
+        correction = 1.0 - tc->kp_above * fill_error;
+        if (correction < 0.25)
+            correction = 0.25;
+    } else {
+        correction = 1.0 - tc->kp_below * fill_error;
+        if (correction > 1.35)
+            correction = 1.35;
+    }
 
     t_new = t_ff * correction;
+
+    if (fill_ratio >= tc->fill_critical) {
+        if (t_new > 0.10)
+            t_new = 0.10;
+    } else if (fill_ratio >= tc->fill_emerg) {
+        if (t_new > 0.25)
+            t_new = 0.25;
+    } else if (fill_ratio >= tc->fill_aggr) {
+        if (t_new > 0.50)
+            t_new = 0.50;
+    }
 
     /* EMA smoothing */
     tc->ema_timeout = tc->alpha * t_new
@@ -839,6 +1013,28 @@ timeout_ctrl_update(struct sim_timeout_ctrl *tc, double hit_rate,
         tc->ema_timeout = tc->max_to;
 
     return tc->ema_timeout;
+}
+
+static unsigned
+sim_inline_maint_min_bucket_occupancy(const struct sim_config *cfg,
+                                      unsigned active_count,
+                                      unsigned max_entries,
+                                      int auto_timeout,
+                                      const struct sim_timeout_ctrl *tc)
+{
+    double fill_ratio;
+    unsigned level;
+
+    (void)auto_timeout;
+    fill_ratio = sim_fill_ratio(active_count, max_entries);
+    level = sim_fill_reclaim_level(fill_ratio, tc);
+    if (level >= 3u)
+        return 0u;
+    if (level == 2u)
+        return cfg->min_bucket_occupancy > 2u ? 2u : cfg->min_bucket_occupancy;
+    if (level == 1u)
+        return cfg->min_bucket_occupancy > 4u ? 4u : cfg->min_bucket_occupancy;
+    return cfg->min_bucket_occupancy;
 }
 
 static void
@@ -867,6 +1063,9 @@ sim_generator_init(struct sim_generator *gen, const struct sim_config *cfg)
     gen->keys = calloc(cfg->batch_size, sizeof(*gen->keys));
     if (gen->keys == NULL)
         return -1;
+    gen->attack_flags = calloc(cfg->batch_size, sizeof(*gen->attack_flags));
+    if (gen->attack_flags == NULL)
+        return -1;
     if (cfg->ddos_burst) {
         gen->legit_keys = calloc(cfg->legit_pool_size, sizeof(*gen->legit_keys));
         if (gen->legit_keys == NULL)
@@ -882,18 +1081,22 @@ static void
 sim_generator_destroy(struct sim_generator *gen)
 {
     free(gen->legit_keys);
+    free(gen->attack_flags);
     free(gen->keys);
     memset(gen, 0, sizeof(*gen));
 }
 
 static void
 sim_generator_prepare_batch(struct sim_generator *gen, double sim_sec,
-                            const struct sim_receiver *rx,
+                            const struct sim_live_source *live,
                             struct sim_batch *batch)
 {
     const struct sim_config *cfg = gen->cfg;
 
     memset(batch, 0, sizeof(*batch));
+    memset(gen->attack_flags, 0, cfg->batch_size * sizeof(*gen->attack_flags));
+    batch->keys = gen->keys;
+    batch->attack_flags = gen->attack_flags;
     if (cfg->ddos_burst) {
         unsigned burst_period = cfg->burst_on_sec + cfg->burst_off_sec;
         unsigned phase = burst_period > 0u
@@ -903,17 +1106,18 @@ sim_generator_prepare_batch(struct sim_generator *gen, double sim_sec,
         batch->is_burst = (phase >= cfg->burst_off_sec);
         attack_count = batch->is_burst
                      ? (cfg->batch_size * cfg->attack_pct / 100u) : 0u;
-        batch->legit_prefix_len = cfg->batch_size - attack_count;
         batch->total_keys = cfg->batch_size;
 
-        for (unsigned i = 0u; i < batch->legit_prefix_len; i++) {
+        for (unsigned i = 0u; i < cfg->batch_size - attack_count; i++) {
             unsigned pidx = (unsigned)(rng_next() % cfg->legit_pool_size);
 
             gen->keys[i] = gen->legit_keys[pidx];
         }
         for (unsigned i = 0u; i < attack_count; i++)
-            gen->keys[batch->legit_prefix_len + i] =
+            gen->keys[cfg->batch_size - attack_count + i] =
                 sim_make_key(gen->next_attack_key_id + i);
+        for (unsigned i = 0u; i < attack_count; i++)
+            gen->attack_flags[cfg->batch_size - attack_count + i] = 1u;
         gen->next_attack_key_id += attack_count;
         return;
     }
@@ -926,25 +1130,21 @@ sim_generator_prepare_batch(struct sim_generator *gen, double sim_sec,
         gen->hit_count  = cfg->batch_size - gen->miss_count;
     }
 
-    batch->legit_prefix_len = 0u;
-    batch->miss_keys = (rx->active.count >= gen->hit_count)
+    batch->miss_keys = (live->active_count >= gen->hit_count)
                      ? cfg->batch_size - gen->hit_count
-                     : cfg->batch_size - rx->active.count;
+                     : cfg->batch_size - live->active_count;
     batch->total_keys = cfg->batch_size - batch->miss_keys + batch->miss_keys;
 
     {
         unsigned actual_hits = cfg->batch_size - batch->miss_keys;
 
         for (unsigned i = 0u; i < actual_hits; i++) {
-            unsigned pos = (unsigned)(rng_next() % rx->active.count);
-            u32 idx = rx->active.indices[pos];
-
-            gen->keys[i] = rx->records[idx - 1u].entry.key;
+            if (!live->sample_key(live->opaque, rng_next(), &gen->keys[i]))
+                break;
         }
         for (unsigned i = 0u; i < batch->miss_keys; i++)
             gen->keys[actual_hits + i] = sim_make_key(gen->next_key_id + i);
         batch->total_keys = actual_hits + batch->miss_keys;
-        batch->legit_prefix_len = batch->total_keys;
     }
 }
 
@@ -953,6 +1153,30 @@ sim_generator_advance(struct sim_generator *gen, const struct sim_batch *batch)
 {
     if (!gen->cfg->ddos_burst)
         gen->next_key_id += batch->miss_keys;
+}
+
+static int
+sim_receiver_sample_live_key(const void *opaque, u64 rnd, struct flow4_key *key)
+{
+    const struct sim_receiver *rx = opaque;
+    unsigned pos;
+    u32 idx;
+
+    if (rx == NULL || key == NULL || rx->active.count == 0u)
+        return 0;
+    pos = (unsigned)(rnd % rx->active.count);
+    idx = rx->active.indices[pos];
+    *key = rx->records[idx - 1u].entry.key;
+    return 1;
+}
+
+static void
+sim_receiver_live_source(struct sim_live_source *live,
+                         const struct sim_receiver *rx)
+{
+    live->opaque = rx;
+    live->sample_key = sim_receiver_sample_live_key;
+    live->active_count = rx->active.count;
 }
 
 static int
@@ -1043,18 +1267,65 @@ sim_receiver_refill_work(struct sim_receiver *rx, unsigned batch_size)
 }
 
 static unsigned
-sim_receiver_stage_batch(struct sim_receiver *rx, const struct flow4_key *keys,
-                         unsigned batch_total)
+sim_receiver_emergency_reclaim(struct sim_receiver *rx,
+                               const struct sim_config *cfg,
+                               const struct sim_timeout_ctrl *to_ctrl,
+                               u64 sim_time_ns,
+                               u64 timeout_ns,
+                               struct sim_interval_stats *intv)
+{
+    double fill_ratio = sim_fill_ratio(rx->active.count, rx->max_entries);
+    unsigned budget = sim_emergency_scan_budget(cfg, to_ctrl, fill_ratio);
+    unsigned min_bucket_occupancy;
+    unsigned total_expired = 0u;
+    u64 t0;
+    u64 t1;
+
+    if (budget == 0u)
+        return 0u;
+
+    min_bucket_occupancy =
+        sim_emergency_scan_min_bucket_occupancy(to_ctrl, fill_ratio);
+    t0 = sim_rdtsc();
+    while (budget > 0u) {
+        unsigned batch_budget = budget > cfg->maint_max_expired
+                              ? cfg->maint_max_expired : budget;
+        unsigned n_expired = ft_flow4_table_maintain(
+            &rx->ft, rx->maintain_next_bk,
+            sim_time_ns, timeout_ns,
+            rx->expired_idxv, batch_budget,
+            min_bucket_occupancy, &rx->maintain_next_bk);
+
+        if (n_expired == 0u)
+            break;
+        total_expired += n_expired;
+        budget -= n_expired;
+        for (unsigned i = 0u; i < n_expired; i++) {
+            active_remove(&rx->active, rx->expired_idxv[i], rx->records);
+            (void)FT_RECORD_ALLOCATOR_FREE_IDX_TYPED(
+                &rx->alloc, struct sim_record, rx->expired_idxv[i]);
+        }
+        if (sim_fill_ratio(rx->active.count, rx->max_entries) < to_ctrl->fill_aggr)
+            break;
+    }
+    t1 = sim_rdtsc();
+    intv->maint_cycles += t1 - t0;
+    intv->maint_expired += total_expired;
+    return total_expired;
+}
+
+static unsigned
+sim_receiver_stage_batch(struct sim_receiver *rx, const struct sim_batch *batch)
 {
     unsigned staged = 0u;
 
-    for (unsigned i = 0u; i < rx->nb_work && staged < batch_total; i++) {
+    for (unsigned i = 0u; i < rx->nb_work && staged < batch->total_keys; i++) {
         struct flow4_entry *entry =
             ft_flow4_table_entry_ptr(&rx->ft, rx->work_idxv[i]);
 
         if (entry == NULL)
             continue;
-        entry->key = keys[staged];
+        entry->key = batch->keys[staged];
         rx->orig_idxv[staged] = rx->work_idxv[i];
         rx->new_idxv[staged] = rx->work_idxv[i];
         staged++;
@@ -1068,13 +1339,26 @@ sim_receiver_process_batch(struct sim_receiver *rx,
                            const struct sim_batch *batch,
                            u64 sim_time_ns,
                            u64 timeout_ns,
+                           u64 dos_timeout_ns,
+                           int dos_active,
                            int auto_timeout,
                            const struct sim_timeout_ctrl *to_ctrl,
-                           struct sim_interval_stats *intv,
-                           const struct flow4_key *keys)
+                           struct sim_interval_stats *intv)
 {
-    unsigned to_add = sim_receiver_stage_batch(rx, keys, batch->total_keys);
+    double fill_ratio = sim_fill_ratio(rx->active.count, rx->max_entries);
+    u64 batch_timeout_ns =
+        sim_batch_timeout_ns(timeout_ns, dos_timeout_ns, dos_active,
+                             fill_ratio, to_ctrl);
+    unsigned to_add;
     unsigned nb_valid = 0u;
+
+    if (cfg->inline_maint && sim_fill_reclaim_level(fill_ratio, to_ctrl) > 0u) {
+        (void)sim_receiver_emergency_reclaim(rx, cfg, to_ctrl, sim_time_ns,
+                                             batch_timeout_ns, intv);
+        sim_receiver_refill_work(rx, cfg->batch_size);
+    }
+
+    to_add = sim_receiver_stage_batch(rx, batch);
 
     if (to_add < batch->total_keys)
         intv->add_skipped += batch->total_keys - to_add;
@@ -1087,15 +1371,18 @@ sim_receiver_process_batch(struct sim_receiver *rx,
         if (cfg->inline_maint) {
             unsigned inline_budget;
             unsigned unused_capacity = to_add;
+            unsigned min_bucket_occupancy;
 
             inline_budget = sim_inline_maint_unused_budget(
+                cfg, rx->active.count, rx->max_entries, auto_timeout, to_ctrl);
+            min_bucket_occupancy = sim_inline_maint_min_bucket_occupancy(
                 cfg, rx->active.count, rx->max_entries, auto_timeout, to_ctrl);
             unused_capacity += inline_budget;
             n_unused = ft_flow4_table_add_idx_bulk_maint(
                 &rx->ft, rx->new_idxv, to_add, rx->add_policy,
-                sim_time_ns, timeout_ns,
+                sim_time_ns, batch_timeout_ns,
                 rx->unused_idxv, unused_capacity,
-                cfg->min_bucket_occupancy);
+                min_bucket_occupancy);
         } else {
             n_unused = ft_flow4_table_add_idx_bulk(
                 &rx->ft, rx->new_idxv, to_add, rx->add_policy,
@@ -1115,7 +1402,7 @@ sim_receiver_process_batch(struct sim_receiver *rx,
             if (ridx == rx->orig_idxv[i]) {
                 active_add(&rx->active, ridx, rx->records);
                 intv->adds++;
-                if (cfg->ddos_burst && i >= batch->legit_prefix_len)
+                if (batch->attack_flags != NULL && batch->attack_flags[i] != 0u)
                     intv->attack_adds++;
             } else {
                 intv->hits++;
@@ -1154,7 +1441,7 @@ sim_receiver_process_batch(struct sim_receiver *rx,
         t0 = sim_rdtsc();
         n_expired = ft_flow4_table_maintain_idx_bulk(
             &rx->ft, rx->hit_idxv, maint_n,
-            sim_time_ns, timeout_ns,
+            sim_time_ns, batch_timeout_ns,
             rx->expired_idxv, cfg->maint_max_expired,
             8u, 1 /* enable_filter */);
         t1 = sim_rdtsc();
@@ -1181,6 +1468,7 @@ main(int argc, char **argv)
     struct sim_config cfg;
     struct sim_generator gen;
     struct sim_receiver rx;
+    struct sim_live_source live;
     struct sim_batch batch;
     struct sim_total_stats total;
     struct sim_interval_stats intv;
@@ -1233,9 +1521,11 @@ main(int argc, char **argv)
         double ftgt = (double)cfg.fill_target_pct / 100.0;
         double hr = (double)cfg.pps * (100u - cfg.miss_pct) / 100.0;
         double nr = (double)cfg.pps * cfg.miss_pct / 100.0;
-        double seed = timeout_ctrl_seed(ftgt, hr, nr, max_entries);
+        double seed;
 
-        timeout_ctrl_init(&to_ctrl, ftgt, seed);
+        timeout_ctrl_init(&to_ctrl, ftgt, 0.0);
+        seed = timeout_ctrl_seed(to_ctrl.fill_setpoint, hr, nr, max_entries);
+        to_ctrl.ema_timeout = seed;
         timeout_ns = (u64)(seed * 1e9);
     } else {
         timeout_ns = (u64)(cfg.timeout_sec * 1e9);
@@ -1347,10 +1637,13 @@ main(int argc, char **argv)
 
     while (sim_time_ns < UINT64_C(1000000000) + duration_ns) {
         double sim_sec = (double)(sim_time_ns - UINT64_C(1000000000)) / 1e9;
-        sim_generator_prepare_batch(&gen, sim_sec, &rx, &batch);
+        sim_receiver_live_source(&live, &rx);
+        sim_generator_prepare_batch(&gen, sim_sec, &live, &batch);
         sim_receiver_process_batch(&rx, &cfg, &batch, sim_time_ns,
-                                   timeout_ns, auto_timeout, &to_ctrl,
-                                   &intv, gen.keys);
+                                   timeout_ns, dos_timeout_ns,
+                                   dos_state == SIM_DOS_ACTIVE,
+                                   auto_timeout,
+                                   &to_ctrl, &intv);
         sim_generator_advance(&gen, &batch);
 
         total.batches++;
@@ -1359,6 +1652,7 @@ main(int argc, char **argv)
         if (sim_sec >= next_report_sec) {
             double fill = 100.0 * (double)rx.active.count / (double)max_entries;
             double fill_ratio = (double)rx.active.count / (double)max_entries;
+            double report_to_sec;
             double add_cy = intv.finds > 0u
                           ? (double)intv.add_cycles / (double)intv.finds
                           : 0.0;
@@ -1385,21 +1679,23 @@ main(int argc, char **argv)
 
                 /* DoS state machine (--ddos-burst) */
                 if (cfg.ddos_burst) {
-                    if (dos_state == SIM_DOS_NORMAL) {
+                    if (fill_ratio >= to_ctrl.fill_aggr) {
+                        dos_state = SIM_DOS_ACTIVE;
+                    } else if (dos_state == SIM_DOS_NORMAL) {
                         if (actual_miss > (double)cfg.dos_threshold_pct) {
                             dos_state = SIM_DOS_ACTIVE;
-                            timeout_ns = dos_timeout_ns;
                         }
                     } else {
-                        if (actual_miss < (double)cfg.normal_threshold_pct) {
+                        if (actual_miss < (double)cfg.normal_threshold_pct
+                            && fill_ratio < to_ctrl.fill_setpoint) {
                             dos_state = SIM_DOS_NORMAL;
-                            if (auto_timeout)
-                                timeout_ns = (u64)(to_ctrl.ema_timeout * 1e9);
-                            else
-                                timeout_ns = (u64)(cfg.timeout_sec * 1e9);
                         }
                     }
                 }
+
+                report_to_sec = (double)sim_batch_timeout_ns(
+                    timeout_ns, dos_timeout_ns, dos_state == SIM_DOS_ACTIVE,
+                    fill_ratio, &to_ctrl) / 1e9;
 
                 if (cfg.ddos_burst) {
                     const char *mode;
@@ -1416,8 +1712,7 @@ main(int argc, char **argv)
                            sim_sec, rx.active.count, fill, actual_miss,
                            mode,
                            intv.finds, intv.hits, intv.adds, total_exp,
-                           add_cy, mnt_cy,
-                           (double)timeout_ns / 1e9);
+                           add_cy, mnt_cy, report_to_sec);
                 } else {
                     printf("  %5.0f  %7u %5.1f%% %4.1f%%"
                            "   %8" PRIu64 " %8" PRIu64
@@ -1425,8 +1720,7 @@ main(int argc, char **argv)
                            "  %7.1f %9.1f %7.2f\n",
                            sim_sec, rx.active.count, fill, actual_miss,
                            intv.finds, intv.hits, intv.adds, total_exp,
-                           add_cy, mnt_cy,
-                           (double)timeout_ns / 1e9);
+                           add_cy, mnt_cy, report_to_sec);
                 }
             }
 
