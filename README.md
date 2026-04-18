@@ -730,10 +730,10 @@ Current `flowtable/` characteristics:
 See [flowtable/README.md](flowtable/README.md) for the flow-table API,
 storage model, resize behavior, benchmark commands, and validation notes.
 For release-facing text, see [CHANGELOG.md](CHANGELOG.md) and
-[RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md). For GitHub metadata and
+[RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md). For GitHub metadata and
 release preparation, see
 [GITHUB_ABOUT.md](GITHUB_ABOUT.md),
-[RELEASE_NOTES_v0.2.0_SHORT.md](RELEASE_NOTES_v0.2.0_SHORT.md), and
+[RELEASE_NOTES_v0.3.0_SHORT.md](RELEASE_NOTES_v0.3.0_SHORT.md), and
 [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md).
 
 ---

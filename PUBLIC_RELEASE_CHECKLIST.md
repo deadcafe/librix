@@ -6,7 +6,7 @@ Use this checklist before publishing a public release of `librix`.
 
 - [ ] Confirm the release scope (`librix`, `flowtable`, or both)
 - [ ] CI passes for `gcc` and `clang`
-- [ ] Confirm the release tag (for example `v0.2.0`)
+- [ ] Confirm the release tag (for example `v0.3.0`)
 - [ ] Confirm what is considered stable vs experimental
 
 ## Documentation

@@ -708,8 +708,8 @@ entry64 *ht64_remove(&head, buckets, pool, key_value);
 設計・API・性能データは [flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
 公開向けの要約文書としては
 [CHANGELOG.md](CHANGELOG.md)、
-[RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md)、
-[RELEASE_NOTES_v0.2.0_SHORT.md](RELEASE_NOTES_v0.2.0_SHORT.md)、
+[RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md)、
+[RELEASE_NOTES_v0.3.0_SHORT.md](RELEASE_NOTES_v0.3.0_SHORT.md)、
 [GITHUB_ABOUT.md](GITHUB_ABOUT.md)、
 [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md)
 も用意しています。

@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog.
 
+## [0.3.0] - 2026-04-18
+
+Minor release focused on reusable index-ring primitives, flow-entry allocator
+cleanup, and more realistic flow-cache simulation under burst load.
+
+### Added
+
+- New `rix_ring` public API for `u32` index FIFO/LIFO operation with burst
+  enqueue/dequeue and push/pop helpers.
+- New release notes for `v0.3.0`.
+- `add_idx_bulk_maint` APIs for `flow4`, `flow6`, and `flowu` so add and
+  maintenance work can be combined in one call.
+
+### Changed
+
+- Test, bench, and simulator flow-entry allocators now use a ring-backed LIFO
+  instead of intrusive free-list links embedded in records.
+- The flow-cache simulator now separates generator and receiver roles more
+  clearly, with explicit batch metadata for traffic classification.
+- Timeout control in the simulator now uses a near-target setpoint in normal
+  operation and batch-level reclaim bands at `85%`, `90%`, and `95%` fill.
+
+### Fixed
+
+- The DDoS simulator no longer pins steady-state fill near `67%` by applying
+  the DoS timeout outside the aggressive reclaim band.
+- Burst handling now reclaims per batch before add work when fill enters the
+  aggressive band, keeping tested burst scenarios below the `95%` guardrail.
+- Flow-entry records used by tests and simulator support paths no longer carry
+  allocator-only link/live-marker fields.
+
+### Validation status
+
+- `make -C flowtable/test /home/tokuzo/work/deadcafe/librix/flowtable/build/bin/ft_sim_cache`: passed
+- Hugepage `ft_sim_cache` scenarios validated at `1M entry / 1M pps / batch=256`
+
 ## [0.2.0] - 2026-04-10
 
 Public release focused on consolidating the repository around `flowtable/`
