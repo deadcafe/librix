@@ -38,33 +38,29 @@ struct rix_hash_find_ctx_extra_s {
 
 /* ---- accessor / prefetch helpers --------------------------------------- */
 
-static RIX_FORCE_INLINE struct rix_hash_bucket_extra_s *
-rix_hash_extra_bucket_of_idx(struct rix_hash_bucket_extra_s *buckets,
-                             unsigned bk_idx)
-{
-    return &buckets[bk_idx];
-}
+/* Return a pointer to buckets[bk_idx]. */
+#  ifndef rix_hash_extra_bucket_of_idx
+#    define rix_hash_extra_bucket_of_idx(buckets, bk_idx) \
+        (&(buckets)[(unsigned)(bk_idx)])
+#  endif
 
-static RIX_FORCE_INLINE u32 *
-rix_hash_extra_bucket_hashes_of_idx(struct rix_hash_bucket_extra_s *buckets,
-                                    unsigned bk_idx)
-{
-    return buckets[bk_idx].hash;
-}
+/* Return buckets[bk_idx].hash[]. */
+#  ifndef rix_hash_extra_bucket_hashes_of_idx
+#    define rix_hash_extra_bucket_hashes_of_idx(buckets, bk_idx) \
+        (rix_hash_extra_bucket_of_idx((buckets), (bk_idx))->hash)
+#  endif
 
-static RIX_FORCE_INLINE u32 *
-rix_hash_extra_bucket_indices_of_idx(struct rix_hash_bucket_extra_s *buckets,
-                                     unsigned bk_idx)
-{
-    return buckets[bk_idx].idx;
-}
+/* Return buckets[bk_idx].idx[]. */
+#  ifndef rix_hash_extra_bucket_indices_of_idx
+#    define rix_hash_extra_bucket_indices_of_idx(buckets, bk_idx) \
+        (rix_hash_extra_bucket_of_idx((buckets), (bk_idx))->idx)
+#  endif
 
-static RIX_FORCE_INLINE u32 *
-rix_hash_extra_bucket_extras_of_idx(struct rix_hash_bucket_extra_s *buckets,
-                                    unsigned bk_idx)
-{
-    return buckets[bk_idx].extra;
-}
+/* Return buckets[bk_idx].extra[]. */
+#  ifndef rix_hash_extra_bucket_extras_of_idx
+#    define rix_hash_extra_bucket_extras_of_idx(buckets, bk_idx) \
+        (rix_hash_extra_bucket_of_idx((buckets), (bk_idx))->extra)
+#  endif
 
 static RIX_FORCE_INLINE void
 rix_hash_prefetch_extra_bucket_hashes_of(
