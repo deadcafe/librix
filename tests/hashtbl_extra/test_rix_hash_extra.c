@@ -161,6 +161,42 @@ test_kickout_preserves_extra(void)
     }
 }
 
+static void
+test_remove_clears_extra(void)
+{
+    printf("[T] remove clears extra\n");
+    e_basic_init();
+
+    for (unsigned i = 0; i < NB_BASIC; i++)
+        eht_insert(&e_head, e_bk, e_basic, &e_basic[i], 0xABCD0000u | i);
+
+    /* Snapshot bk/slot before removal */
+    unsigned saved_bk[NB_BASIC];
+    unsigned saved_slot[NB_BASIC];
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        saved_bk[i]   = e_basic[i].cur_hash & e_head.rhh_mask;
+        saved_slot[i] = e_basic[i].slot;
+    }
+
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        struct enode *r = eht_remove(&e_head, e_bk, e_basic, &e_basic[i]);
+        if (r != &e_basic[i])
+            FAILF("remove[%u] wrong ptr", i);
+        if (e_bk[saved_bk[i]].extra[saved_slot[i]] != 0u)
+            FAILF("remove[%u] did not clear extra at bk=%u slot=%u (got 0x%x)",
+                  i, saved_bk[i], saved_slot[i],
+                  e_bk[saved_bk[i]].extra[saved_slot[i]]);
+        if (e_bk[saved_bk[i]].idx[saved_slot[i]] != (u32)RIX_NIL)
+            FAILF("remove[%u] did not clear idx at bk=%u slot=%u",
+                  i, saved_bk[i], saved_slot[i]);
+        if (e_bk[saved_bk[i]].hash[saved_slot[i]] != 0u)
+            FAILF("remove[%u] did not clear hash at bk=%u slot=%u",
+                  i, saved_bk[i], saved_slot[i]);
+    }
+    if (e_head.rhh_nb != 0u)
+        FAILF("rhh_nb expected 0 after full remove, got %u", e_head.rhh_nb);
+}
+
 int
 main(void)
 {
@@ -168,6 +204,7 @@ main(void)
     test_bucket_layout();
     test_insert_find_remove_basic();
     test_kickout_preserves_extra();
+    test_remove_clears_extra();
     printf("PASS\n");
     return 0;
 }
