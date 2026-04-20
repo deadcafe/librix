@@ -10,7 +10,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
-#include <time.h>
 
 #include "rix_hash.h"
 
