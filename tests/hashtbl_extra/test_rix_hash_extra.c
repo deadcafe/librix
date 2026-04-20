@@ -245,6 +245,60 @@ test_staged_find_xN(void)
     }
 }
 
+/* Classic slot variant, distinct name prefix */
+struct cnode {
+    u32 cur_hash;
+    u16 slot;
+    u16 _pad;
+    struct ek key;
+};
+
+RIX_HASH_HEAD(cht);
+RIX_HASH_GENERATE_SLOT(cht, cnode, key, cur_hash, slot, ek_cmp)
+
+static void
+test_coexist_classic_extra(void)
+{
+    printf("[T] classic + extra coexist in one TU\n");
+
+    struct cnode c_pool[NB_BASIC];
+    struct rix_hash_bucket_s c_bk[NB_BK_BASIC] __attribute__((aligned(64)));
+    struct cht c_head;
+
+    memset(c_pool, 0, sizeof(c_pool));
+    memset(c_bk,   0, sizeof(c_bk));
+    RIX_HASH_INIT(cht, &c_head, NB_BK_BASIC);
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        c_pool[i].key.hi = (u64)(i + 1);
+        c_pool[i].key.lo = 0xCAFEBABEu;
+    }
+    for (unsigned i = 0; i < NB_BASIC; i++)
+        if (cht_insert(&c_head, c_bk, c_pool, &c_pool[i]) != NULL)
+            FAILF("classic insert[%u] unexpected dup", i);
+
+    e_basic_init();
+    for (unsigned i = 0; i < NB_BASIC; i++)
+        if (eht_insert(&e_head, e_bk, e_basic, &e_basic[i], i) != NULL)
+            FAILF("extra insert[%u] unexpected dup", i);
+
+    /* Both tables must find their own entries */
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        if (cht_find(&c_head, c_bk, c_pool, &c_pool[i].key) != &c_pool[i])
+            FAILF("classic find[%u] wrong", i);
+        if (eht_find(&e_head, e_bk, e_basic, &e_basic[i].key) != &e_basic[i])
+            FAILF("extra find[%u] wrong", i);
+    }
+
+    /* Classic bucket type is 128B, extra type is 192B -
+       independence check. */
+    if (sizeof(struct rix_hash_bucket_s) !=
+            2u * RIX_HASH_BUCKET_ENTRY_SZ * sizeof(u32))
+        FAIL("classic bucket size wrong");
+    if (sizeof(struct rix_hash_bucket_extra_s) !=
+            3u * RIX_HASH_BUCKET_ENTRY_SZ * sizeof(u32))
+        FAIL("extra bucket size wrong");
+}
+
 int
 main(void)
 {
@@ -255,6 +309,7 @@ main(void)
     test_remove_clears_extra();
     test_staged_find_x1();
     test_staged_find_xN();
+    test_coexist_classic_extra();
     printf("PASS\n");
     return 0;
 }
