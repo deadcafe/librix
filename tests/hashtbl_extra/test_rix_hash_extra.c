@@ -398,6 +398,55 @@ test_fuzz_extra_consistency(void)
     printf("    fuzz: ins=%u rem=%u upd=%u\n", inserts, removes, updates);
 }
 
+static RIX_UNUSED RIX_FORCE_INLINE union rix_hash_hash_u
+ek_hash(const struct ek *k, u32 mask)
+{
+    return rix_hash_bytes_fast((const void *)k, sizeof(*k), mask);
+}
+
+/* Distinct head + name prefix. */
+struct xnode {
+    u32 cur_hash;
+    u16 slot;
+    u16 _pad;
+    struct ek key;
+};
+
+RIX_HASH_HEAD(xht);
+RIX_HASH_GENERATE_SLOT_EXTRA_EX(xht, xnode, key, cur_hash, slot,
+                                 ek_cmp, ek_hash)
+
+static void
+test_ex_variant(void)
+{
+    printf("[T] SLOT_EXTRA_EX (explicit hash_fn)\n");
+    struct xnode pool[NB_BASIC];
+    struct rix_hash_bucket_extra_s bk[NB_BK_BASIC]
+        __attribute__((aligned(64)));
+    struct xht head;
+
+    memset(pool, 0, sizeof(pool));
+    memset(bk,   0, sizeof(bk));
+    RIX_HASH_INIT(xht, &head, NB_BK_BASIC);
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        pool[i].key.hi = (u64)(i + 1);
+        pool[i].key.lo = 0x1234ABCDu;
+    }
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        if (xht_insert(&head, bk, pool, &pool[i], 0x9000u + i) != NULL)
+            FAILF("ex insert[%u] dup", i);
+    }
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        struct xnode *f = xht_find(&head, bk, pool, &pool[i].key);
+        if (f != &pool[i])
+            FAILF("ex find[%u] wrong", i);
+        unsigned b = f->cur_hash & head.rhh_mask;
+        unsigned s = f->slot;
+        if (bk[b].extra[s] != 0x9000u + i)
+            FAILF("ex extra[%u] got 0x%x", i, bk[b].extra[s]);
+    }
+}
+
 int
 main(void)
 {
@@ -410,6 +459,7 @@ main(void)
     test_staged_find_xN();
     test_coexist_classic_extra();
     test_fuzz_extra_consistency();
+    test_ex_variant();
     printf("PASS\n");
     return 0;
 }
