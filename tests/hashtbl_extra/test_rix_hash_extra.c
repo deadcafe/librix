@@ -197,6 +197,54 @@ test_remove_clears_extra(void)
         FAILF("rhh_nb expected 0 after full remove, got %u", e_head.rhh_nb);
 }
 
+static void
+test_staged_find_x1(void)
+{
+    printf("[T] staged find x1\n");
+    e_basic_init();
+    for (unsigned i = 0; i < NB_BASIC; i++)
+        eht_insert(&e_head, e_bk, e_basic, &e_basic[i], 0xE1E1u + i);
+
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        struct rix_hash_find_ctx_extra_s ctx;
+        RIX_HASH_HASH_KEY(eht, &ctx, &e_head, e_bk, &e_basic[i].key);
+        RIX_HASH_SCAN_BK (eht, &ctx, &e_head, e_bk);
+        RIX_HASH_PREFETCH_NODE(eht, &ctx, e_basic);
+        struct enode *n = RIX_HASH_CMP_KEY(eht, &ctx, e_basic);
+        if (n != &e_basic[i])
+            FAILF("staged find[%u] expected %p got %p",
+                  i, (void *)&e_basic[i], (void *)n);
+    }
+}
+
+static void
+test_staged_find_xN(void)
+{
+    printf("[T] staged find xN\n");
+    e_basic_init();
+    for (unsigned i = 0; i < NB_BASIC; i++)
+        eht_insert(&e_head, e_bk, e_basic, &e_basic[i], 0xFEFEu + i);
+
+    enum { N = 4 };
+    struct rix_hash_find_ctx_extra_s ctx[N];
+    const struct ek *keys[N];
+    struct enode    *res[N];
+
+    for (unsigned base = 0; base + N <= NB_BASIC; base += N) {
+        for (unsigned i = 0; i < N; i++)
+            keys[i] = &e_basic[base + i].key;
+        RIX_HASH_HASH_KEY_N(eht, ctx, N, &e_head, e_bk, keys);
+        RIX_HASH_SCAN_BK_N (eht, ctx, N, &e_head, e_bk);
+        RIX_HASH_PREFETCH_NODE_N(eht, ctx, N, e_basic);
+        RIX_HASH_CMP_KEY_N (eht, ctx, N, e_basic, res);
+        for (unsigned i = 0; i < N; i++) {
+            if (res[i] != &e_basic[base + i])
+                FAILF("staged_n[%u+%u] expected %p got %p",
+                      base, i, (void *)&e_basic[base + i], (void *)res[i]);
+        }
+    }
+}
+
 int
 main(void)
 {
@@ -205,6 +253,8 @@ main(void)
     test_insert_find_remove_basic();
     test_kickout_preserves_extra();
     test_remove_clears_extra();
+    test_staged_find_x1();
+    test_staged_find_xN();
     printf("PASS\n");
     return 0;
 }
