@@ -299,6 +299,105 @@ test_coexist_classic_extra(void)
         FAIL("extra bucket size wrong");
 }
 
+/* A tiny deterministic PRNG (xorshift32) for reproducibility. */
+static u32
+xs32(u32 *s)
+{
+    u32 x = *s;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *s = x;
+    return x;
+}
+
+#define FUZZ_POOL   512u
+#define FUZZ_BK      64u
+#define FUZZ_OPS 20000u
+
+static struct enode fuzz_pool[FUZZ_POOL];
+static struct rix_hash_bucket_extra_s fuzz_bk[FUZZ_BK]
+    __attribute__((aligned(64)));
+static struct eht fuzz_head;
+static u32 fuzz_expected[FUZZ_POOL]; /* 0 = not inserted */
+
+static void
+test_fuzz_extra_consistency(void)
+{
+    printf("[T] fuzz extra consistency\n");
+    memset(fuzz_pool, 0, sizeof(fuzz_pool));
+    memset(fuzz_bk,   0, sizeof(fuzz_bk));
+    memset(fuzz_expected, 0, sizeof(fuzz_expected));
+    RIX_HASH_INIT(eht, &fuzz_head, FUZZ_BK);
+
+    for (unsigned i = 0; i < FUZZ_POOL; i++) {
+        fuzz_pool[i].key.hi = (u64)(i + 1);
+        fuzz_pool[i].key.lo = (u64)i * 0x9E3779B97F4A7C15ULL;
+    }
+
+    u32 rng = 0xC0FFEE00u;
+    unsigned inserts = 0, removes = 0, updates = 0;
+    for (unsigned op = 0; op < FUZZ_OPS; op++) {
+        u32 r = xs32(&rng);
+        unsigned i = r % FUZZ_POOL;
+        unsigned action = (r >> 16) & 3u;  /* 0..3 */
+
+        if (action == 0u || (action == 1u && fuzz_expected[i] == 0u)) {
+            /* insert */
+            if (fuzz_expected[i] != 0u)
+                continue; /* already inserted; skip */
+            u32 extra = (r | 1u); /* non-zero so we can detect 0 = clear */
+            struct enode *dup = eht_insert(&fuzz_head, fuzz_bk, fuzz_pool,
+                                           &fuzz_pool[i], extra);
+            if (dup != NULL)
+                FAILF("fuzz insert[%u] unexpected dup %p",
+                      i, (void *)dup);
+            fuzz_expected[i] = extra;
+            inserts++;
+        } else if (action == 1u) {
+            /* remove */
+            struct enode *rm = eht_remove(&fuzz_head, fuzz_bk, fuzz_pool,
+                                          &fuzz_pool[i]);
+            if (rm != &fuzz_pool[i])
+                FAILF("fuzz remove[%u] expected %p got %p",
+                      i, (void *)&fuzz_pool[i], (void *)rm);
+            fuzz_expected[i] = 0u;
+            removes++;
+        } else {
+            /* extra update (only if present) */
+            if (fuzz_expected[i] == 0u)
+                continue;
+            unsigned bk   = fuzz_pool[i].cur_hash & fuzz_head.rhh_mask;
+            unsigned slot = fuzz_pool[i].slot;
+            u32 new_extra = (r ^ 0xABCD0000u) | 1u;
+            fuzz_bk[bk].extra[slot] = new_extra;
+            fuzz_expected[i] = new_extra;
+            updates++;
+        }
+
+        /* Every 128 ops, validate a random 8 entries */
+        if ((op & 127u) == 127u) {
+            for (unsigned t = 0; t < 8u; t++) {
+                unsigned j = xs32(&rng) % FUZZ_POOL;
+                if (fuzz_expected[j] == 0u)
+                    continue;
+                struct enode *f = eht_find(&fuzz_head, fuzz_bk, fuzz_pool,
+                                           &fuzz_pool[j].key);
+                if (f != &fuzz_pool[j])
+                    FAILF("fuzz find[%u] at op=%u returned %p expected %p",
+                          j, op, (void *)f, (void *)&fuzz_pool[j]);
+                unsigned bk   = f->cur_hash & fuzz_head.rhh_mask;
+                unsigned slot = f->slot;
+                if (fuzz_bk[bk].extra[slot] != fuzz_expected[j])
+                    FAILF("fuzz extra[%u] at op=%u expected 0x%x got 0x%x",
+                          j, op, fuzz_expected[j],
+                          fuzz_bk[bk].extra[slot]);
+            }
+        }
+    }
+    printf("    fuzz: ins=%u rem=%u upd=%u\n", inserts, removes, updates);
+}
+
 int
 main(void)
 {
@@ -310,6 +409,7 @@ main(void)
     test_staged_find_x1();
     test_staged_find_xN();
     test_coexist_classic_extra();
+    test_fuzz_extra_consistency();
     printf("PASS\n");
     return 0;
 }
