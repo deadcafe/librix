@@ -117,12 +117,57 @@ test_insert_find_remove_basic(void)
               NB_BASIC / 2, e_head.rhh_nb);
 }
 
+#define NB_KICK    256u
+#define NB_BK_KICK  32u  /* 32 * 16 = 512 slots -> ~50% fill */
+
+static struct enode                     k_pool[NB_KICK];
+static struct rix_hash_bucket_extra_s   k_bk[NB_BK_KICK]
+    __attribute__((aligned(64)));
+static struct eht                       k_head;
+
+static void
+test_kickout_preserves_extra(void)
+{
+    printf("[T] kickout preserves extra\n");
+    memset(k_pool, 0, sizeof(k_pool));
+    memset(k_bk,   0, sizeof(k_bk));
+    RIX_HASH_INIT(eht, &k_head, NB_BK_KICK);
+
+    for (unsigned i = 0; i < NB_KICK; i++) {
+        k_pool[i].key.hi = (u64)(0xA5A5A500u + i);
+        k_pool[i].key.lo = (u64)(0x5A5A5A00u + i) * 17ULL;
+    }
+
+    for (unsigned i = 0; i < NB_KICK; i++) {
+        u32 expected_extra = 0xC0DE0000u | i;
+        struct enode *dup = eht_insert(&k_head, k_bk, k_pool,
+                                       &k_pool[i], expected_extra);
+        if (dup != NULL)
+            FAILF("kick insert[%u] unexpected dup %p", i, (void *)dup);
+    }
+    if (k_head.rhh_nb != NB_KICK)
+        FAILF("kick rhh_nb expected %u got %u", NB_KICK, k_head.rhh_nb);
+
+    for (unsigned i = 0; i < NB_KICK; i++) {
+        struct enode *f = eht_find(&k_head, k_bk, k_pool, &k_pool[i].key);
+        if (f != &k_pool[i])
+            FAILF("kick find[%u] wrong ptr", i);
+        unsigned bk   = f->cur_hash & k_head.rhh_mask;
+        unsigned slot = f->slot;
+        u32 expected  = 0xC0DE0000u | i;
+        if (k_bk[bk].extra[slot] != expected)
+            FAILF("kick extra[%u]: expected 0x%x got 0x%x at bk=%u slot=%u",
+                  i, expected, k_bk[bk].extra[slot], bk, slot);
+    }
+}
+
 int
 main(void)
 {
     rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
     test_bucket_layout();
     test_insert_find_remove_basic();
+    test_kickout_preserves_extra();
     printf("PASS\n");
     return 0;
 }
