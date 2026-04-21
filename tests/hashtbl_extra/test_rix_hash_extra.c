@@ -447,6 +447,52 @@ test_ex_variant(void)
     }
 }
 
+/* Prototype/definition split check: declare via PROTOTYPE_STATIC first,
+ * then define via GENERATE_STATIC with the same name. A mismatch between
+ * the two (bucket type or insert arity) makes the compiler reject the
+ * redeclaration, so this block is the compile-time test itself. */
+struct pnode {
+    u32 cur_hash;
+    u16 slot;
+    u16 _pad;
+    struct ek key;
+};
+
+RIX_HASH_HEAD(pht);
+RIX_HASH_PROTOTYPE_STATIC_SLOT_EXTRA(pht, pnode, key, cur_hash, slot, ek_cmp)
+RIX_HASH_GENERATE_STATIC_SLOT_EXTRA(pht, pnode, key, cur_hash, slot, ek_cmp)
+
+static void
+test_prototype_split(void)
+{
+    printf("[T] PROTOTYPE/GENERATE signature parity\n");
+    struct pnode pool[NB_BASIC];
+    struct rix_hash_bucket_extra_s bk[NB_BK_BASIC]
+        __attribute__((aligned(64)));
+    struct pht head;
+
+    memset(pool, 0, sizeof(pool));
+    memset(bk,   0, sizeof(bk));
+    RIX_HASH_INIT(pht, &head, NB_BK_BASIC);
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        pool[i].key.hi = (u64)(i + 1);
+        pool[i].key.lo = 0xFEEDFACEu;
+    }
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        if (pht_insert(&head, bk, pool, &pool[i], 0xB000u + i) != NULL)
+            FAILF("pht insert[%u] dup", i);
+    }
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        struct pnode *f = pht_find(&head, bk, pool, &pool[i].key);
+        if (f != &pool[i])
+            FAILF("pht find[%u] wrong", i);
+    }
+    for (unsigned i = 0; i < NB_BASIC; i++) {
+        if (pht_remove(&head, bk, pool, &pool[i]) != &pool[i])
+            FAILF("pht remove[%u] wrong", i);
+    }
+}
+
 int
 main(void)
 {
@@ -460,6 +506,7 @@ main(void)
     test_coexist_classic_extra();
     test_fuzz_extra_consistency();
     test_ex_variant();
+    test_prototype_split();
     printf("PASS\n");
     return 0;
 }

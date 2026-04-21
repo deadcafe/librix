@@ -111,17 +111,44 @@ rix_hash_prefetch_extra_bucket_full_of(
 
 /* ---- PROTOTYPE macros -------------------------------------------------- */
 
+/*
+ * Declare the public slot_extra API surface. Mirrors the signatures emitted
+ * by RIX_HASH_GENERATE_SLOT_EXTRA_INTERNAL (192B bucket type, 5-arg insert).
+ * Use this when splitting declaration (.h) and definition (.c) across TUs;
+ * single-TU users can skip PROTOTYPE and call GENERATE directly.
+ */
+#  define RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, attr) \
+    attr void name##_init(struct name *head, unsigned nb_bk);                  \
+    attr struct type *name##_insert(struct name *head,                         \
+                                    struct rix_hash_bucket_extra_s *buckets,   \
+                                    struct type *base,                         \
+                                    struct type *elm,                          \
+                                    u32 extra);                                \
+    attr unsigned name##_remove_at(struct name *head,                          \
+                                   struct rix_hash_bucket_extra_s *buckets,    \
+                                   unsigned bk,                                \
+                                   unsigned slot);                             \
+    attr struct type *name##_remove(struct name *head,                         \
+                                    struct rix_hash_bucket_extra_s *buckets,   \
+                                    struct type *base,                         \
+                                    struct type *elm);                         \
+    attr int name##_walk(struct name *head,                                    \
+                         struct rix_hash_bucket_extra_s *buckets,              \
+                         struct type *base,                                    \
+                         int (*cb)(struct type *, void *),                     \
+                         void *arg);
+
 #  define RIX_HASH_PROTOTYPE_SLOT_EXTRA_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
-    RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, )
+    RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, )
 
 #  define RIX_HASH_PROTOTYPE_SLOT_EXTRA(name, type, key_field, hash_field, slot_field, cmp_fn) \
-    RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, )
+    RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, )
 
 #  define RIX_HASH_PROTOTYPE_STATIC_SLOT_EXTRA_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
-    RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
+    RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
 #  define RIX_HASH_PROTOTYPE_STATIC_SLOT_EXTRA(name, type, key_field, hash_field, slot_field, cmp_fn) \
-    RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
+    RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
 /* ---- GENERATE wrappers ------------------------------------------------- */
 
