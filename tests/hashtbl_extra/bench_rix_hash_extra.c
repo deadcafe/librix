@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <inttypes.h>
+#include <sys/mman.h>
 
 #include "rix_hash.h"
 
@@ -35,10 +35,18 @@ RIX_HASH_HEAD(bht);
 RIX_HASH_GENERATE_SLOT_EXTRA(bht, bnode, key, cur_hash, slot, bkey_cmp)
 
 static RIX_FORCE_INLINE u64
-rdtsc(void)
+tsc_start(void)
 {
     u32 lo, hi;
-    __asm__ __volatile__("lfence; rdtsc" : "=a"(lo), "=d"(hi));
+    __asm__ volatile ("lfence\n\trdtsc\n\t" : "=a"(lo), "=d"(hi));
+    return ((u64)hi << 32) | lo;
+}
+
+static RIX_FORCE_INLINE u64
+tsc_end(void)
+{
+    u32 lo, hi;
+    __asm__ volatile ("rdtscp\n\tlfence\n\t" : "=a"(lo), "=d"(hi) :: "rcx");
     return ((u64)hi << 32) | lo;
 }
 
@@ -51,17 +59,31 @@ main(void)
 {
     rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
 
-    static struct bnode *pool;
-    static struct rix_hash_bucket_extra_s *bk;
     struct bht head;
 
-    pool = calloc(N_KEYS, sizeof(*pool));
-    bk   = aligned_alloc(64, (size_t)N_BK * sizeof(*bk));
-    if (!pool || !bk) {
-        fprintf(stderr, "alloc failed\n");
+    size_t node_mem = (size_t)N_KEYS * sizeof(struct bnode);
+    size_t bk_mem   = (size_t)N_BK * sizeof(struct rix_hash_bucket_extra_s);
+
+    struct bnode *pool = mmap(NULL, node_mem, PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (pool == MAP_FAILED) {
+        perror("mmap pool");
         return 1;
     }
-    memset(bk, 0, (size_t)N_BK * sizeof(*bk));
+    madvise(pool, node_mem, MADV_HUGEPAGE);
+    memset(pool, 0, node_mem);
+
+    struct rix_hash_bucket_extra_s *bk = mmap(NULL, bk_mem,
+                                              PROT_READ | PROT_WRITE,
+                                              MAP_PRIVATE | MAP_ANONYMOUS,
+                                              -1, 0);
+    if (bk == MAP_FAILED) {
+        perror("mmap bk");
+        munmap(pool, node_mem);
+        return 1;
+    }
+    madvise(bk, bk_mem, MADV_HUGEPAGE);
+    memset(bk, 0, bk_mem);
 
     for (unsigned i = 0; i < N_KEYS; i++) {
         pool[i].key.hi = (u64)(i + 1);
@@ -71,36 +93,36 @@ main(void)
     u64 ins_cy = 0, find_cy = 0, miss_cy = 0, rm_cy = 0;
 
     for (unsigned r = 0; r < REPS; r++) {
-        memset(bk, 0, (size_t)N_BK * sizeof(*bk));
+        memset(bk, 0, bk_mem);
         RIX_HASH_INIT(bht, &head, N_BK);
 
-        u64 t0 = rdtsc();
+        u64 t0 = tsc_start();
         for (unsigned i = 0; i < N_KEYS; i++)
             (void)bht_insert(&head, bk, pool, &pool[i], 0xABCDu + i);
-        u64 t1 = rdtsc();
+        u64 t1 = tsc_end();
         ins_cy += (t1 - t0);
 
-        t0 = rdtsc();
+        t0 = tsc_start();
         for (unsigned i = 0; i < N_KEYS; i++)
             (void)bht_find(&head, bk, pool, &pool[i].key);
-        t1 = rdtsc();
+        t1 = tsc_end();
         find_cy += (t1 - t0);
 
         struct bkey miss;
         miss.hi = 0xDEADBEEFu;
         miss.lo = 0u;
-        t0 = rdtsc();
+        t0 = tsc_start();
         for (unsigned i = 0; i < N_KEYS; i++) {
             miss.lo = i;
             (void)bht_find(&head, bk, pool, &miss);
         }
-        t1 = rdtsc();
+        t1 = tsc_end();
         miss_cy += (t1 - t0);
 
-        t0 = rdtsc();
+        t0 = tsc_start();
         for (unsigned i = 0; i < N_KEYS; i++)
             (void)bht_remove(&head, bk, pool, &pool[i]);
-        t1 = rdtsc();
+        t1 = tsc_end();
         rm_cy += (t1 - t0);
     }
 
@@ -112,7 +134,7 @@ main(void)
     printf("  find_miss  : %5.2f cy/op\n", (double)miss_cy / (double)total_ops);
     printf("  remove     : %5.2f cy/op\n", (double)rm_cy / (double)total_ops);
 
-    free(pool);
-    free(bk);
+    munmap(pool, node_mem);
+    munmap(bk, bk_mem);
     return 0;
 }
