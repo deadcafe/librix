@@ -2,7 +2,7 @@ include mk/cc.mk
 export CC
 
 TESTDIRS := tests/slist tests/list tests/stailq tests/tailq tests/circleq \
-            tests/rbtree tests/hashtbl tests/hashtbl32 tests/hashtbl64
+            tests/rbtree tests/hashtbl tests/hashtbl_extra tests/hashtbl32 tests/hashtbl64
 BENCHDIRS := flowtable
 SUBDIRS  := $(TESTDIRS) flowtable
 
@@ -73,7 +73,7 @@ $(BENCH_TARGETS): bench-%: build-%
 	@echo "[BENCH] $*"
 	@$(MAKE) -C $* bench
 
-BENCH_FULL_DIRS := tests/hashtbl tests/hashtbl32 tests/hashtbl64
+BENCH_FULL_DIRS := tests/hashtbl tests/hashtbl_extra tests/hashtbl32 tests/hashtbl64
 BENCH_FULL_TARGETS := $(addprefix bench-full-,$(BENCH_FULL_DIRS))
 CLEAN_TARGETS := $(addprefix clean-,$(SUBDIRS))
 
