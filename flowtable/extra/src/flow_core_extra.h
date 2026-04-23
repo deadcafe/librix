@@ -131,9 +131,9 @@ fcore_extra_record_member_ptr_nonnull(void *base,
 #define _FCORE_EXTRA_INT(p, name) \
     _FCORE_EXTRA_CAT(_fcore_extra_, _FCORE_EXTRA_CAT(p, _##name))
 
-/* Type helpers */
-#define _FCORE_EXTRA_KEY_T(p)      struct _FCORE_EXTRA_CAT(p, _key)
-#define _FCORE_EXTRA_ENTRY_T(p)    struct _FCORE_EXTRA_CAT(p, _entry)
+/* Type helpers: extra variant pastes p##_extra_{key,entry}. */
+#define _FCORE_EXTRA_KEY_T(p)      struct _FCORE_EXTRA_CAT(p, _extra_key)
+#define _FCORE_EXTRA_ENTRY_T(p)    struct _FCORE_EXTRA_CAT(p, _extra_entry)
 #define _FCORE_EXTRA_OT(ot)        struct ot
 
 /* ht_head type: struct <ht> (same layout as any RIX_HASH_HEAD) */
