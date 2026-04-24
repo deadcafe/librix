@@ -18,10 +18,10 @@ flow4_extra_table_init(struct ft_table_extra *ft,
                        void *buckets, size_t bucket_size,
                        const struct ft_table_extra_config *cfg)
 {
-    return FT_TABLE_EXTRA_INIT_TYPED(ft, FT_TABLE_VARIANT_FLOW4,
-                                     entry_array, max_entries,
-                                     struct flow4_extra_entry, meta,
-                                     buckets, bucket_size, cfg);
+    return ft_table_extra_init(ft, FT_TABLE_VARIANT_FLOW4,
+                               entry_array, max_entries,
+                               sizeof(struct flow4_extra_entry), 0u,
+                               buckets, bucket_size, cfg);
 }
 
 static inline struct flow4_extra_entry *

@@ -31,12 +31,12 @@
 #define _FTG_CAT2(a, b)  a##b
 #define _FTG_CAT(a, b)   _FTG_CAT2(a, b)
 
-#define _FTG_INT(p, name)   _FTG_CAT(ft_, _FTG_CAT(p, _##name))
+#define _FTG_INT(p, name)   _FTG_CAT(ft_, _FTG_CAT(p, _extra_##name))
 
 #ifdef FT_ARCH_SUFFIX
-#define _FTG_API(p, name)  _FTG_CAT(_FTG_CAT(ft_, _FTG_CAT(p, _table_##name)), FT_ARCH_SUFFIX)
+#define _FTG_API(p, name)  _FTG_CAT(_FTG_CAT(ft_, _FTG_CAT(p, _extra_table_##name)), FT_ARCH_SUFFIX)
 #else
-#define _FTG_API(p, name)  _FTG_CAT(ft_, _FTG_CAT(p, _table_##name))
+#define _FTG_API(p, name)  _FTG_CAT(ft_, _FTG_CAT(p, _extra_table_##name))
 #endif
 
 #define _FTG_KEY_T(p)       struct _FTG_CAT(p, _extra_key)
@@ -653,7 +653,8 @@ _migrate_done: (void)0;                                                       \
  * OPS table macro (used in each arch .c after FT_TABLE_EXTRA_GENERATE)
  *===========================================================================*/
 #define _FT_OPS_EXTRA_FNAME(prefix, name)                                     \
-    _FTG_CAT(_FTG_CAT(ft_, _FTG_CAT(prefix, _table_##name)), FT_ARCH_SUFFIX)
+    _FTG_CAT(_FTG_CAT(ft_, _FTG_CAT(prefix, _extra_table_##name)),            \
+             FT_ARCH_SUFFIX)
 
 #define _FT_OPS_EXTRA_TNAME(prefix, suffix)                                   \
     _FTG_CAT(_FTG_CAT(ft_, _FTG_CAT(prefix, _extra_ops)), suffix)
