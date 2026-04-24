@@ -51,20 +51,23 @@ BENCH_NAME    = ft_bench
 SIM_NAME      = ft_sim_cache
 TEST_EXTRA_NAME = ft_test_extra
 TEST_PARITY_NAME = ft_test_parity
+BENCH_EXTRA_NAME = ft_bench_extra
 TARGET        = $(BINDIR)/$(TARGET_NAME)
 BENCH         = $(BINDIR)/$(BENCH_NAME)
 SIM           = $(BINDIR)/$(SIM_NAME)
 TEST_EXTRA    = $(BINDIR)/$(TEST_EXTRA_NAME)
 TEST_PARITY   = $(BINDIR)/$(TEST_PARITY_NAME)
+BENCH_EXTRA   = $(BINDIR)/$(BENCH_EXTRA_NAME)
 SRC          = test_flow_table.c
 BENCH_SRC    = bench_flow_table.c
 SIM_SRC      = sim_flow_cache.c
 TEST_EXTRA_SRC = test_flow4_extra.c
 TEST_PARITY_SRC = test_flow4_parity.c
+BENCH_EXTRA_SRC = bench_flow4_vs_extra.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
-DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d
+DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(BENCH_EXTRA).d
 
-.PHONY: all help test test-classic test-extra test-parity bench bench-light bench-full sim clean libft FORCE
+.PHONY: all help test test-classic test-extra test-parity bench bench-light bench-full bench-extra sim clean libft FORCE
 
 all: test
 
@@ -101,6 +104,9 @@ $(TEST_EXTRA): $(TEST_EXTRA_SRC) $(LIBFT) | $(BINDIR)
 $(TEST_PARITY): $(TEST_PARITY_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_PARITY_SRC) $(LIBFT)
 
+$(BENCH_EXTRA): $(BENCH_EXTRA_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_EXTRA_SRC) $(LIBFT)
+
 # Always enter the ftable sub-make so its own .d files can decide whether
 # header changes require rebuilding the library objects/archive.
 $(LIBFT): FORCE
@@ -128,6 +134,9 @@ bench-light: $(BENCH)
 	done
 
 bench: bench-light
+
+bench-extra: $(BENCH_EXTRA)
+	$(BENCH_EXTRA)
 
 sim: $(SIM)
 	$(SIM)
