@@ -13,7 +13,7 @@ PREFIX       ?= /usr/local
 
 RIX_PUB_HDRS := $(filter-out %_private.h, $(wildcard include/rix/*.h))
 
-.PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help ftable flowtable flowtable-test flowtable-bench
+.PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help ftable flowtable flowtable-test flowtable-bench bench-flowtable-extra bench-flowtable-sweep
 all: build run-tests run-bench
 
 help:
@@ -63,11 +63,15 @@ test-flowtable: build-flowtable
 
 bench: build run-bench
 
-run-bench: bench-flowtable
+run-bench: bench-flowtable bench-flowtable-extra
 
 bench-flowtable: build-flowtable
 	@echo "[BENCH] flowtable"
 	@$(MAKE) -C flowtable/test bench
+
+bench-flowtable-extra: build-flowtable
+	@echo "[BENCH] flowtable/extra"
+	@$(MAKE) -C flowtable/test bench-extra
 
 $(BENCH_TARGETS): bench-%: build-%
 	@echo "[BENCH] $*"
@@ -79,11 +83,15 @@ CLEAN_TARGETS := $(addprefix clean-,$(SUBDIRS))
 
 bench-full: build run-bench-full
 
-run-bench-full: $(BENCH_FULL_TARGETS) bench-full-flowtable
+run-bench-full: $(BENCH_FULL_TARGETS) bench-full-flowtable bench-flowtable-sweep
 
 bench-full-flowtable: build-flowtable
 	@echo "[BENCH] flowtable"
-	@$(MAKE) -C flowtable bench-full
+	@$(MAKE) -C flowtable/test bench-full
+
+bench-flowtable-sweep: build-flowtable
+	@echo "[BENCH] flowtable/sweep"
+	@$(MAKE) -C flowtable/test bench-sweep
 
 $(BENCH_FULL_TARGETS): bench-full-%: build-%
 	@echo "[BENCH] $*"
