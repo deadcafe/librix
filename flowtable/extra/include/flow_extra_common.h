@@ -57,11 +57,20 @@ struct ft_table_extra {
     struct flow_status              status;
 };
 
-/* Maintenance context: no pool_base/pool_stride/meta_off/max_entries. */
+/*
+ * Maintenance context.  ft_table_extra_maintain (bucket sweep) only needs
+ * buckets/rhh_nb/stats/rhh_mask/ts_shift.  ft_table_extra_maintain_idx_bulk
+ * needs to resolve (bucket, slot) from entry->meta, so the pool pointer,
+ * stride, entry offset, and max_entries are also provided.
+ */
 struct ft_maint_extra_ctx {
     struct rix_hash_bucket_extra_s *buckets;
     unsigned                       *rhh_nb;
     struct ft_table_extra_stats    *stats;
+    unsigned char                  *pool_base;
+    size_t                          pool_stride;
+    size_t                          meta_off;
+    unsigned                        max_entries;
     unsigned                        rhh_mask;
     u8                              ts_shift;
 };
