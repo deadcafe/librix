@@ -36,7 +36,7 @@ flow4_extra_table_entry_ptr(const struct ft_table_extra *ft, unsigned idx)
 
 u32 flow4_extra_table_add(struct ft_table_extra *ft,
                           struct flow4_extra_entry *entry, u64 now);
-u32 flow4_extra_table_find(const struct ft_table_extra *ft,
+u32 flow4_extra_table_find(struct ft_table_extra *ft,
                            const struct flow4_extra_key *key);
 u32 flow4_extra_table_del(struct ft_table_extra *ft,
                           const struct flow4_extra_key *key);

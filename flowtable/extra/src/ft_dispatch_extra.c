@@ -340,7 +340,7 @@ ft_table_extra_touch(struct ft_table_extra *ft, u32 entry_idx, u64 now)
     meta = &((struct flow4_extra_entry *)(void *)record)->meta;
     bk = &ft->buckets[meta->cur_hash & ft->start_mask];
     flow_extra_ts_set(bk, meta->slot,
-                      flow_timestamp_encode(now, ft->ts_shift));
+                      flow_extra_timestamp_encode(now, ft->ts_shift));
 }
 
 /*===========================================================================
@@ -390,15 +390,14 @@ flow4_extra_table_add(struct ft_table_extra *ft,
 }
 
 u32
-flow4_extra_table_find(const struct ft_table_extra *ft,
+flow4_extra_table_find(struct ft_table_extra *ft,
                        const struct flow4_extra_key *key)
 {
     struct ft_table_result result = { .entry_idx = 0u };
 
     if (ft == NULL || key == NULL)
         return 0u;
-    ft_flow4_extra_active->find_bulk((struct ft_table_extra *)ft,
-                                     key, 1u, 0u, &result);
+    ft_flow4_extra_active->find_bulk(ft, key, 1u, 0u, &result);
     return result.entry_idx;
 }
 

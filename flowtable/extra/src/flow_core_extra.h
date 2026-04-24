@@ -314,7 +314,7 @@ _FCORE_EXTRA_INT(p, find_key_bulk_)(_FCORE_EXTRA_OT(ot) *owner,              \
                             _bk = ctx[idx & ctx_mask].bk[1];                 \
                         if ((now) != 0u)                                      \
                             _bk->extra[_slot] =                               \
-                                flow_timestamp_encode(                        \
+                                flow_extra_timestamp_encode(                        \
                                     (now),                                    \
                                     FCORE_EXTRA_TIMESTAMP_SHIFT(owner));      \
                     }                                                         \
@@ -407,7 +407,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                     if ((unsigned)policy & 1u) {                              \
                         ctx.bk[0]->idx[bit] = eidx;                           \
                         ctx.bk[0]->extra[bit] =                               \
-                            flow_timestamp_encode(                            \
+                            flow_extra_timestamp_encode(                            \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
                         entry->meta.cur_hash = ctx.hash.val32[0];             \
@@ -420,7 +420,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                         /* touch: update bk->extra[slot] for existing node */ \
                         if ((now) != 0u)                                      \
                             ctx.bk[0]->extra[bit] =                           \
-                                flow_timestamp_encode(                        \
+                                flow_extra_timestamp_encode(                        \
                                     (now),                                    \
                                     FCORE_EXTRA_TIMESTAMP_SHIFT(owner));      \
                         FCORE_EXTRA_TOUCH_TIMESTAMP(owner, node, now);        \
@@ -448,7 +448,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                     if ((unsigned)policy & 1u) {                              \
                         ctx.bk[1]->idx[bit] = eidx;                           \
                         ctx.bk[1]->extra[bit] =                               \
-                            flow_timestamp_encode(                            \
+                            flow_extra_timestamp_encode(                            \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
                         entry->meta.cur_hash = ctx.hash.val32[1];             \
@@ -461,7 +461,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                         /* touch: update bk->extra[slot] for existing node */ \
                         if ((now) != 0u)                                      \
                             ctx.bk[1]->extra[bit] =                           \
-                                flow_timestamp_encode(                        \
+                                flow_extra_timestamp_encode(                        \
                                     (now),                                    \
                                     FCORE_EXTRA_TIMESTAMP_SHIFT(owner));      \
                         FCORE_EXTRA_TOUCH_TIMESTAMP(owner, node, now);        \
@@ -478,7 +478,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
             ctx.bk[0]->hash[slot] = ctx.fp;                                   \
             ctx.bk[0]->idx[slot] = eidx;                                      \
             ctx.bk[0]->extra[slot] =                                          \
-                flow_timestamp_encode((now),                                  \
+                flow_extra_timestamp_encode((now),                                  \
                                       FCORE_EXTRA_TIMESTAMP_SHIFT(owner));    \
             entry->meta.cur_hash = ctx.hash.val32[0];                         \
             entry->meta.slot = (__typeof__(entry->meta.slot))slot;            \
@@ -494,7 +494,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
             ctx.bk[1]->hash[slot] = ctx.fp;                                   \
             ctx.bk[1]->idx[slot] = eidx;                                      \
             ctx.bk[1]->extra[slot] =                                          \
-                flow_timestamp_encode((now),                                  \
+                flow_extra_timestamp_encode((now),                                  \
                                       FCORE_EXTRA_TIMESTAMP_SHIFT(owner));    \
             entry->meta.cur_hash = ctx.hash.val32[1];                         \
             entry->meta.slot = (__typeof__(entry->meta.slot))slot;            \
@@ -507,7 +507,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
         }                                                                     \
         ret_idx = _FCORE_EXTRA_HT(ht, insert_hashed_idx)(                    \
             head, buckets, hash_base, entry, ctx.hash,                        \
-            flow_timestamp_encode((now), FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));\
+            flow_extra_timestamp_encode((now), FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));\
         if (RIX_LIKELY(ret_idx == 0u)) {                                      \
             FCORE_EXTRA_INIT_TIMESTAMP(owner, entry, now);                    \
             FLOW_STATS(owner).adds++;                                         \
@@ -531,7 +531,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                 FCORE_EXTRA_CLEAR_TIMESTAMP(node);                            \
                 ins_idx = _FCORE_EXTRA_HT(ht, insert_hashed_idx)(            \
                     head, buckets, hash_base, entry, ctx.hash,                \
-                    flow_timestamp_encode((now),                               \
+                    flow_extra_timestamp_encode((now),                               \
                                          FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));\
                 RIX_ASSERT(ins_idx == 0u);                                    \
                 FCORE_EXTRA_INIT_TIMESTAMP(owner, entry, now);                \
@@ -548,7 +548,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                         buckets + _bki;                                       \
                     if ((now) != 0u)                                          \
                         _bk->extra[_slot] =                                   \
-                            flow_timestamp_encode(                            \
+                            flow_extra_timestamp_encode(                            \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
                 }                                                             \
@@ -563,7 +563,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
             entry_idxv[idx] = 0u;                                             \
             unused_idxv[free_count++] = eidx;                                 \
         } else {                                                              \
-            u64 now_enc = flow_timestamp_encode(                              \
+            u64 now_enc = flow_extra_timestamp_encode(                              \
                 now, FCORE_EXTRA_TIMESTAMP_SHIFT(owner));                     \
             u64 max_elapsed = 0u;                                             \
             unsigned victim_bki = 0u;                                         \
@@ -595,7 +595,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                 ctx.bk[victim_bki]->hash[victim_slot] = ctx.fp;               \
                 ctx.bk[victim_bki]->idx[victim_slot] = eidx;                  \
                 ctx.bk[victim_bki]->extra[victim_slot] =                      \
-                    flow_timestamp_encode((now),                               \
+                    flow_extra_timestamp_encode((now),                               \
                                          FCORE_EXTRA_TIMESTAMP_SHIFT(owner)); \
                 entry->meta.cur_hash = ctx.hash.val32[victim_bki];            \
                 entry->meta.slot =                                            \
@@ -749,7 +749,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                             if ((unsigned)policy & 1u) {                      \
                                 ctxp->bk[0]->idx[bit] = eidx;                 \
                                 ctxp->bk[0]->extra[bit] =                     \
-                                    flow_timestamp_encode(                    \
+                                    flow_extra_timestamp_encode(                    \
                                         (now),                                \
                                         FCORE_EXTRA_TIMESTAMP_SHIFT(owner));  \
                                 entry->meta.cur_hash =                        \
@@ -763,7 +763,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                                 /* touch existing via bk[0] */                \
                                 if ((now) != 0u)                              \
                                     ctxp->bk[0]->extra[bit] =                 \
-                                        flow_timestamp_encode(                \
+                                        flow_extra_timestamp_encode(                \
                                             (now),                            \
                                             FCORE_EXTRA_TIMESTAMP_SHIFT(      \
                                                 owner));                      \
@@ -793,7 +793,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                             if ((unsigned)policy & 1u) {                      \
                                 ctxp->bk[1]->idx[bit] = eidx;                 \
                                 ctxp->bk[1]->extra[bit] =                     \
-                                    flow_timestamp_encode(                    \
+                                    flow_extra_timestamp_encode(                    \
                                         (now),                                \
                                         FCORE_EXTRA_TIMESTAMP_SHIFT(owner));  \
                                 entry->meta.cur_hash =                        \
@@ -807,7 +807,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                                 /* touch existing via bk[1] */                \
                                 if ((now) != 0u)                              \
                                     ctxp->bk[1]->extra[bit] =                 \
-                                        flow_timestamp_encode(                \
+                                        flow_extra_timestamp_encode(                \
                                             (now),                            \
                                             FCORE_EXTRA_TIMESTAMP_SHIFT(      \
                                                 owner));                      \
@@ -826,7 +826,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                     ctxp->bk[0]->hash[slot] = ctxp->fp;                       \
                     ctxp->bk[0]->idx[slot] = eidx;                            \
                     ctxp->bk[0]->extra[slot] =                                \
-                        flow_timestamp_encode((now),                           \
+                        flow_extra_timestamp_encode((now),                           \
                                               FCORE_EXTRA_TIMESTAMP_SHIFT(    \
                                                   owner));                    \
                     entry->meta.cur_hash = ctxp->hash.val32[0];               \
@@ -845,7 +845,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                     ctxp->bk[1]->hash[slot] = ctxp->fp;                       \
                     ctxp->bk[1]->idx[slot] = eidx;                            \
                     ctxp->bk[1]->extra[slot] =                                \
-                        flow_timestamp_encode((now),                           \
+                        flow_extra_timestamp_encode((now),                           \
                                               FCORE_EXTRA_TIMESTAMP_SHIFT(    \
                                                   owner));                    \
                     entry->meta.cur_hash = ctxp->hash.val32[1];               \
@@ -860,7 +860,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                 }                                                             \
                 ret_idx = _FCORE_EXTRA_HT(ht, insert_hashed_idx)(            \
                     head, buckets, hash_base, entry, ctxp->hash,              \
-                    flow_timestamp_encode((now),                               \
+                    flow_extra_timestamp_encode((now),                               \
                                          FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));\
                 if (RIX_LIKELY(ret_idx == 0u)) {                              \
                     FCORE_EXTRA_INIT_TIMESTAMP(owner, entry, now);            \
@@ -885,7 +885,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                         FCORE_EXTRA_CLEAR_TIMESTAMP(node);                    \
                         ins_idx = _FCORE_EXTRA_HT(ht, insert_hashed_idx)(    \
                             head, buckets, hash_base, entry, ctxp->hash,      \
-                            flow_timestamp_encode(                            \
+                            flow_extra_timestamp_encode(                            \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));         \
                         RIX_ASSERT(ins_idx == 0u);                            \
@@ -904,7 +904,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                                 buckets + _bki;                               \
                             if ((now) != 0u)                                  \
                                 _bk->extra[_slot] =                           \
-                                    flow_timestamp_encode(                    \
+                                    flow_extra_timestamp_encode(                    \
                                         (now),                                \
                                         FCORE_EXTRA_TIMESTAMP_SHIFT(owner));  \
                         }                                                     \
@@ -919,7 +919,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                     entry_idxv[idx] = 0u;                                     \
                     unused_idxv[free_count++] = eidx;                         \
                 } else {                                                      \
-                    u64 now_enc = flow_timestamp_encode(                      \
+                    u64 now_enc = flow_extra_timestamp_encode(                      \
                         now, FCORE_EXTRA_TIMESTAMP_SHIFT(owner));             \
                     u64 max_elapsed = 0u;                                     \
                     unsigned victim_bki = 0u;                                 \
@@ -954,7 +954,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                         ctxp->bk[victim_bki]->idx[victim_slot] =              \
                             eidx;                                             \
                         ctxp->bk[victim_bki]->extra[victim_slot] =            \
-                            flow_timestamp_encode(                            \
+                            flow_extra_timestamp_encode(                            \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
                         entry->meta.cur_hash =                                \
@@ -1261,7 +1261,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_maint_)(_FCORE_EXTRA_OT(ot) *owner,         \
         if (timeout == 0u || maint_budget == 0u || free_count >= max_unused)  \
             return free_count;                                                \
                                                                               \
-        now_enc = flow_timestamp_encode(                                      \
+        now_enc = flow_extra_timestamp_encode(                                      \
             now, FCORE_EXTRA_TIMESTAMP_SHIFT(owner));                         \
         timeout_enc = flow_timestamp_timeout_encode(                           \
             timeout, FCORE_EXTRA_TIMESTAMP_SHIFT(owner));                     \

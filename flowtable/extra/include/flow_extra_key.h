@@ -68,4 +68,15 @@ flow_extra_ts_is_permanent(u32 encoded)
  * flow_timestamp_is_expired_raw so classic <-> extra comparisons are
  * bit-exact. */
 
+/*
+ * Narrowing wrapper for extra-variant storage: bk->extra[] is u32 so we
+ * want a u32 return to avoid explicit casts at every store site.  The
+ * underlying encode already masks to FLOW_TIMESTAMP_MASK (32 bits).
+ */
+static inline u32
+flow_extra_timestamp_encode(u64 now, unsigned shift)
+{
+    return (u32)flow_timestamp_encode(now, shift);
+}
+
 #endif /* _FLOW_EXTRA_KEY_H_ */
