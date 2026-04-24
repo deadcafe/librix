@@ -107,8 +107,8 @@ fcore_flow4_extra_layout_entry_idx_(const struct ft_table_extra *ft,
 RIX_HASH_HEAD(fcore_flow4_extra_ht);
 RIX_HASH_HEAD(ft_flow4_extra_ht);
 
-#undef RIX_HASH_SLOT_DEFINE_INDEXERS
-#define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
+#undef RIX_HASH_SLOT_EXTRA_DEFINE_INDEXERS
+#define RIX_HASH_SLOT_EXTRA_DEFINE_INDEXERS(name, type)                        \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                    \
 name##_hidx(struct type *base, const struct type *p)                           \
 {                                                                              \
@@ -172,7 +172,7 @@ FCORE_EXTRA_GENERATE(flow4, ft_table_extra, fcore_flow4_extra_ht,
 #undef FCORE_EXTRA_LAYOUT_ENTRY_INDEX
 #undef FCORE_EXTRA_LAYOUT_HASH_BASE
 #undef FLOW_STATS
-#undef RIX_HASH_SLOT_DEFINE_INDEXERS
+#undef RIX_HASH_SLOT_EXTRA_DEFINE_INDEXERS
 
 /*===========================================================================
  * FT_TABLE_EXTRA layer: flow4_extra_entry slot + FT_TABLE_EXTRA_GENERATE
@@ -188,7 +188,7 @@ FCORE_EXTRA_GENERATE(flow4, ft_table_extra, fcore_flow4_extra_ht,
 
 #define FTG_ENTRY_TYPE(p) struct flow4_extra_entry
 
-#define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type)                              \
+#define RIX_HASH_SLOT_EXTRA_DEFINE_INDEXERS(name, type)                        \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                    \
 name##_hidx(struct type *base, const struct type *p)                           \
 {                                                                              \

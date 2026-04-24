@@ -449,7 +449,13 @@ flow4_extra_table_del_bulk(struct ft_table_extra *ft,
 size_t
 flow4_extra_table_bucket_size(unsigned max_entries)
 {
-    return ft_table_extra_bucket_mem_size(max_entries);
+    unsigned nb_bk;
+
+    nb_bk = (max_entries + (RIX_HASH_BUCKET_ENTRY_SZ - 1u))
+          / RIX_HASH_BUCKET_ENTRY_SZ;
+    if (nb_bk < FT_TABLE_MIN_NB_BK)
+        nb_bk = FT_TABLE_MIN_NB_BK;
+    return (size_t)ft_roundup_pow2_u32(nb_bk) * FT_TABLE_EXTRA_BUCKET_SIZE;
 }
 
 /*

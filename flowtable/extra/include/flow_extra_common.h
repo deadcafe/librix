@@ -139,7 +139,12 @@ unsigned ft_table_extra_maintain_idx_bulk(const struct ft_maint_extra_ctx *ctx,
                                           int enable_filter);
 
 size_t ft_table_extra_bucket_size(unsigned max_entries);
-size_t ft_table_extra_bucket_mem_size(unsigned nb_bk);
+
+static inline size_t
+ft_table_extra_bucket_mem_size(unsigned nb_bk)
+{
+    return (size_t)nb_bk * sizeof(struct rix_hash_bucket_extra_s);
+}
 
 void ft_arch_extra_init(unsigned arch_enable);
 
