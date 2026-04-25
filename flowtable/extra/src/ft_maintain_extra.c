@@ -16,6 +16,10 @@
 
 #include <string.h>
 
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__SSE2__)
+#include <immintrin.h>
+#endif
+
 #include <rix/rix_hash.h>
 #include <rix/rix_hash_slot_extra.h>
 #include <rix/rix_defs_private.h>
@@ -106,16 +110,103 @@ ft_maint_extra_scan_bucket_(const struct ft_maint_extra_ctx *ctx,
                             unsigned *out_used_count)
 {
     struct rix_hash_bucket_extra_s *bk = ctx->buckets + bk_idx;
-    u32 used_bits = 0u;
-    u32 expired_bits = 0u;
+    u32 used_bits;
+    u32 expired_bits;
     unsigned used_count;
 
-    RIX_ASSERT(RIX_HASH_BUCKET_ENTRY_SZ <= 32u);
+    RIX_ASSERT(RIX_HASH_BUCKET_ENTRY_SZ == 16u);
 
-    for (unsigned slot = 0; slot < RIX_HASH_BUCKET_ENTRY_SZ; slot++) {
-        if (bk->hash[slot] != 0u)
-            used_bits |= (u32)(1u << slot);
+#if defined(__AVX512F__)
+    {
+        /*
+         * 16-wide u32 lanes: one 512-bit load each for hash[] and
+         * extra[].  Native cmpneq_epu32 / cmpgt_epu32 mask
+         * intrinsics directly produce the 16-bit used / expired
+         * bitsets, no movemask plumbing needed.
+         */
+        __m512i hash_v = _mm512_loadu_si512((const void *)&bk->hash[0]);
+        __m512i ts_v   = _mm512_loadu_si512((const void *)&bk->extra[0]);
+        __m512i now_v  = _mm512_set1_epi32((int)(u32)now_ts);
+        __m512i tmo_v  = _mm512_set1_epi32((int)(u32)timeout_ts);
+        __m512i diff_v = _mm512_sub_epi32(now_v, ts_v);
+        __mmask16 used_mask = _mm512_cmpneq_epu32_mask(hash_v,
+                                  _mm512_setzero_si512());
+        __mmask16 exp_mask  = _mm512_cmpgt_epu32_mask(diff_v, tmo_v);
+
+        used_bits    = (u32)used_mask;
+        expired_bits = (u32)(used_mask & exp_mask);
     }
+#elif defined(__AVX2__)
+    {
+        /*
+         * Two 256-bit halves.  AVX2 has only signed cmpgt_epi32, so
+         * the unsigned (now-ts) > timeout test is rewritten as a
+         * signed compare on values biased by 0x80000000.
+         */
+        const __m256i bias  = _mm256_set1_epi32((int)0x80000000);
+        const __m256i zero  = _mm256_setzero_si256();
+        __m256i now_v       = _mm256_set1_epi32((int)(u32)now_ts);
+        __m256i tmo_b       = _mm256_xor_si256(
+                                  _mm256_set1_epi32((int)(u32)timeout_ts),
+                                  bias);
+        __m256i hash_lo     = _mm256_loadu_si256(
+                                  (const __m256i_u *)&bk->hash[0]);
+        __m256i hash_hi     = _mm256_loadu_si256(
+                                  (const __m256i_u *)&bk->hash[8]);
+        __m256i ts_lo       = _mm256_loadu_si256(
+                                  (const __m256i_u *)&bk->extra[0]);
+        __m256i ts_hi       = _mm256_loadu_si256(
+                                  (const __m256i_u *)&bk->extra[8]);
+        __m256i diff_lo     = _mm256_sub_epi32(now_v, ts_lo);
+        __m256i diff_hi     = _mm256_sub_epi32(now_v, ts_hi);
+        __m256i diff_lo_b   = _mm256_xor_si256(diff_lo, bias);
+        __m256i diff_hi_b   = _mm256_xor_si256(diff_hi, bias);
+        __m256i exp_lo      = _mm256_cmpgt_epi32(diff_lo_b, tmo_b);
+        __m256i exp_hi      = _mm256_cmpgt_epi32(diff_hi_b, tmo_b);
+        __m256i used_lo     = _mm256_xor_si256(
+                                  _mm256_cmpeq_epi32(hash_lo, zero),
+                                  _mm256_set1_epi32(-1));
+        __m256i used_hi     = _mm256_xor_si256(
+                                  _mm256_cmpeq_epi32(hash_hi, zero),
+                                  _mm256_set1_epi32(-1));
+        unsigned ulo = (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(
+                                                       used_lo));
+        unsigned uhi = (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(
+                                                       used_hi));
+        unsigned elo = (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(
+                                                       exp_lo));
+        unsigned ehi = (unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(
+                                                       exp_hi));
+
+        used_bits    = ulo | (uhi << 8);
+        expired_bits = used_bits & (elo | (ehi << 8));
+    }
+#else
+    {
+        u32 ub = 0u;
+        u32 eb = 0u;
+
+        for (unsigned slot = 0; slot < RIX_HASH_BUCKET_ENTRY_SZ; slot++) {
+            if (bk->hash[slot] != 0u)
+                ub |= (u32)(1u << slot);
+        }
+        {
+            u32 u = ub;
+
+            while (u != 0u) {
+                unsigned slot = (unsigned)__builtin_ctz(u);
+                u32 ts = bk->extra[slot];
+
+                u &= u - 1u;
+                if (flow_timestamp_is_expired_raw(ts, now_ts,
+                                                  timeout_ts))
+                    eb |= (u32)(1u << slot);
+            }
+        }
+        used_bits    = ub;
+        expired_bits = eb;
+    }
+#endif
 
     used_count = (unsigned)__builtin_popcount(used_bits);
     if (out_used_count != NULL)
@@ -124,19 +215,6 @@ ft_maint_extra_scan_bucket_(const struct ft_maint_extra_ctx *ctx,
         return out_pos;
 
     ctx->stats->maint_extras_loaded++;
-
-    {
-        u32 u = used_bits;
-
-        while (u != 0u) {
-            unsigned slot = (unsigned)__builtin_ctz(u);
-            u32 ts = bk->extra[slot];
-
-            u &= u - 1u;
-            if (flow_timestamp_is_expired_raw(ts, now_ts, timeout_ts))
-                expired_bits |= (u32)(1u << slot);
-        }
-    }
 
     while (expired_bits != 0u && out_pos < max_expired) {
         unsigned slot = (unsigned)__builtin_ctz(expired_bits);
