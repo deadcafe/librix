@@ -109,6 +109,127 @@ rix_hash_prefetch_extra_bucket_full_of(
 #  define rix_hash_prefetch_extra_bucket_extras_of_idx(buckets, bk_idx)       \
     rix_hash_prefetch_extra_bucket_extras_of(&(buckets)[(unsigned)(bk_idx)])
 
+static RIX_FORCE_INLINE int
+rix_hash_slot_extra_slot_valid(unsigned slot)
+{
+    return slot < RIX_HASH_BUCKET_ENTRY_SZ;
+}
+
+static RIX_FORCE_INLINE struct rix_hash_bucket_extra_s *
+rix_hash_slot_extra_bucket_by_hash(struct rix_hash_bucket_extra_s *buckets,
+                                   unsigned mask,
+                                   u32 cur_hash)
+{
+    return &buckets[cur_hash & mask];
+}
+
+static RIX_FORCE_INLINE const struct rix_hash_bucket_extra_s *
+rix_hash_slot_extra_bucket_by_hash_const(
+    const struct rix_hash_bucket_extra_s *buckets,
+    unsigned mask,
+    u32 cur_hash)
+{
+    return &buckets[cur_hash & mask];
+}
+
+/**
+ * Validated read of bucket->extra[slot].
+ *
+ * Confirms that the bucket resolved from @cur_hash & @mask still holds
+ * @expected_idx at @slot before reading.  @expected_idx must be a real
+ * 1-origin entry index; passing @c RIX_NIL (the empty-slot sentinel) is
+ * rejected so that callers cannot accidentally read the extra[] of an
+ * unoccupied slot.
+ *
+ * Returns 0 on success, -1 if @buckets / @out is NULL, @slot is out of
+ * range, @expected_idx is RIX_NIL, or the slot does not hold @expected_idx.
+ */
+static RIX_FORCE_INLINE int
+rix_hash_slot_extra_get(const struct rix_hash_bucket_extra_s *buckets,
+                        unsigned mask,
+                        u32 cur_hash,
+                        unsigned slot,
+                        u32 expected_idx,
+                        u32 *out)
+{
+    const struct rix_hash_bucket_extra_s *bk;
+
+    if (buckets == NULL || out == NULL)
+        return -1;
+    if (!rix_hash_slot_extra_slot_valid(slot))
+        return -1;
+    if (expected_idx == (u32)RIX_NIL)
+        return -1;
+    bk = rix_hash_slot_extra_bucket_by_hash_const(buckets, mask, cur_hash);
+    if (bk->idx[slot] != expected_idx)
+        return -1;
+    *out = bk->extra[slot];
+    return 0;
+}
+
+/**
+ * Validated write of bucket->extra[slot].  See rix_hash_slot_extra_get()
+ * for the contract; @expected_idx == @c RIX_NIL is rejected to avoid writing
+ * into empty slots by mistake.
+ */
+static RIX_FORCE_INLINE int
+rix_hash_slot_extra_set(struct rix_hash_bucket_extra_s *buckets,
+                        unsigned mask,
+                        u32 cur_hash,
+                        unsigned slot,
+                        u32 expected_idx,
+                        u32 value)
+{
+    struct rix_hash_bucket_extra_s *bk;
+
+    if (buckets == NULL)
+        return -1;
+    if (!rix_hash_slot_extra_slot_valid(slot))
+        return -1;
+    if (expected_idx == (u32)RIX_NIL)
+        return -1;
+    bk = rix_hash_slot_extra_bucket_by_hash(buckets, mask, cur_hash);
+    if (bk->idx[slot] != expected_idx)
+        return -1;
+    bk->extra[slot] = value;
+    return 0;
+}
+
+/**
+ * Touch the bucket-side extra[] for an entry that lives in one of two
+ * candidate buckets (the bk[0]/bk[1] pair held in
+ * struct rix_hash_find_ctx_extra_s after scan).  The helper writes @value to
+ * extra[slot] in whichever of bk0 / bk1 actually holds @expected_idx at @slot.
+ *
+ * @expected_idx must be a real 1-origin entry index; @c RIX_NIL (empty-slot
+ * sentinel) is rejected so a caller cannot accidentally match an empty slot.
+ *
+ * Returns 0 on success, -1 if @slot is out of range, @expected_idx is
+ * @c RIX_NIL, or no candidate bucket matches @expected_idx.
+ */
+static RIX_FORCE_INLINE int
+rix_hash_slot_extra_touch_2bk(struct rix_hash_bucket_extra_s *bk0,
+                              struct rix_hash_bucket_extra_s *bk1,
+                              unsigned slot,
+                              u32 expected_idx,
+                              u32 value)
+{
+    struct rix_hash_bucket_extra_s *bk;
+
+    if (!rix_hash_slot_extra_slot_valid(slot))
+        return -1;
+    if (expected_idx == (u32)RIX_NIL)
+        return -1;
+    bk = bk0;
+    if (bk == NULL || bk->idx[slot] != expected_idx) {
+        bk = bk1;
+        if (bk == NULL || bk->idx[slot] != expected_idx)
+            return -1;
+    }
+    bk->extra[slot] = value;
+    return 0;
+}
+
 /* ---- PROTOTYPE macros -------------------------------------------------- */
 
 /*

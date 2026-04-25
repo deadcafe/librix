@@ -116,6 +116,25 @@ ft_maint_extra_scan_bucket_(const struct ft_maint_extra_ctx *ctx,
 
     RIX_ASSERT(RIX_HASH_BUCKET_ENTRY_SZ == 16u);
 
+    /*
+     * Sparse-bucket fast path.  When the caller demands that a bucket carry
+     * at least @min_bk_entries occupied slots, count occupancy from hash[]
+     * alone (one cache line) and skip loading extra[] / running the SIMD
+     * timestamp compare when the bucket is below threshold.
+     */
+    if (min_bk_entries > 1u) {
+        u32 empty_bits = RIX_HASH_FIND_U32X16(bk->hash, 0u);
+        u32 early_used_bits = (~empty_bits) & 0xffffu;
+        unsigned early_used_count =
+            (unsigned)__builtin_popcount(early_used_bits);
+
+        if (early_used_count < min_bk_entries) {
+            if (out_used_count != NULL)
+                *out_used_count = early_used_count;
+            return out_pos;
+        }
+    }
+
 #if defined(__AVX512F__)
     {
         /*

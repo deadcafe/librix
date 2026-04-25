@@ -157,16 +157,7 @@ test_maintain_expires(void)
     for (unsigned i = 0u; i < 50u; i++)
         flow4_extra_table_add(&ft, &pool[i], 1000u);
 
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.buckets     = ft.buckets;
-    ctx.rhh_nb      = &ft.ht_head.rhh_nb;
-    ctx.stats       = &ft.stats;
-    ctx.pool_base   = (unsigned char *)pool;
-    ctx.pool_stride = sizeof(*pool);
-    ctx.meta_off    = offsetof(struct flow4_extra_entry, meta);
-    ctx.max_entries = N_MAX;
-    ctx.rhh_mask    = ft.ht_head.rhh_mask;
-    ctx.ts_shift    = (u8)cfg.ts_shift;
+    assert(ft_table_extra_maint_ctx_init(&ft, &ctx) == 0);
 
     n = ft_table_extra_maintain(&ctx, 0u,
                                 /* now     = */ 1000u + (1u << 20),
@@ -174,6 +165,38 @@ test_maintain_expires(void)
                                 expired, 64u, 0u, &next);
     assert(n >= 36u);
     (void)next;
+
+    ft_table_extra_destroy(&ft);
+    munmap(pool, N_MAX * sizeof(*pool));
+    munmap(bk_raw, bk_sz);
+}
+
+static void
+test_find_touch_updates_bucket_extra(void)
+{
+    size_t bk_sz = flow4_extra_table_bucket_size(N_MAX);
+    struct flow4_extra_entry *pool = hugealloc(N_MAX * sizeof(*pool));
+    void *bk_raw = hugealloc(bk_sz);
+    struct ft_table_extra ft;
+    struct ft_table_extra_config cfg = { .ts_shift = 4u };
+    struct flow4_extra_key key;
+    unsigned bk_idx;
+    unsigned slot;
+    u32 idx;
+
+    printf("[T] flow4_extra find_touch updates bucket extra[]\n");
+    assert(flow4_extra_table_init(&ft, pool, N_MAX, bk_raw, bk_sz, &cfg) == 0);
+
+    pool[0].key = mk_key(0u);
+    key = pool[0].key;
+    idx = flow4_extra_table_add(&ft, &pool[0], 1000u);
+    assert(idx != (u32)RIX_NIL);
+    assert(flow4_extra_table_find_touch(&ft, &key, 9000u) == idx);
+
+    bk_idx = pool[0].meta.cur_hash & ft.ht_head.rhh_mask;
+    slot   = (unsigned)pool[0].meta.slot;
+    assert(flow_extra_ts_get(&ft.buckets[bk_idx], slot) ==
+           flow_extra_timestamp_encode(9000u, cfg.ts_shift));
 
     ft_table_extra_destroy(&ft);
     munmap(pool, N_MAX * sizeof(*pool));
@@ -211,6 +234,150 @@ test_touch_updates_bucket_extra(void)
     munmap(bk_raw, bk_sz);
 }
 
+static void
+test_touch_checked_rejects_deleted_idx(void)
+{
+    size_t bk_sz = flow4_extra_table_bucket_size(N_MAX);
+    struct flow4_extra_entry *pool = hugealloc(N_MAX * sizeof(*pool));
+    void *bk_raw = hugealloc(bk_sz);
+    struct ft_table_extra ft;
+    struct ft_table_extra_config cfg = { .ts_shift = 4u };
+    u32 idx;
+
+    printf("[T] flow4_extra touch_checked rejects deleted idx\n");
+    assert(flow4_extra_table_init(&ft, pool, N_MAX, bk_raw, bk_sz, &cfg) == 0);
+
+    pool[0].key = mk_key(0u);
+    idx = flow4_extra_table_add(&ft, &pool[0], 1000u);
+    assert(idx != (u32)RIX_NIL);
+    assert(flow4_extra_table_del(&ft, &pool[0].key) == idx);
+    assert(ft_table_extra_touch_checked(&ft, idx, 5000u) != 0);
+
+    ft_table_extra_destroy(&ft);
+    munmap(pool, N_MAX * sizeof(*pool));
+    munmap(bk_raw, bk_sz);
+}
+
+static void
+test_touch_after_migrate_uses_current_mask(void)
+{
+    size_t old_bk_sz = flow4_extra_table_bucket_size(N_MAX);
+    size_t new_bk_sz = old_bk_sz * 2u;
+    struct flow4_extra_entry *pool = hugealloc(N_MAX * sizeof(*pool));
+    void *old_bk_raw = hugealloc(old_bk_sz);
+    void *new_bk_raw = hugealloc(new_bk_sz);
+    struct ft_table_extra ft;
+    struct ft_table_extra_config cfg = { .ts_shift = 4u };
+    unsigned old_mask;
+    unsigned new_mask;
+    unsigned chosen = 0u;
+    int found = 0;
+
+    printf("[T] flow4_extra touch after migrate uses current mask\n");
+    assert(flow4_extra_table_init(&ft, pool, N_MAX, old_bk_raw,
+                                  old_bk_sz, &cfg) == 0);
+
+    for (unsigned i = 0u; i < N_MAX; i++) {
+        pool[i].key = mk_key(i);
+        assert(flow4_extra_table_add(&ft, &pool[i], 1000u) != (u32)RIX_NIL);
+    }
+    old_mask = ft.ht_head.rhh_mask;
+    assert(ft_table_extra_migrate(&ft, new_bk_raw, new_bk_sz) == 0);
+    new_mask = ft.ht_head.rhh_mask;
+    assert(new_mask > old_mask);
+
+    for (unsigned i = 0u; i < N_MAX; i++) {
+        unsigned old_bk = pool[i].meta.cur_hash & old_mask;
+        unsigned new_bk = pool[i].meta.cur_hash & new_mask;
+
+        if (old_bk != new_bk) {
+            chosen = i;
+            found = 1;
+            break;
+        }
+    }
+    assert(found);
+    assert(ft_table_extra_touch_checked(&ft, chosen + 1u, 7000u) == 0);
+    {
+        unsigned bk_idx = pool[chosen].meta.cur_hash & new_mask;
+        unsigned slot = (unsigned)pool[chosen].meta.slot;
+
+        assert(flow_extra_ts_get(&ft.buckets[bk_idx], slot) ==
+               flow_extra_timestamp_encode(7000u, cfg.ts_shift));
+    }
+
+    ft_table_extra_destroy(&ft);
+    munmap(pool, N_MAX * sizeof(*pool));
+    munmap(old_bk_raw, old_bk_sz);
+    munmap(new_bk_raw, new_bk_sz);
+}
+
+static void
+test_find_bulk_touches_bucket_extra(void)
+{
+    enum { NB = 64u };
+    size_t bk_sz = flow4_extra_table_bucket_size(N_MAX);
+    struct flow4_extra_entry *pool = hugealloc(N_MAX * sizeof(*pool));
+    void *bk_raw = hugealloc(bk_sz);
+    struct ft_table_extra ft;
+    struct ft_table_extra_config cfg = { .ts_shift = 4u };
+    struct flow4_extra_key keys[NB];
+    u32 results[NB];
+    unsigned hit;
+
+    printf("[T] flow4_extra find_bulk path touches bucket extra[]\n");
+    assert(flow4_extra_table_init(&ft, pool, N_MAX, bk_raw, bk_sz, &cfg) == 0);
+
+    for (unsigned i = 0u; i < NB; i++) {
+        pool[i].key = mk_key(i);
+        keys[i] = pool[i].key;
+        assert(flow4_extra_table_add(&ft, &pool[i], 1000u) != (u32)RIX_NIL);
+    }
+    hit = flow4_extra_table_find_bulk(&ft, keys, NB, 9000u, results);
+    assert(hit == NB);
+    for (unsigned i = 0u; i < NB; i++) {
+        unsigned bk_idx = pool[i].meta.cur_hash & ft.ht_head.rhh_mask;
+        unsigned slot = (unsigned)pool[i].meta.slot;
+
+        assert(results[i] == i + 1u);
+        assert(flow_extra_ts_get(&ft.buckets[bk_idx], slot) ==
+               flow_extra_timestamp_encode(9000u, cfg.ts_shift));
+    }
+
+    ft_table_extra_destroy(&ft);
+    munmap(pool, N_MAX * sizeof(*pool));
+    munmap(bk_raw, bk_sz);
+}
+
+static void
+test_compact_key_omits_vrfid(void)
+{
+    struct flow4_key c0 = { 0 };
+    struct flow4_key c1 = { 0 };
+    struct flow4_extra_key e0 = { 0 };
+    struct flow4_extra_key e1 = { 0 };
+
+    printf("[T] flow4_extra compact key omits vrfid by design\n");
+    c0.family = c1.family = 4u;
+    c0.proto = c1.proto = 6u;
+    c0.src_port = c1.src_port = 1000u;
+    c0.dst_port = c1.dst_port = 2000u;
+    c0.src_ip = c1.src_ip = 0x0A000001u;
+    c0.dst_ip = c1.dst_ip = 0x0B000001u;
+    c0.vrfid = 1u;
+    c1.vrfid = 2u;
+
+    e0.family = e1.family = c0.family;
+    e0.proto = e1.proto = c0.proto;
+    e0.src_port = e1.src_port = c0.src_port;
+    e0.dst_port = e1.dst_port = c0.dst_port;
+    e0.src_addr = e1.src_addr = c0.src_ip;
+    e0.dst_addr = e1.dst_addr = c0.dst_ip;
+
+    assert(memcmp(&c0, &c1, sizeof(c0)) != 0);
+    assert(memcmp(&e0, &e1, sizeof(e0)) == 0);
+}
+
 int
 main(void)
 {
@@ -220,7 +387,12 @@ main(void)
     test_add_find_del();
     test_ts_in_bucket();
     test_maintain_expires();
+    test_find_touch_updates_bucket_extra();
     test_touch_updates_bucket_extra();
+    test_touch_checked_rejects_deleted_idx();
+    test_touch_after_migrate_uses_current_mask();
+    test_find_bulk_touches_bucket_extra();
+    test_compact_key_omits_vrfid();
     printf("PASS\n");
     return 0;
 }

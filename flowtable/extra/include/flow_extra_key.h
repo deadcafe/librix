@@ -45,6 +45,15 @@ struct flow4_extra_entry {
 _Static_assert(offsetof(struct flow4_extra_entry, meta) == 16u,
                "flow4_extra_entry.meta must be at offset 16");
 
+/*
+ * Bare bucket-side timestamp accessors.  Use these only when (bk, slot) are
+ * already fully derived in the local context (e.g. test setup, bench prep,
+ * post-find inline writes where scan has just produced the bk pointer).
+ *
+ * For higher-level code that wants validation against an expected entry index,
+ * prefer rix_hash_slot_extra_set() / rix_hash_slot_extra_get() /
+ * rix_hash_slot_extra_touch_2bk() in <rix/rix_hash_slot_extra.h>.
+ */
 static inline u32
 flow_extra_ts_get(const struct rix_hash_bucket_extra_s *bk, unsigned slot)
 {

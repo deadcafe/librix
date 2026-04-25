@@ -47,6 +47,7 @@ struct ft_table_extra {
     unsigned char                  *pool_base;
     size_t                          pool_stride;
     size_t                          pool_entry_offset;
+    size_t                          meta_offset;        /* record base -> meta */
     struct ft_table_extra_ht        ht_head;
     unsigned                        start_mask;
     unsigned                        nb_bk;
@@ -119,8 +120,55 @@ int ft_table_extra_walk(struct ft_table_extra *ft,
 int ft_table_extra_migrate(struct ft_table_extra *ft,
                            void *new_buckets, size_t new_bucket_size);
 
+/**
+ * @brief Refresh the bucket-side timestamp for @p entry_idx (best-effort).
+ *
+ * Convenience void wrapper around ft_table_extra_touch_checked(); silently
+ * ignores stale or out-of-range indices.  Kept for ABI compatibility.
+ *
+ * @param ft         Table handle.
+ * @param entry_idx  1-origin entry index (must currently live in the table).
+ * @param now        Current TSC value; encoded with @c ft->ts_shift.
+ */
 void ft_table_extra_touch(struct ft_table_extra *ft, u32 entry_idx,
                           u64 now);
+
+/**
+ * @brief Refresh the bucket-side timestamp for @p entry_idx, validating that
+ *        the current bucket layout still maps the entry.
+ *
+ * Validates @p ft state, that @p entry_idx is in range, that the bucket
+ * resolved via @c ht_head.rhh_mask still holds @p entry_idx at the slot
+ * recorded in the entry meta, and only then writes the encoded timestamp.
+ * This is migrate-safe (uses the live mask, not @c start_mask) and rejects
+ * deleted or relocated entries instead of corrupting unrelated slots.
+ *
+ * @param ft         Table handle.
+ * @param entry_idx  1-origin entry index.
+ * @param now        Current TSC value; encoded with @c ft->ts_shift.
+ * @return 0 on success, -1 if @p ft / @p entry_idx is invalid or the entry
+ *         no longer maps to the recorded slot.
+ */
+int ft_table_extra_touch_checked(struct ft_table_extra *ft, u32 entry_idx,
+                                 u64 now);
+
+/**
+ * @brief Populate @p ctx from @p ft so it can be passed to
+ *        ft_table_extra_maintain() / ft_table_extra_maintain_idx_bulk().
+ *
+ * Fills @c buckets, @c rhh_nb, @c stats, @c pool_base, @c pool_stride,
+ * @c meta_off (resolved per variant at @c ft_table_extra_init() time),
+ * @c max_entries, @c rhh_mask, @c ts_shift.  Other fields are zeroed.
+ *
+ * @param ft   Initialized table handle.
+ * @param ctx  Maintenance context to fill.
+ * @return 0 on success, -1 if @p ft / @p ctx is NULL or @p ft is uninitialized.
+ *
+ * Call again after ft_table_extra_migrate() so @c rhh_mask and @c buckets
+ * reflect the new bucket array.
+ */
+int ft_table_extra_maint_ctx_init(struct ft_table_extra *ft,
+                                  struct ft_maint_extra_ctx *ctx);
 
 unsigned ft_table_extra_maintain(const struct ft_maint_extra_ctx *ctx,
                                  unsigned start_bk,

@@ -233,6 +233,17 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
             if (RIX_LIKELY(entry != NULL)) {                                  \
                 u32 entry_idx = FTG_LAYOUT_ENTRY_INDEX(ft, entry);            \
                                                                               \
+                /* scan_bk has already proven entry_idx lives in bk[0]/bk[1], \
+                 * so touch must succeed here.  Assert in debug builds.       \
+                 */                                                           \
+                if ((now) != 0u) {                                            \
+                    int _ts_rc = rix_hash_slot_extra_touch_2bk(               \
+                        ctx[i].bk[0], ctx[i].bk[1],                           \
+                        (unsigned)entry->meta.slot, entry_idx,                \
+                        flow_extra_timestamp_encode((now), ft->ts_shift));    \
+                    RIX_ASSERT(_ts_rc == 0);                                  \
+                    (void)_ts_rc;                                             \
+                }                                                             \
                 FCORE_EXTRA_TOUCH_TIMESTAMP(ft, entry, now);                  \
                 FCORE_EXTRA_ON_HIT(ft, entry, entry_idx);                     \
                 results[i].entry_idx = entry_idx;                             \
@@ -261,6 +272,17 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
         if (RIX_LIKELY(entry != NULL)) {                                      \
             u32 entry_idx = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                \
                                                                               \
+            /* scan_bk has already proven entry_idx lives in bk[0]/bk[1].     \
+             * Assert in debug builds; release path drops the check.          \
+             */                                                               \
+            if ((now) != 0u) {                                                \
+                int _ts_rc = rix_hash_slot_extra_touch_2bk(                   \
+                    ctx.bk[0], ctx.bk[1],                                     \
+                    (unsigned)entry->meta.slot, entry_idx,                    \
+                    flow_extra_timestamp_encode((now), ft->ts_shift));        \
+                RIX_ASSERT(_ts_rc == 0);                                      \
+                (void)_ts_rc;                                                 \
+            }                                                                 \
             FCORE_EXTRA_TOUCH_TIMESTAMP(ft, entry, now);                      \
             FCORE_EXTRA_ON_HIT(ft, entry, entry_idx);                         \
             results[i].entry_idx = entry_idx;                                 \

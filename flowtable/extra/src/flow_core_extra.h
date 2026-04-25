@@ -305,18 +305,17 @@ _FCORE_EXTRA_INT(p, find_key_bulk_)(_FCORE_EXTRA_OT(ot) *owner,              \
                 if (RIX_LIKELY(entry != NULL)) {                              \
                     u32 eidx =                                                 \
                         FCORE_EXTRA_LAYOUT_ENTRY_INDEX(owner, entry);         \
-                    /* Write timestamp to bk->extra[slot] inline */           \
-                    {                                                         \
-                        unsigned _slot = entry->meta.slot;                    \
-                        struct rix_hash_bucket_extra_s *_bk =                 \
-                            ctx[idx & ctx_mask].bk[0];                        \
-                        if (_bk->idx[_slot] != eidx)                          \
-                            _bk = ctx[idx & ctx_mask].bk[1];                 \
-                        if ((now) != 0u)                                      \
-                            _bk->extra[_slot] =                               \
-                                flow_extra_timestamp_encode(                        \
-                                    (now),                                    \
-                                    FCORE_EXTRA_TIMESTAMP_SHIFT(owner));      \
+                    /* scan_bk has proven eidx lives in bk[0]/bk[1]. */       \
+                    if ((now) != 0u) {                                        \
+                        int _ts_rc = rix_hash_slot_extra_touch_2bk(           \
+                            ctx[idx & ctx_mask].bk[0],                        \
+                            ctx[idx & ctx_mask].bk[1],                        \
+                            (unsigned)entry->meta.slot, eidx,                 \
+                            flow_extra_timestamp_encode(                      \
+                                (now),                                        \
+                                FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));         \
+                        RIX_ASSERT(_ts_rc == 0);                              \
+                        (void)_ts_rc;                                         \
                     }                                                         \
                     FCORE_EXTRA_TOUCH_TIMESTAMP(owner, entry, (now));         \
                     FCORE_EXTRA_ON_HIT(owner, entry, eidx);                   \
@@ -540,17 +539,15 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
                 _FCORE_EXTRA_ENTRY_T(p) *node =                               \
                     FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, ret_idx);             \
                 RIX_ASSUME_NONNULL(node);                                     \
-                /* touch existing node: find its bk and update extra[slot] */ \
-                {                                                             \
-                    unsigned _slot = node->meta.slot;                         \
-                    unsigned _bki = node->meta.cur_hash & head->rhh_mask;     \
-                    struct rix_hash_bucket_extra_s *_bk =                     \
-                        buckets + _bki;                                       \
-                    if ((now) != 0u)                                          \
-                        _bk->extra[_slot] =                                   \
-                            flow_extra_timestamp_encode(                            \
-                                (now),                                        \
-                                FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
+                if ((now) != 0u) {                                            \
+                    int _ts_rc = rix_hash_slot_extra_set(                     \
+                        buckets, head->rhh_mask, node->meta.cur_hash,         \
+                        (unsigned)node->meta.slot, ret_idx,                   \
+                        flow_extra_timestamp_encode(                          \
+                            (now),                                            \
+                            FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));             \
+                    RIX_ASSERT(_ts_rc == 0);                                  \
+                    (void)_ts_rc;                                             \
                 }                                                             \
                 FCORE_EXTRA_TOUCH_TIMESTAMP(owner, node, now);                \
                 FCORE_EXTRA_CLEAR_TIMESTAMP(entry);                           \
@@ -895,18 +892,15 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                         _FCORE_EXTRA_ENTRY_T(p) *node =                       \
                             FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, ret_idx);     \
                         RIX_ASSUME_NONNULL(node);                             \
-                        /* touch existing node via its registered bk */       \
-                        {                                                     \
-                            unsigned _slot = node->meta.slot;                 \
-                            unsigned _bki =                                   \
-                                node->meta.cur_hash & head->rhh_mask;         \
-                            struct rix_hash_bucket_extra_s *_bk =             \
-                                buckets + _bki;                               \
-                            if ((now) != 0u)                                  \
-                                _bk->extra[_slot] =                           \
-                                    flow_extra_timestamp_encode(                    \
-                                        (now),                                \
-                                        FCORE_EXTRA_TIMESTAMP_SHIFT(owner));  \
+                        if ((now) != 0u) {                                    \
+                            int _ts_rc = rix_hash_slot_extra_set(             \
+                                buckets, head->rhh_mask, node->meta.cur_hash, \
+                                (unsigned)node->meta.slot, ret_idx,           \
+                                flow_extra_timestamp_encode(                  \
+                                    (now),                                    \
+                                    FCORE_EXTRA_TIMESTAMP_SHIFT(owner)));     \
+                            RIX_ASSERT(_ts_rc == 0);                          \
+                            (void)_ts_rc;                                     \
                         }                                                     \
                         FCORE_EXTRA_TOUCH_TIMESTAMP(owner, node, now);        \
                         FCORE_EXTRA_CLEAR_TIMESTAMP(entry);                   \

@@ -100,9 +100,24 @@ test_insert_find_remove_basic(void)
         unsigned bk = f->cur_hash & e_head.rhh_mask;
         unsigned slot = f->slot;
         u32 expected = 0x1000u + i;
+        u32 got = 0u;
         if (e_bk[bk].extra[slot] != expected)
             FAILF("extra[%u]: expected 0x%x got 0x%x at bk=%u slot=%u",
                   i, expected, e_bk[bk].extra[slot], bk, slot);
+        if (rix_hash_slot_extra_get(e_bk, e_head.rhh_mask, f->cur_hash,
+                                    slot, i + 1u, &got) != 0 ||
+            got != expected)
+            FAILF("extra_get[%u]: expected 0x%x got 0x%x",
+                  i, expected, got);
+        if (rix_hash_slot_extra_set(e_bk, e_head.rhh_mask, f->cur_hash,
+                                    slot, i + 1u, expected + 1u) != 0)
+            FAILF("extra_set[%u] failed", i);
+        if (rix_hash_slot_extra_get(e_bk, e_head.rhh_mask, f->cur_hash,
+                                    slot, i + 1u, &got) != 0 ||
+            got != expected + 1u)
+            FAILF("extra_get_after_set[%u]: expected 0x%x got 0x%x",
+                  i, expected + 1u, got);
+        e_bk[bk].extra[slot] = expected;
     }
 
     for (unsigned i = 0; i < NB_BASIC; i += 2) {
@@ -493,6 +508,80 @@ test_prototype_split(void)
     }
 }
 
+static void
+test_slot_extra_touch_2bk(void)
+{
+    struct rix_hash_bucket_extra_s b0 = { 0 };
+    struct rix_hash_bucket_extra_s b1 = { 0 };
+    u32 got;
+
+    printf("[T] slot_extra touch_2bk variants\n");
+
+    b0.idx[3] = 0x1234u; b0.extra[3] = 0xAAAAu;
+    b1.idx[3] = 0x5678u; b1.extra[3] = 0xBBBBu;
+
+    /* match in bk0 */
+    if (rix_hash_slot_extra_touch_2bk(&b0, &b1, 3u, 0x1234u, 0xCAFEu) != 0)
+        FAIL("touch_2bk bk0 hit returned non-zero");
+    if (b0.extra[3] != 0xCAFEu)
+        FAILF("touch_2bk bk0 hit: extra=0x%x", b0.extra[3]);
+    if (b1.extra[3] != 0xBBBBu)
+        FAIL("touch_2bk bk0 hit clobbered bk1");
+
+    /* match in bk1 only */
+    if (rix_hash_slot_extra_touch_2bk(&b0, &b1, 3u, 0x5678u, 0xBEEFu) != 0)
+        FAIL("touch_2bk bk1 hit returned non-zero");
+    if (b1.extra[3] != 0xBEEFu)
+        FAILF("touch_2bk bk1 hit: extra=0x%x", b1.extra[3]);
+    if (b0.extra[3] != 0xCAFEu)
+        FAIL("touch_2bk bk1 hit clobbered bk0");
+
+    /* miss */
+    got = b0.extra[3];
+    if (rix_hash_slot_extra_touch_2bk(&b0, &b1, 3u, 0xDEADu, 0xFEEDu) == 0)
+        FAIL("touch_2bk miss returned 0");
+    if (b0.extra[3] != got || b1.extra[3] != 0xBEEFu)
+        FAIL("touch_2bk miss must not write");
+
+    /* slot out of range */
+    if (rix_hash_slot_extra_touch_2bk(&b0, &b1, 99u, 0x1234u, 0xFEEDu) == 0)
+        FAIL("touch_2bk out-of-range slot returned 0");
+
+    /* bk0 NULL falls back to bk1 */
+    if (rix_hash_slot_extra_touch_2bk(NULL, &b1, 3u, 0x5678u, 0x4242u) != 0)
+        FAIL("touch_2bk bk0=NULL bk1=match returned non-zero");
+    if (b1.extra[3] != 0x4242u)
+        FAILF("touch_2bk bk0=NULL: extra=0x%x", b1.extra[3]);
+
+    /* both NULL */
+    if (rix_hash_slot_extra_touch_2bk(NULL, NULL, 3u, 0x1234u, 0u) == 0)
+        FAIL("touch_2bk both NULL returned 0");
+
+    /* expected_idx == RIX_NIL (0) must be rejected even if a slot happens
+     * to be empty (idx == RIX_NIL).  Validated accessors must not match
+     * the empty-slot sentinel. */
+    {
+        struct rix_hash_bucket_extra_s nil_bk = { 0 };
+        u32 nil_got = 0u;
+
+        if (rix_hash_slot_extra_touch_2bk(&nil_bk, NULL, 0u, (u32)RIX_NIL,
+                                          0xDEADu) == 0)
+            FAIL("touch_2bk expected_idx==RIX_NIL must fail");
+        if (nil_bk.extra[0] != 0u)
+            FAIL("touch_2bk RIX_NIL guard must not write");
+
+        if (rix_hash_slot_extra_set(&nil_bk, 0u, 0u, 0u, (u32)RIX_NIL,
+                                    0xDEADu) == 0)
+            FAIL("set expected_idx==RIX_NIL must fail");
+        if (nil_bk.extra[0] != 0u)
+            FAIL("set RIX_NIL guard must not write");
+
+        if (rix_hash_slot_extra_get(&nil_bk, 0u, 0u, 0u, (u32)RIX_NIL,
+                                    &nil_got) == 0)
+            FAIL("get expected_idx==RIX_NIL must fail");
+    }
+}
+
 int
 main(void)
 {
@@ -507,6 +596,7 @@ main(void)
     test_fuzz_extra_consistency();
     test_ex_variant();
     test_prototype_split();
+    test_slot_extra_touch_2bk();
     printf("PASS\n");
     return 0;
 }

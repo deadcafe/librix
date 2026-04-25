@@ -8,6 +8,7 @@
  * variant.  Only flow4 is supported; no variant switch.
  */
 
+#include <stddef.h>
 #include <string.h>
 
 #include <rix/rix_hash_arch.h>
@@ -173,6 +174,19 @@ ft_table_extra_init(struct ft_table_extra *ft,
     ft->pool_base = (unsigned char *)array;
     ft->pool_stride = stride;
     ft->pool_entry_offset = entry_offset;
+    /*
+     * Resolve meta offset per variant.  When new variants (flow6/flowu_extra)
+     * are added, extend this switch — keep the resolution centralized so that
+     * helpers like ft_table_extra_maint_ctx_init() do not hard-code a struct.
+     */
+    switch (variant) {
+    case FT_TABLE_VARIANT_FLOW4:
+        ft->meta_offset = entry_offset
+                        + offsetof(struct flow4_extra_entry, meta);
+        break;
+    default:
+        return -1;
+    }
 
     memset(buckets, 0, (size_t)nb_bk * sizeof(*buckets));
     ft->buckets = buckets;
@@ -239,6 +253,25 @@ ft_table_extra_status_get(const struct ft_table_extra *ft,
         return;
     }
     ft_flow4_extra_ops_gen.status(ft, out);
+}
+
+int
+ft_table_extra_maint_ctx_init(struct ft_table_extra *ft,
+                              struct ft_maint_extra_ctx *ctx)
+{
+    if (ft == NULL || ctx == NULL || ft->buckets == NULL)
+        return -1;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->buckets     = ft->buckets;
+    ctx->rhh_nb      = &ft->ht_head.rhh_nb;
+    ctx->stats       = &ft->stats;
+    ctx->pool_base   = ft->pool_base;
+    ctx->pool_stride = ft->pool_stride;
+    ctx->meta_off    = ft->meta_offset;
+    ctx->max_entries = ft->max_entries;
+    ctx->rhh_mask    = ft->ht_head.rhh_mask;
+    ctx->ts_shift    = ft->ts_shift;
+    return 0;
 }
 
 int
@@ -328,19 +361,28 @@ ft_table_extra_del_idx_bulk(struct ft_table_extra *ft,
 void
 ft_table_extra_touch(struct ft_table_extra *ft, u32 entry_idx, u64 now)
 {
-    struct flow_entry_meta_extra *meta;
-    struct rix_hash_bucket_extra_s *bk;
-    unsigned char *record;
+    (void)ft_table_extra_touch_checked(ft, entry_idx, now);
+}
 
-    if (ft == NULL || entry_idx == 0u || entry_idx > ft->max_entries)
-        return;
+int
+ft_table_extra_touch_checked(struct ft_table_extra *ft, u32 entry_idx, u64 now)
+{
+    struct flow_entry_meta_extra *meta;
+    unsigned char *record;
+    u32 encoded;
+
+    if (ft == NULL || ft->buckets == NULL || ft->pool_base == NULL)
+        return -1;
+    if (entry_idx == 0u || entry_idx > ft->max_entries)
+        return -1;
 
     record = ft->pool_base + (size_t)(entry_idx - 1u) * ft->pool_stride
         + ft->pool_entry_offset;
     meta = &((struct flow4_extra_entry *)(void *)record)->meta;
-    bk = &ft->buckets[meta->cur_hash & ft->start_mask];
-    flow_extra_ts_set(bk, meta->slot,
-                      flow_extra_timestamp_encode(now, ft->ts_shift));
+    encoded = flow_extra_timestamp_encode(now, ft->ts_shift);
+    return rix_hash_slot_extra_set(ft->buckets, ft->ht_head.rhh_mask,
+                                   meta->cur_hash, (unsigned)meta->slot,
+                                   entry_idx, encoded);
 }
 
 /*===========================================================================
@@ -393,11 +435,19 @@ u32
 flow4_extra_table_find(struct ft_table_extra *ft,
                        const struct flow4_extra_key *key)
 {
+    return flow4_extra_table_find_touch(ft, key, 0u);
+}
+
+u32
+flow4_extra_table_find_touch(struct ft_table_extra *ft,
+                             const struct flow4_extra_key *key,
+                             u64 now)
+{
     struct ft_table_result result = { .entry_idx = 0u };
 
     if (ft == NULL || key == NULL)
         return 0u;
-    ft_flow4_extra_active->find_bulk(ft, key, 1u, 0u, &result);
+    ft_flow4_extra_active->find_bulk(ft, key, 1u, now, &result);
     return result.entry_idx;
 }
 
