@@ -30,6 +30,7 @@ EXTRA_CFLAGS ?=
 CFLAGS_BASE  = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include \
                -I$(CURDIR)/include -I$(CURDIR)/src \
+               -I$(CURDIR)/extra/include -I$(CURDIR)/extra/src \
                -fPIC $(EXTRA_CFLAGS)
 DEPFLAGS     = -MMD -MP
 
@@ -39,9 +40,12 @@ LIBDIR      ?= $(BUILDDIR)/lib
 SRCDIR       = src
 INCDIR       = include
 DISPATCH_SRC  = $(SRCDIR)/ft_dispatch.c
+EXTRA_SRCDIR        = extra/src
+EXTRA_DISPATCH_SRC  = $(EXTRA_SRCDIR)/ft_dispatch_extra.c
 ARCH_VARIANTS := gen sse avx2 avx512
 FLOW_UNITS    := flow4 flow6 flowu
 ARCH_UNITS    := $(FLOW_UNITS) ft_maintain
+EXTRA_ARCH_UNITS := flow4_extra ft_maintain_extra
 ARCH_CFLAGS_gen :=
 ARCH_CFLAGS_sse := -msse4.2
 ARCH_CFLAGS_avx2 := -mavx2 -msse4.2
@@ -52,7 +56,11 @@ OBJS         = $(foreach unit,$(FLOW_UNITS), \
                        $(OBJDIR)/$(unit)_$(arch).o)) \
                $(OBJDIR)/ft_dispatch.o \
                $(foreach arch,$(ARCH_VARIANTS), \
-                   $(OBJDIR)/ft_maintain_$(arch).o)
+                   $(OBJDIR)/ft_maintain_$(arch).o) \
+               $(foreach unit,$(EXTRA_ARCH_UNITS), \
+                   $(foreach arch,$(ARCH_VARIANTS), \
+                       $(OBJDIR)/$(unit)_$(arch).o)) \
+               $(OBJDIR)/ft_dispatch_extra.o
 LIB_STATIC   = $(LIBDIR)/libftable.a
 DEPS         = $(OBJS:.o=.d)
 
@@ -74,8 +82,21 @@ $(foreach unit,$(ARCH_UNITS), \
   $(foreach arch,$(ARCH_VARIANTS), \
     $(eval $(call COMPILE_ARCH_UNIT,$(unit),$(arch)))))
 
+define COMPILE_EXTRA_ARCH_UNIT
+$(OBJDIR)/$(1)_$(2).o: $(EXTRA_SRCDIR)/$(1).c | $(OBJDIR)
+	$$(CC) $$(CFLAGS_BASE) $$(DEPFLAGS) -MF $$(@:.o=.d) -MT $$@ \
+	    $$(ARCH_CFLAGS_$(2)) -DFT_ARCH_SUFFIX=_$(2) -c -o $$@ $$<
+endef
+
+$(foreach unit,$(EXTRA_ARCH_UNITS), \
+  $(foreach arch,$(ARCH_VARIANTS), \
+    $(eval $(call COMPILE_EXTRA_ARCH_UNIT,$(unit),$(arch)))))
+
 # dispatch
 $(OBJDIR)/ft_dispatch.o: $(DISPATCH_SRC) | $(OBJDIR)
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
+
+$(OBJDIR)/ft_dispatch_extra.o: $(EXTRA_DISPATCH_SRC) | $(OBJDIR)
 	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
 
 $(LIB_STATIC): $(OBJS) | $(LIBDIR)

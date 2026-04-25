@@ -40,6 +40,7 @@ BENCH_MAINT_FILL := 50
 CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include \
                -I$(FTDIR)/include \
+               -I$(FTDIR)/extra/include \
                -mavx2 -msse4.2 $(EXTRA_CFLAGS)
 DEPFLAGS     = -MMD -MP
 
@@ -48,16 +49,28 @@ BINDIR       ?= $(BUILDDIR)/bin
 TARGET_NAME   = ft_test
 BENCH_NAME    = ft_bench
 SIM_NAME      = ft_sim_cache
+TEST_EXTRA_NAME = ft_test_extra
+TEST_PARITY_NAME = ft_test_parity
+BENCH_EXTRA_NAME = ft_bench_extra
+BENCH_SWEEP_NAME = ft_bench_sweep
 TARGET        = $(BINDIR)/$(TARGET_NAME)
 BENCH         = $(BINDIR)/$(BENCH_NAME)
 SIM           = $(BINDIR)/$(SIM_NAME)
+TEST_EXTRA    = $(BINDIR)/$(TEST_EXTRA_NAME)
+TEST_PARITY   = $(BINDIR)/$(TEST_PARITY_NAME)
+BENCH_EXTRA   = $(BINDIR)/$(BENCH_EXTRA_NAME)
+BENCH_SWEEP   = $(BINDIR)/$(BENCH_SWEEP_NAME)
 SRC          = test_flow_table.c
 BENCH_SRC    = bench_flow_table.c
 SIM_SRC      = sim_flow_cache.c
+TEST_EXTRA_SRC = test_flow4_extra.c
+TEST_PARITY_SRC = test_flow4_parity.c
+BENCH_EXTRA_SRC = bench_flow4_vs_extra.c
+BENCH_SWEEP_SRC = bench_flow4_maint_sweep.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
-DEPS         = $(TARGET).d $(BENCH).d $(SIM).d
+DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(BENCH_EXTRA).d $(BENCH_SWEEP).d
 
-.PHONY: all help test bench bench-light bench-full sim clean libft FORCE
+.PHONY: all help test test-classic test-extra test-parity bench bench-light bench-full bench-extra bench-sweep sim clean libft FORCE
 
 all: test
 
@@ -88,6 +101,18 @@ $(BENCH): $(BENCH_SRC) $(LIBFT) | $(BINDIR)
 $(SIM): $(SIM_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(SIM_SRC) $(LIBFT) -lm
 
+$(TEST_EXTRA): $(TEST_EXTRA_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_EXTRA_SRC) $(LIBFT)
+
+$(TEST_PARITY): $(TEST_PARITY_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_PARITY_SRC) $(LIBFT)
+
+$(BENCH_EXTRA): $(BENCH_EXTRA_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_EXTRA_SRC) $(LIBFT)
+
+$(BENCH_SWEEP): $(BENCH_SWEEP_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SWEEP_SRC) $(LIBFT)
+
 # Always enter the ftable sub-make so its own .d files can decide whether
 # header changes require rebuilding the library objects/archive.
 $(LIBFT): FORCE
@@ -97,8 +122,16 @@ FORCE:
 
 libft: $(LIBFT)
 
-test: $(TARGET)
+test: test-classic test-extra test-parity
+
+test-classic: $(TARGET)
 	$(TARGET)
+
+test-extra: $(TEST_EXTRA)
+	$(TEST_EXTRA)
+
+test-parity: $(TEST_PARITY)
+	$(TEST_PARITY)
 
 bench-light: $(BENCH)
 	@for q in $(BENCH_QUERIES); do \
@@ -107,6 +140,12 @@ bench-light: $(BENCH)
 	done
 
 bench: bench-light
+
+bench-extra: $(BENCH_EXTRA)
+	$(BENCH_EXTRA)
+
+bench-sweep: $(BENCH_SWEEP)
+	$(BENCH_SWEEP)
 
 sim: $(SIM)
 	$(SIM)
