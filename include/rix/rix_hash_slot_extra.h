@@ -38,30 +38,31 @@ struct rix_hash_find_ctx_extra_s {
 
 /* ---- accessor / prefetch helpers --------------------------------------- */
 
-/* Return a pointer to buckets[bk_idx]. */
+/** @brief Pointer to the bucket at index @p bk_idx. */
 #  ifndef rix_hash_extra_bucket_of_idx
 #    define rix_hash_extra_bucket_of_idx(buckets, bk_idx) \
         (&(buckets)[(unsigned)(bk_idx)])
 #  endif
 
-/* Return buckets[bk_idx].hash[]. */
+/** @brief Pointer to the @c hash[] line of the bucket at index @p bk_idx. */
 #  ifndef rix_hash_extra_bucket_hashes_of_idx
 #    define rix_hash_extra_bucket_hashes_of_idx(buckets, bk_idx) \
         (rix_hash_extra_bucket_of_idx((buckets), (bk_idx))->hash)
 #  endif
 
-/* Return buckets[bk_idx].idx[]. */
+/** @brief Pointer to the @c idx[] line of the bucket at index @p bk_idx. */
 #  ifndef rix_hash_extra_bucket_indices_of_idx
 #    define rix_hash_extra_bucket_indices_of_idx(buckets, bk_idx) \
         (rix_hash_extra_bucket_of_idx((buckets), (bk_idx))->idx)
 #  endif
 
-/* Return buckets[bk_idx].extra[]. */
+/** @brief Pointer to the @c extra[] line of the bucket at index @p bk_idx. */
 #  ifndef rix_hash_extra_bucket_extras_of_idx
 #    define rix_hash_extra_bucket_extras_of_idx(buckets, bk_idx) \
         (rix_hash_extra_bucket_of_idx((buckets), (bk_idx))->extra)
 #  endif
 
+/** @brief Prefetch the hash[] cache line (T1) of @p bucket. */
 static RIX_FORCE_INLINE void
 rix_hash_prefetch_extra_bucket_hashes_of(
     const struct rix_hash_bucket_extra_s *bucket)
@@ -69,6 +70,7 @@ rix_hash_prefetch_extra_bucket_hashes_of(
     __builtin_prefetch(&bucket->hash[0], 0, 1);
 }
 
+/** @brief Prefetch the idx[] cache line (T1) of @p bucket. */
 static RIX_FORCE_INLINE void
 rix_hash_prefetch_extra_bucket_indices_of(
     const struct rix_hash_bucket_extra_s *bucket)
@@ -76,6 +78,7 @@ rix_hash_prefetch_extra_bucket_indices_of(
     __builtin_prefetch(&bucket->idx[0], 0, 1);
 }
 
+/** @brief Prefetch the extra[] cache line (T1) of @p bucket. */
 static RIX_FORCE_INLINE void
 rix_hash_prefetch_extra_bucket_extras_of(
     const struct rix_hash_bucket_extra_s *bucket)
@@ -83,6 +86,9 @@ rix_hash_prefetch_extra_bucket_extras_of(
     __builtin_prefetch(&bucket->extra[0], 0, 1);
 }
 
+/** @brief Prefetch the hash[] and idx[] cache lines of @p bucket
+ *         (find / scan path).
+ */
 static RIX_FORCE_INLINE void
 rix_hash_prefetch_extra_bucket_of(
     const struct rix_hash_bucket_extra_s *bucket)
@@ -91,6 +97,9 @@ rix_hash_prefetch_extra_bucket_of(
     rix_hash_prefetch_extra_bucket_indices_of(bucket);
 }
 
+/** @brief Prefetch all three cache lines of @p bucket
+ *         (maintain / timestamp-aware path).
+ */
 static RIX_FORCE_INLINE void
 rix_hash_prefetch_extra_bucket_full_of(
     const struct rix_hash_bucket_extra_s *bucket)
@@ -100,21 +109,31 @@ rix_hash_prefetch_extra_bucket_full_of(
     rix_hash_prefetch_extra_bucket_extras_of(bucket);
 }
 
+/** @brief Index-form variant of rix_hash_prefetch_extra_bucket_hashes_of(). */
 #  define rix_hash_prefetch_extra_bucket_hashes_of_idx(buckets, bk_idx)       \
     rix_hash_prefetch_extra_bucket_hashes_of(&(buckets)[(unsigned)(bk_idx)])
 
+/** @brief Index-form variant of rix_hash_prefetch_extra_bucket_indices_of(). */
 #  define rix_hash_prefetch_extra_bucket_indices_of_idx(buckets, bk_idx)      \
     rix_hash_prefetch_extra_bucket_indices_of(&(buckets)[(unsigned)(bk_idx)])
 
+/** @brief Index-form variant of rix_hash_prefetch_extra_bucket_extras_of(). */
 #  define rix_hash_prefetch_extra_bucket_extras_of_idx(buckets, bk_idx)       \
     rix_hash_prefetch_extra_bucket_extras_of(&(buckets)[(unsigned)(bk_idx)])
 
+/**
+ * @brief True (non-zero) if @p slot is a valid bucket-slot index
+ *        (< RIX_HASH_BUCKET_ENTRY_SZ).
+ */
 static RIX_FORCE_INLINE int
 rix_hash_slot_extra_slot_valid(unsigned slot)
 {
     return slot < RIX_HASH_BUCKET_ENTRY_SZ;
 }
 
+/**
+ * @brief Resolve the bucket pointer for @p cur_hash given mask @p mask.
+ */
 static RIX_FORCE_INLINE struct rix_hash_bucket_extra_s *
 rix_hash_slot_extra_bucket_by_hash(struct rix_hash_bucket_extra_s *buckets,
                                    unsigned mask,
@@ -123,6 +142,7 @@ rix_hash_slot_extra_bucket_by_hash(struct rix_hash_bucket_extra_s *buckets,
     return &buckets[cur_hash & mask];
 }
 
+/** @brief @c const variant of rix_hash_slot_extra_bucket_by_hash(). */
 static RIX_FORCE_INLINE const struct rix_hash_bucket_extra_s *
 rix_hash_slot_extra_bucket_by_hash_const(
     const struct rix_hash_bucket_extra_s *buckets,

@@ -54,12 +54,19 @@ _Static_assert(offsetof(struct flow4_extra_entry, meta) == 16u,
  * prefer rix_hash_slot_extra_set() / rix_hash_slot_extra_get() /
  * rix_hash_slot_extra_touch_2bk() in <rix/rix_hash_slot_extra.h>.
  */
+
+/**
+ * @brief Read @c bk->extra[slot] without any validation.
+ */
 static inline u32
 flow_extra_ts_get(const struct rix_hash_bucket_extra_s *bk, unsigned slot)
 {
     return bk->extra[slot];
 }
 
+/**
+ * @brief Write @p encoded into @c bk->extra[slot] without any validation.
+ */
 static inline void
 flow_extra_ts_set(struct rix_hash_bucket_extra_s *bk, unsigned slot,
                   u32 encoded)
@@ -67,6 +74,10 @@ flow_extra_ts_set(struct rix_hash_bucket_extra_s *bk, unsigned slot,
     bk->extra[slot] = encoded;
 }
 
+/**
+ * @brief Check whether @p encoded is the "permanent" timestamp sentinel
+ *        (0).  Permanent entries are skipped by maintain expiry.
+ */
 static inline int
 flow_extra_ts_is_permanent(u32 encoded)
 {
@@ -77,10 +88,13 @@ flow_extra_ts_is_permanent(u32 encoded)
  * flow_timestamp_is_expired_raw so classic <-> extra comparisons are
  * bit-exact. */
 
-/*
- * Narrowing wrapper for extra-variant storage: bk->extra[] is u32 so we
- * want a u32 return to avoid explicit casts at every store site.  The
- * underlying encode already masks to FLOW_TIMESTAMP_MASK (32 bits).
+/**
+ * @brief Encode a TSC value @p now with shift @p shift into the 32-bit
+ *        bucket extra[] timestamp form used by the slot_extra variant.
+ *
+ * Narrowing wrapper around flow_timestamp_encode(): bk->extra[] is u32 so
+ * a u32 return avoids casts at every store site.  The underlying encode
+ * already masks to FLOW_TIMESTAMP_MASK (32 bits) so this is safe.
  */
 static inline u32
 flow_extra_timestamp_encode(u64 now, unsigned shift)
