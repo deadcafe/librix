@@ -581,7 +581,111 @@ hugepage 有効、1M entries、60% fill で計測。
 - `maint_idx_expire` が ~23 cy/entry であり、post-hit の
   局所 maintenance として効率的
 
-## 12. ファイル構成
+## 12. ft_fill_ctrl — 適応型 fill-rate コントローラ
+
+`flowtable/include/ft_fill_ctrl.h` は header-only の適応型コントローラである。
+バッチごとに sweep 予算と expire タイムアウトを自動計算し、
+fill を setpoint 付近に維持しながら DoS バースト時の急増を抑制する。
+
+### 12.1 設計概要（二重ループ）
+
+```
+ Inner loop (毎バッチ): fill_delta EWMA → sweep_budget
+   fill が setpoint を超えた分 + 上昇トレンドを予算に変換する。
+   ceiling を超えた場合は budget_max を強制する。
+
+ Outer loop (毎バッチ): miss-rate EWMA → expire_tsc
+   新規フロー到着率の増加（DoS）を miss-rate の上昇として検出し、
+   expire_tsc を比例短縮することで fill の上限を抑える。
+```
+
+### 12.2 初期化
+
+```c
+#include <ft_fill_ctrl.h>
+
+struct ft_fill_ctrl ctrl;
+ft_fill_ctrl_init(&ctrl,
+    N,                        /* table 容量 */
+    68,                       /* setpoint (%) */
+    74,                       /* ceiling (%) */
+    FT_MISS_X1024(3),         /* 通常 miss rate 3% */
+    23ULL * tsc_hz,           /* t_normal: 通常 timeout (tsc ticks) */
+    3ULL  * tsc_hz);          /* t_min: DoS 時の最短 timeout */
+```
+
+`t_normal` の目安:
+
+```
+t_normal = setpoint_entries / add_rate [flows/s] × tsc_hz
+例) N=1M, setpoint=68%, add_rate=30000 flows/s:
+    t_normal = 680000 / 30000 × 2e9 ≈ 45.3s × 2 GHz = 9.1e10 ticks
+```
+
+### 12.3 バッチループへの組み込み
+
+```c
+unsigned prev_added = 0, prev_hits = 0, prev_next_bk = 0;
+for (;;) {
+    unsigned budget, start_bk;
+    u64      tmo;
+
+    ft_fill_ctrl_compute(&ctrl,
+        ft_flow4_table_nb_entries(&ft),  /* 現在の fill */
+        prev_added, prev_hits,           /* 前バッチの結果 */
+        prev_next_bk,
+        &budget, &start_bk, &tmo);      /* 今バッチの制御パラメータ */
+
+    /* add path */
+    prev_added = ft_flow4_extra_table_add_idx_bulk(
+                     &ft, idxv, keys, nb_keys, tmo);
+
+    /* hit path */
+    prev_hits = ft_flow4_extra_table_find_touch_bulk(
+                    &ft, result, keys, nb_keys, tmo);
+
+    /* sweep */
+    if (budget > 0)
+        ft_flow4_extra_table_maintain(
+            &ft, start_bk, now_tsc, tmo,
+            expired_buf, budget, 1, &prev_next_bk);
+}
+```
+
+### 12.4 パラメータ選択の指針
+
+| 状況                       | 対処                                      |
+|----------------------------|-------------------------------------------|
+| steady-state fill が高い   | setpoint_pct を下げるか t_normal を短縮    |
+| DoS 時に fill が上限を超える | t_min を短縮するか ceiling_pct を上げる    |
+| sweep が追いつかない        | budget_max を増やす（既定 512）            |
+| miss-rate 検出が遅い        | outer_shift を下げる（既定 4 → 3）        |
+
+### 12.5 bench-ctrl — コントローラ動作検証ベンチ
+
+`bench_fill_ctrl.c` は 3 フェーズのシミュレーションで制御動作を検証する。
+
+```sh
+make -C flowtable/test bench-ctrl          # auto (AVX2)
+make -C flowtable/test bench-ctrl-sse      # SSE arch
+make -C flowtable/test bench-ctrl-gen      # GEN (scalar) arch
+```
+
+| フェーズ     | 内容                                              |
+|-------------|---------------------------------------------------|
+| Phase1:normal   | 定常: Q_add=64, Q_hit=2048, fill ≈ setpoint を維持 |
+| Phase2:DoS      | バースト: Q_add=512, miss_rate=20% → tmo 短縮、fill 抑制 |
+| Phase3:recovery | 復帰: バースト後 fill → 100%（期待動作）              |
+
+AVX2 での代表値（N=1M, setpoint=68%, 1.996 GHz TSC）:
+
+| フェーズ        | cy/pkt |
+|----------------|-------:|
+| Phase1:normal  |   95.5 |
+| Phase2:DoS     |  122.7 |
+| Phase3:recovery| 131,382 (table 満杯時の add 失敗コスト) |
+
+## 13. ファイル構成
 
 ```text
 flowtable/
@@ -595,6 +699,7 @@ flowtable/
     flow6_table.h
     flowu_table.h
     flow_common.h
+    ft_fill_ctrl.h        (適応型 fill-rate コントローラ)
   src/
     flow4.c
     flow6.c
@@ -610,4 +715,6 @@ flowtable/
     bench_flow_table.c
     bench_scope.h
     test_flow_table.c
+    bench_fill_ctrl.c     (ft_fill_ctrl 動作検証ベンチ)
 ```
+

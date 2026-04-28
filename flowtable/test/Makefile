@@ -53,6 +53,8 @@ TEST_EXTRA_NAME = ft_test_extra
 TEST_PARITY_NAME = ft_test_parity
 BENCH_EXTRA_NAME = ft_bench_extra
 BENCH_SWEEP_NAME = ft_bench_sweep
+BENCH_ZONED_NAME = ft_bench_zoned
+BENCH_CTRL_NAME  = ft_bench_ctrl
 TARGET        = $(BINDIR)/$(TARGET_NAME)
 BENCH         = $(BINDIR)/$(BENCH_NAME)
 SIM           = $(BINDIR)/$(SIM_NAME)
@@ -60,6 +62,8 @@ TEST_EXTRA    = $(BINDIR)/$(TEST_EXTRA_NAME)
 TEST_PARITY   = $(BINDIR)/$(TEST_PARITY_NAME)
 BENCH_EXTRA   = $(BINDIR)/$(BENCH_EXTRA_NAME)
 BENCH_SWEEP   = $(BINDIR)/$(BENCH_SWEEP_NAME)
+BENCH_ZONED   = $(BINDIR)/$(BENCH_ZONED_NAME)
+BENCH_CTRL    = $(BINDIR)/$(BENCH_CTRL_NAME)
 SRC          = test_flow_table.c
 BENCH_SRC    = bench_flow_table.c
 SIM_SRC      = sim_flow_cache.c
@@ -67,10 +71,12 @@ TEST_EXTRA_SRC = test_flow4_extra.c
 TEST_PARITY_SRC = test_flow4_parity.c
 BENCH_EXTRA_SRC = bench_flow4_vs_extra.c
 BENCH_SWEEP_SRC = bench_flow4_maint_sweep.c
+BENCH_ZONED_SRC = bench_flow4_zoned.c
+BENCH_CTRL_SRC  = bench_fill_ctrl.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
-DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(BENCH_EXTRA).d $(BENCH_SWEEP).d
+DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(BENCH_EXTRA).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d
 
-.PHONY: all help test test-classic test-extra test-parity bench bench-light bench-full bench-extra bench-sweep sim clean libft FORCE
+.PHONY: all help test test-classic test-extra test-parity bench bench-light bench-full bench-extra bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 sim clean libft FORCE
 
 all: test
 
@@ -87,7 +93,12 @@ help:
 	  '' \
 	  'Useful variables:' \
 	  '  BENCH_FT_OPTS       Options for bench / bench-light' \
-	  '  BENCH_FT_FULL_OPTS  Options for bench-full'
+	  '  BENCH_FT_FULL_OPTS  Options for bench-full' \
+	  '' \
+	  'Fill-controller bench arch variants (gen / sse / avx2):' \
+	  '  bench-ctrl-gen   Run ft_bench_ctrl with GEN (scalar) arch' \
+	  '  bench-ctrl-sse   Run ft_bench_ctrl with SSE arch' \
+	  '  bench-ctrl-avx2  Run ft_bench_ctrl with AVX2 arch'
 
 $(BINDIR):
 	mkdir -p $@
@@ -112,6 +123,12 @@ $(BENCH_EXTRA): $(BENCH_EXTRA_SRC) $(LIBFT) | $(BINDIR)
 
 $(BENCH_SWEEP): $(BENCH_SWEEP_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SWEEP_SRC) $(LIBFT)
+
+$(BENCH_ZONED): $(BENCH_ZONED_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_ZONED_SRC) $(LIBFT)
+
+$(BENCH_CTRL): $(BENCH_CTRL_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_CTRL_SRC) $(LIBFT)
 
 # Always enter the ftable sub-make so its own .d files can decide whether
 # header changes require rebuilding the library objects/archive.
@@ -146,6 +163,21 @@ bench-extra: $(BENCH_EXTRA)
 
 bench-sweep: $(BENCH_SWEEP)
 	$(BENCH_SWEEP)
+
+bench-zoned: $(BENCH_ZONED)
+	$(BENCH_ZONED)
+
+bench-ctrl: $(BENCH_CTRL)
+	$(BENCH_CTRL)
+
+bench-ctrl-gen: $(BENCH_CTRL)
+	$(BENCH_CTRL) gen
+
+bench-ctrl-sse: $(BENCH_CTRL)
+	$(BENCH_CTRL) sse
+
+bench-ctrl-avx2: $(BENCH_CTRL)
+	$(BENCH_CTRL) avx2
 
 sim: $(SIM)
 	$(SIM)

@@ -663,8 +663,8 @@ name##_insert_hashed_idx(struct name *head,                                   \
     u32 _hits_zero[2];                                                        \
     _fp = rix_hash_fp(_h, mask, &_bk0, &_bk1);                          \
     elm->hash_field = _h.val32[0];                                            \
-    rix_hash_prefetch_extra_bucket_of(buckets + _bk0);                        \
-    rix_hash_prefetch_extra_bucket_of(buckets + _bk1);                        \
+    rix_hash_prefetch_extra_bucket_full_of(buckets + _bk0);                   \
+    rix_hash_prefetch_extra_bucket_full_of(buckets + _bk1);                   \
                                                                               \
     for (int _i = 0; _i < 2; _i++) {                                          \
         struct rix_hash_bucket_extra_s *_bk =                                 \

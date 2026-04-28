@@ -374,6 +374,8 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,              \
         rix_hash_prefetch_key(&entry->key);                                   \
         _FCORE_EXTRA_HT(ht, hash_key_2bk_masked)(&ctx, buckets, &entry->key, \
                                                   hash_mask, head->rhh_mask); \
+        rix_hash_prefetch_extra_bucket_extras_of(ctx.bk[0]);                  \
+        rix_hash_prefetch_extra_bucket_extras_of(ctx.bk[1]);                  \
         _FCORE_EXTRA_HT(ht, scan_bk_empties)(&ctx, 0u);                      \
         _FCORE_EXTRA_HT(ht, scan_bk_empties)(&ctx, 1u);                      \
         if (RIX_UNLIKELY(ctx.fp_hits[0] != 0u)) {                             \
@@ -689,8 +691,8 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                 ctxp->key = (const void *)entry;                              \
                 ctxp->bk[0] = buckets + bk0;                                  \
                 ctxp->bk[1] = buckets + bk1;                                  \
-                rix_hash_prefetch_extra_bucket_of(ctxp->bk[0]);               \
-                rix_hash_prefetch_extra_bucket_of(ctxp->bk[1]);               \
+                rix_hash_prefetch_extra_bucket_full_of(ctxp->bk[0]);          \
+                rix_hash_prefetch_extra_bucket_full_of(ctxp->bk[1]);          \
             }                                                                 \
         }                                                                     \
         /* Stage 3: speculative fp scan of bk[0], prefetch first match */    \

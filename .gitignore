@@ -82,4 +82,7 @@ samples/test/fc_bench_ndebug
 samples/test/out/
 tests/hashtbl/slot_query_sweep
 tests/hashtbl/out/
+tests/hashtbl_extra/hash_extra_bench
+tests/hashtbl_extra/hash_extra_test
+tests/hashtbl_extra/hash_vs_classic_bench
 flowtable/build/
