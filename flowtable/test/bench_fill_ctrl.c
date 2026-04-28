@@ -276,7 +276,7 @@ main(int argc, char **argv)
     unsigned ft_arch_f = FT_ARCH_AUTO;
     const char *arch_name = "auto";
 
-    /* optional first argument: gen | sse | avx2 | auto */
+    /* optional first argument: gen | sse | avx2 | avx512 | auto */
     if (argc >= 2) {
         if (strcmp(argv[1], "gen") == 0) {
             rix_arch = 0u; ft_arch_f = FT_ARCH_GEN; arch_name = "gen";
@@ -284,6 +284,10 @@ main(int argc, char **argv)
             rix_arch = RIX_HASH_ARCH_SSE; ft_arch_f = FT_ARCH_SSE; arch_name = "sse";
         } else if (strcmp(argv[1], "avx2") == 0) {
             rix_arch = RIX_HASH_ARCH_AVX2; ft_arch_f = FT_ARCH_AVX2; arch_name = "avx2";
+        } else if (strcmp(argv[1], "avx512") == 0) {
+            rix_arch = RIX_HASH_ARCH_AVX512;
+            ft_arch_f = FT_ARCH_AVX512;
+            arch_name = "avx512";
         }
     }
 
@@ -322,7 +326,7 @@ main(int argc, char **argv)
      * Simulated time parameters:
      *   SIM_TICK  = Q_ADD_NORMAL = 64
      *   T_NORMAL  = setpoint     (so steady-state fill = setpoint)
-     *   expiry period = T_NORMAL / SIM_TICK = setpoint / Q_ADD ≈ 11 K batches
+     *   expiry period = T_NORMAL / SIM_TICK = setpoint / Q_ADD ~= 11 K batches
      *   T_MIN     = T_NORMAL / 8  (DoS floor)
      */
     const unsigned Q_ADD_NORMAL = 64u;

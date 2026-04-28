@@ -37,11 +37,16 @@ BENCH_FULL_FILLS := 40 50 60 80 90
 BENCH_GROW_FILL := 60
 BENCH_MAINT_FILL := 50
 
-CFLAGS       = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
+CFLAGS_COMMON = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include \
                -I$(FTDIR)/include \
                -I$(FTDIR)/extra/include \
-               -mavx2 -msse4.2 $(EXTRA_CFLAGS)
+               $(EXTRA_CFLAGS)
+ARCH_CFLAGS_gen :=
+ARCH_CFLAGS_sse := -msse4.2
+ARCH_CFLAGS_avx2 := -mavx2 -msse4.2
+ARCH_CFLAGS_avx512 := -mavx512f -mavx2 -msse4.2
+CFLAGS       = $(CFLAGS_COMMON) $(ARCH_CFLAGS_avx2)
 DEPFLAGS     = -MMD -MP
 
 BUILDDIR     ?= $(FTDIR)/build
@@ -51,6 +56,7 @@ BENCH_NAME    = ft_bench
 SIM_NAME      = ft_sim_cache
 TEST_EXTRA_NAME = ft_test_extra
 TEST_PARITY_NAME = ft_test_parity
+TEST_CTRL_NAME = ft_test_ctrl
 BENCH_EXTRA_NAME = ft_bench_extra
 BENCH_SWEEP_NAME = ft_bench_sweep
 BENCH_ZONED_NAME = ft_bench_zoned
@@ -60,23 +66,29 @@ BENCH         = $(BINDIR)/$(BENCH_NAME)
 SIM           = $(BINDIR)/$(SIM_NAME)
 TEST_EXTRA    = $(BINDIR)/$(TEST_EXTRA_NAME)
 TEST_PARITY   = $(BINDIR)/$(TEST_PARITY_NAME)
+TEST_CTRL     = $(BINDIR)/$(TEST_CTRL_NAME)
 BENCH_EXTRA   = $(BINDIR)/$(BENCH_EXTRA_NAME)
 BENCH_SWEEP   = $(BINDIR)/$(BENCH_SWEEP_NAME)
 BENCH_ZONED   = $(BINDIR)/$(BENCH_ZONED_NAME)
 BENCH_CTRL    = $(BINDIR)/$(BENCH_CTRL_NAME)
+BENCH_CTRL_GEN    = $(BINDIR)/$(BENCH_CTRL_NAME)_gen
+BENCH_CTRL_SSE    = $(BINDIR)/$(BENCH_CTRL_NAME)_sse
+BENCH_CTRL_AVX2   = $(BINDIR)/$(BENCH_CTRL_NAME)_avx2
+BENCH_CTRL_AVX512 = $(BINDIR)/$(BENCH_CTRL_NAME)_avx512
 SRC          = test_flow_table.c
 BENCH_SRC    = bench_flow_table.c
 SIM_SRC      = sim_flow_cache.c
 TEST_EXTRA_SRC = test_flow4_extra.c
 TEST_PARITY_SRC = test_flow4_parity.c
+TEST_CTRL_SRC = test_fill_ctrl.c
 BENCH_EXTRA_SRC = bench_flow4_vs_extra.c
 BENCH_SWEEP_SRC = bench_flow4_maint_sweep.c
 BENCH_ZONED_SRC = bench_flow4_zoned.c
 BENCH_CTRL_SRC  = bench_fill_ctrl.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
-DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(BENCH_EXTRA).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d
+DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(TEST_CTRL).d $(BENCH_EXTRA).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d $(BENCH_CTRL_GEN).d $(BENCH_CTRL_SSE).d $(BENCH_CTRL_AVX2).d $(BENCH_CTRL_AVX512).d
 
-.PHONY: all help test test-classic test-extra test-parity bench bench-light bench-full bench-extra bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 sim clean libft FORCE
+.PHONY: all help test test-classic test-extra test-parity test-ctrl bench bench-light bench-full bench-extra bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 bench-ctrl-avx512 bench-ctrl-build-all sim clean libft FORCE
 
 all: test
 
@@ -95,10 +107,12 @@ help:
 	  '  BENCH_FT_OPTS       Options for bench / bench-light' \
 	  '  BENCH_FT_FULL_OPTS  Options for bench-full' \
 	  '' \
-	  'Fill-controller bench arch variants (gen / sse / avx2):' \
-	  '  bench-ctrl-gen   Run ft_bench_ctrl with GEN (scalar) arch' \
-	  '  bench-ctrl-sse   Run ft_bench_ctrl with SSE arch' \
-	  '  bench-ctrl-avx2  Run ft_bench_ctrl with AVX2 arch'
+	  'Fill-controller bench arch variants (optimized binaries):' \
+	  '  bench-ctrl-gen      Build/run ft_bench_ctrl_gen with GEN arch' \
+	  '  bench-ctrl-sse      Build/run ft_bench_ctrl_sse with SSE arch' \
+	  '  bench-ctrl-avx2     Build/run ft_bench_ctrl_avx2 with AVX2 arch' \
+	  '  bench-ctrl-avx512   Build ft_bench_ctrl_avx512; run only on AVX512 CPU' \
+	  '  bench-ctrl-build-all  Build all ft_bench_ctrl_* arch binaries'
 
 $(BINDIR):
 	mkdir -p $@
@@ -118,6 +132,9 @@ $(TEST_EXTRA): $(TEST_EXTRA_SRC) $(LIBFT) | $(BINDIR)
 $(TEST_PARITY): $(TEST_PARITY_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_PARITY_SRC) $(LIBFT)
 
+$(TEST_CTRL): $(TEST_CTRL_SRC) | $(BINDIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_CTRL_SRC)
+
 $(BENCH_EXTRA): $(BENCH_EXTRA_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_EXTRA_SRC) $(LIBFT)
 
@@ -130,6 +147,14 @@ $(BENCH_ZONED): $(BENCH_ZONED_SRC) $(LIBFT) | $(BINDIR)
 $(BENCH_CTRL): $(BENCH_CTRL_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_CTRL_SRC) $(LIBFT)
 
+define BENCH_CTRL_ARCH_RULE
+$(BINDIR)/$(BENCH_CTRL_NAME)_$(1): $(BENCH_CTRL_SRC) $(LIBFT) | $(BINDIR)
+	$$(CC) $$(CFLAGS_COMMON) $$(ARCH_CFLAGS_$(1)) -DNDEBUG $$(DEPFLAGS) \
+	    -MF $$@.d -MT $$@ -o $$@ $$(BENCH_CTRL_SRC) $$(LIBFT)
+endef
+
+$(foreach arch,gen sse avx2 avx512,$(eval $(call BENCH_CTRL_ARCH_RULE,$(arch))))
+
 # Always enter the ftable sub-make so its own .d files can decide whether
 # header changes require rebuilding the library objects/archive.
 $(LIBFT): FORCE
@@ -139,7 +164,7 @@ FORCE:
 
 libft: $(LIBFT)
 
-test: test-classic test-extra test-parity
+test: test-classic test-extra test-parity test-ctrl
 
 test-classic: $(TARGET)
 	$(TARGET)
@@ -149,6 +174,9 @@ test-extra: $(TEST_EXTRA)
 
 test-parity: $(TEST_PARITY)
 	$(TEST_PARITY)
+
+test-ctrl: $(TEST_CTRL)
+	$(TEST_CTRL)
 
 bench-light: $(BENCH)
 	@for q in $(BENCH_QUERIES); do \
@@ -170,14 +198,23 @@ bench-zoned: $(BENCH_ZONED)
 bench-ctrl: $(BENCH_CTRL)
 	$(BENCH_CTRL)
 
-bench-ctrl-gen: $(BENCH_CTRL)
-	$(BENCH_CTRL) gen
+bench-ctrl-build-all: $(BENCH_CTRL_GEN) $(BENCH_CTRL_SSE) $(BENCH_CTRL_AVX2) $(BENCH_CTRL_AVX512)
 
-bench-ctrl-sse: $(BENCH_CTRL)
-	$(BENCH_CTRL) sse
+bench-ctrl-gen: $(BENCH_CTRL_GEN)
+	$(BENCH_CTRL_GEN) gen
 
-bench-ctrl-avx2: $(BENCH_CTRL)
-	$(BENCH_CTRL) avx2
+bench-ctrl-sse: $(BENCH_CTRL_SSE)
+	$(BENCH_CTRL_SSE) sse
+
+bench-ctrl-avx2: $(BENCH_CTRL_AVX2)
+	$(BENCH_CTRL_AVX2) avx2
+
+bench-ctrl-avx512: $(BENCH_CTRL_AVX512)
+	@if grep -qw avx512f /proc/cpuinfo; then \
+		$(BENCH_CTRL_AVX512) avx512; \
+	else \
+		echo "skip: CPU does not support AVX512F; built $(BENCH_CTRL_AVX512)"; \
+	fi
 
 sim: $(SIM)
 	$(SIM)

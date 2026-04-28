@@ -12,7 +12,7 @@
  *     Measures how fast fill is changing and computes the sweep budget
  *     needed to bring fill back to setpoint.
  *
- *   Outer loop (per-batch): miss-rate EWMA -> expire_tsc
+ *   Outer loop (per-batch): miss-rate EWMA + fill zone -> expire_tsc
  *     Detects traffic anomaly (DoS) from the cache miss-rate ratio and
  *     shortens the expiry timeout proportionally, keeping fill stable
  *     even when new-flow arrival rate spikes.
@@ -23,7 +23,7 @@
  *
  * Example (N=1M, 70% target, 1 Mpps, 3% miss):
  *   add_rate = 1e6 * 0.03 = 30,000 flows/s
- *   timeout  = 700,000 / 30,000 ≈ 23 s  -> t_normal ≈ 23 * TSC_HZ
+ *   timeout  = 700,000 / 30,000 ~= 23 s -> t_normal ~= 23 * TSC_HZ
  *
  * Usage sketch:
  *   struct ft_fill_ctrl ctrl;
@@ -60,7 +60,7 @@
  * @brief Convert a miss-rate percentage to the x1024 fixed-point form used by
  *        ft_fill_ctrl.
  *
- * Example: FT_MISS_X1024(3) = 30  (3% expressed as 30/1024 ≈ 2.93%)
+ * Example: FT_MISS_X1024(3) = 30  (3% expressed as 30/1024 ~= 2.93%)
  */
 #define FT_MISS_X1024(pct)  ((u32)((pct) * 1024u / 100u))
 
@@ -90,18 +90,27 @@ struct ft_fill_ctrl {
 
     /**
      * Inner-loop EWMA decay shift for fill_delta.
-     * Window ≈ 2^inner_shift batches (default 3 → ~8 batches).
+     * Window ~= 2^inner_shift batches (default 3 -> ~8 batches).
      */
     unsigned  inner_shift;
 
     /**
      * Outer-loop EWMA decay shift for miss-rate.
-     * Window ≈ 2^outer_shift batches (default 4 → ~16 batches).
+     * Window ~= 2^outer_shift batches (default 4 -> ~16 batches).
      */
     unsigned  outer_shift;
 
-    /** Baseline miss rate × 1024 (normal operating point). */
+    /** Baseline miss rate multiplied by 1024 (normal operating point). */
     u32       normal_miss_x1024;
+
+    /** Green upper boundary. At or above this fill, timeout is shortened. */
+    unsigned  fill_green_max;
+
+    /** Yellow upper boundary. At or above this fill, timeout is shortened more. */
+    unsigned  fill_yellow_max;
+
+    /** Red upper boundary. At or above this fill, timeout is clamped to t_min. */
+    unsigned  fill_red_max;
 
     /**
      * Normal expire_tsc in raw TSC ticks.
@@ -126,7 +135,7 @@ struct ft_fill_ctrl {
      */
     int       fill_delta_ewma;
 
-    /** EWMA of miss rate × 1024. */
+    /** EWMA of miss rate multiplied by 1024. */
     u32       miss_rate_x1024;
 
     /** Fill count observed at the previous ft_fill_ctrl_compute() call. */
@@ -140,7 +149,8 @@ struct ft_fill_ctrl {
  * @param N                 Table capacity (max_entries).
  * @param setpoint_pct      Target fill percentage (e.g. 68).
  * @param ceiling_pct       Emergency upper limit percentage (e.g. 74).
- * @param normal_miss_x1024 Baseline miss rate × 1024 (use FT_MISS_X1024()).
+ * @param normal_miss_x1024 Baseline miss rate multiplied by 1024
+ *                          (use FT_MISS_X1024()).
  * @param t_normal          Normal expire_tsc in raw TSC ticks.
  * @param t_min             Minimum expire_tsc in raw TSC ticks (DoS floor).
  */
@@ -161,9 +171,53 @@ ft_fill_ctrl_init(struct ft_fill_ctrl *c,
     c->inner_shift       = 3u;
     c->outer_shift       = 4u;
     c->normal_miss_x1024 = normal_miss_x1024;
+    c->fill_green_max    = N * 75u / 100u;
+    c->fill_yellow_max   = N * 85u / 100u;
+    c->fill_red_max      = N * 95u / 100u;
     c->t_normal          = t_normal;
     c->t_min             = t_min;
     c->miss_rate_x1024   = normal_miss_x1024;  /* warm start at baseline */
+}
+
+static inline int
+ft_fill_ctrl_ewma_i32(int old_value, int sample, unsigned shift)
+{
+    int denom = (int)(1u << shift);
+
+    return old_value + (sample - old_value) / denom;
+}
+
+static inline u32
+ft_fill_ctrl_ewma_u32(u32 old_value, u32 sample, unsigned shift)
+{
+    if (sample >= old_value)
+        return old_value + (sample - old_value) / (1u << shift);
+    return old_value - (old_value - sample) / (1u << shift);
+}
+
+static inline u64
+ft_fill_ctrl_max_u64(u64 a, u64 b)
+{
+    return a > b ? a : b;
+}
+
+static inline u64
+ft_fill_ctrl_min_u64(u64 a, u64 b)
+{
+    return a < b ? a : b;
+}
+
+static inline u64
+ft_fill_ctrl_zone_timeout(const struct ft_fill_ctrl *c,
+                          unsigned current_fill)
+{
+    if (current_fill >= c->fill_red_max)
+        return c->t_min;
+    if (current_fill >= c->fill_yellow_max)
+        return c->t_min;
+    if (current_fill >= c->fill_green_max)
+        return ft_fill_ctrl_max_u64(c->t_min, c->t_normal / 4u);
+    return c->t_normal;
 }
 
 /**
@@ -179,7 +233,9 @@ ft_fill_ctrl_init(struct ft_fill_ctrl *c,
  *
  * Outer loop (expire_tsc):
  *   Updates miss_rate_x1024 from prev_n_added / (prev_n_added + prev_n_hits).
- *   expire_tsc = t_normal * normal_miss / current_miss, floored at t_min.
+ *   expire_tsc is the lower of:
+ *     - t_normal * normal_miss / current_miss, floored at t_min
+ *     - fill-zone timeout cap: Green 100%, Yellow 25%, Red t_min
  *
  * @param c              Controller state.
  * @param current_fill   Current nb_entries() of the table.
@@ -215,9 +271,9 @@ ft_fill_ctrl_compute(struct ft_fill_ctrl *c,
             ? (u32)((unsigned long long)prev_n_added * 1024u / total)
             : c->normal_miss_x1024;
 
-        /* EWMA: ema += (x - ema) >> shift */
-        c->miss_rate_x1024 = (u32)((int)c->miss_rate_x1024
-            + (((int)miss_x1024 - (int)c->miss_rate_x1024) >> (int)c->outer_shift));
+        /* EWMA: ema += (x - ema) / 2^shift */
+        c->miss_rate_x1024 = ft_fill_ctrl_ewma_u32(
+            c->miss_rate_x1024, miss_x1024, c->outer_shift);
 
         /* expire_tsc = t_normal * normal_miss / current_miss */
         if (c->miss_rate_x1024 <= c->normal_miss_x1024) {
@@ -227,12 +283,15 @@ ft_fill_ctrl_compute(struct ft_fill_ctrl *c,
                       / (u64)c->miss_rate_x1024;
             *expire_tsc = (tmo < c->t_min) ? c->t_min : tmo;
         }
+        *expire_tsc = ft_fill_ctrl_min_u64(
+            *expire_tsc, ft_fill_ctrl_zone_timeout(c, current_fill));
     }
 
     /* --- inner loop: fill_delta EWMA -> sweep_budget --- */
     {
         int delta = (int)current_fill - (int)c->last_fill;
-        c->fill_delta_ewma += (delta - c->fill_delta_ewma) >> (int)c->inner_shift;
+        c->fill_delta_ewma = ft_fill_ctrl_ewma_i32(
+            c->fill_delta_ewma, delta, c->inner_shift);
         c->last_fill = current_fill;
 
         int excess   = (int)current_fill - (int)c->setpoint;

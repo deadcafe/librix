@@ -105,6 +105,15 @@ timestamp が 0 の entry は permanent として扱う。
 これにより、別途 `maintain_idx_bulk` を呼ぶ必要がなくなり、meta-prefetch や
 bucket 解決のステージも省略できる。
 
+ただし、`add_idx_bulk_maint()` は add 先 bucket を起点にした局所 reclaim
+である。新規 flow が入る bucket と stale entry の分布が重なる場合は
+Green 維持に有効だが、stale entry が別 bucket に偏る場合や、DoS 後の
+recovery で新規 add が少ない場合は単独では不足する。
+
+fill を安定して Green に保つには、`add_idx_bulk_maint()` と bucket sweep
+型の `maintain()` を併用する。`add_idx_bulk_maint()` は add 周辺を安く掃除し、
+`maintain()` は table 全体を少量ずつ巡回して分布依存を下げる役割を持つ。
+
 ```c
 unsigned n = ft_flow4_table_add_idx_bulk_maint(
     &ft, entry_idxv, nb_keys, policy,
@@ -132,6 +141,18 @@ maint フェーズのコストを制御する 2 つのパラメータ:
 α を増やすか `min_bk_used` を下げると expire rate が上がり（定常 fill rate
 が低下する）、per-key コストが増加する。
 
+`maintain()` sweep は常時・少量・定期的に回す。`next_bk` を保持し、毎回
+続きの bucket から再開すること。毎回 0 から開始すると sweep が偏る。
+
+fill zone ごとの初期目安:
+
+| fill zone | timeout | `add_idx_bulk_maint()` | `maintain()` sweep |
+|-----------|---------|------------------------|--------------------|
+| Green `<75%` | 通常 `t_normal` | 小さい α | 小さい budget (`16`-`64`) |
+| Yellow `75%`-`85%` | 短縮 | α を増やす | budget 増 (`128`-`512`) |
+| Red `85%+` | `t_min` 近くまで短縮 | α 最大 | budget 最大 |
+| Critical `95%+` | `t_min` | add 前 reclaim も検討 | emergency sweep |
+
 `batch=256`、目標 fill ≤ 75% での推奨初期値:
 
 | パラメータ     | 値 | 備考                         |
@@ -144,7 +165,7 @@ maint フェーズのコストを制御する 2 つのパラメータ:
 分離呼び出し（`add_idx_bulk` + `maintain_idx_bulk`）の ~200 cy/key と比較して
 約 42% の削減である。
 
-例: auto-timeout と統合 maint を用いた flow cache
+例: auto-timeout、統合 maint、常時 sweep を用いた flow cache
 
 ```c
 /* バッチごとに fill rate から α を算出 */
@@ -156,7 +177,7 @@ if (fill_ratio > fill_target) {
 unsigned max_unused = nb_keys + alpha;
 
 unsigned n = ft_flow4_table_add_idx_bulk_maint(
-    &ft, entry_idxv, nb_keys, FT_ADD_FORCE_EXPIRE,
+    &ft, entry_idxv, nb_keys, FT_ADD_IGNORE_FORCE_EXPIRE,
     now_tsc, timeout_tsc,
     unused_idxv, max_unused,
     10u /* min_bk_used */);
@@ -164,6 +185,16 @@ unsigned n = ft_flow4_table_add_idx_bulk_maint(
 /* unused_idxv[0..n-1] に add-unused と maint-expired の両方が含まれる */
 for (unsigned i = 0; i < n; i++)
     reclaim(unused_idxv[i]);
+
+/* table 全体を定期 sweep する。next_bk は caller が保持する。 */
+if (sweep_budget > 0) {
+    unsigned n_expired = ft_flow4_table_maintain(
+        &ft, next_bk, now_tsc, timeout_tsc,
+        expired_idxv, sweep_budget, min_bk_used, &next_bk);
+
+    for (unsigned i = 0; i < n_expired; i++)
+        reclaim(expired_idxv[i]);
+}
 ```
 
 ## 3. ストレージモデル
@@ -594,9 +625,10 @@ fill を setpoint 付近に維持しながら DoS バースト時の急増を抑
    fill が setpoint を超えた分 + 上昇トレンドを予算に変換する。
    ceiling を超えた場合は budget_max を強制する。
 
- Outer loop (毎バッチ): miss-rate EWMA → expire_tsc
+ Outer loop (毎バッチ): miss-rate EWMA + fill zone → expire_tsc
    新規フロー到着率の増加（DoS）を miss-rate の上昇として検出し、
    expire_tsc を比例短縮することで fill の上限を抑える。
+   さらに Yellow/Red では fill 圧だけでも timeout を短縮する。
 ```
 
 ### 12.2 初期化
@@ -619,7 +651,7 @@ ft_fill_ctrl_init(&ctrl,
 ```
 t_normal = setpoint_entries / add_rate [flows/s] × tsc_hz
 例) N=1M, setpoint=68%, add_rate=30000 flows/s:
-    t_normal = 680000 / 30000 × 2e9 ≈ 45.3s × 2 GHz = 9.1e10 ticks
+    t_normal = 680000 / 30000 × 2e9 ≈ 22.7s × 2 GHz = 4.5e10 ticks
 ```
 
 ### 12.3 バッチループへの組み込み
@@ -636,19 +668,28 @@ for (;;) {
         prev_next_bk,
         &budget, &start_bk, &tmo);      /* 今バッチの制御パラメータ */
 
-    /* add path */
-    prev_added = ft_flow4_extra_table_add_idx_bulk(
-                     &ft, idxv, keys, nb_keys, tmo);
+    /* add path + local reclaim around add buckets */
+    unsigned n_unused = ft_flow4_table_add_idx_bulk_maint(
+        &ft, entry_idxv, nb_add, FT_ADD_IGNORE,
+        now_tsc, tmo, unused_idxv, max_unused, min_bk_used);
 
-    /* hit path */
-    prev_hits = ft_flow4_extra_table_find_touch_bulk(
-                    &ft, result, keys, nb_keys, tmo);
+    for (unsigned i = 0; i < n_unused; i++)
+        reclaim(unused_idxv[i]);
 
-    /* sweep */
-    if (budget > 0)
-        ft_flow4_extra_table_maintain(
+    /* hit path: application-specific find/touch work */
+    prev_hits = do_hit_path(&ft, now_tsc, tmo);
+
+    /* global sweep; prev_next_bk keeps the cursor across batches */
+    if (budget > 0) {
+        unsigned n_expired = ft_flow4_table_maintain(
             &ft, start_bk, now_tsc, tmo,
-            expired_buf, budget, 1, &prev_next_bk);
+            expired_idxv, budget, min_bk_used, &prev_next_bk);
+
+        for (unsigned i = 0; i < n_expired; i++)
+            reclaim(expired_idxv[i]);
+    }
+
+    prev_added = nb_add;
 }
 ```
 
@@ -667,23 +708,26 @@ for (;;) {
 
 ```sh
 make -C flowtable/test bench-ctrl          # auto (AVX2)
-make -C flowtable/test bench-ctrl-sse      # SSE arch
-make -C flowtable/test bench-ctrl-gen      # GEN (scalar) arch
+make -C flowtable/test bench-ctrl-gen      # GEN 最適化 binary
+make -C flowtable/test bench-ctrl-sse      # SSE 最適化 binary
+make -C flowtable/test bench-ctrl-avx2     # AVX2 最適化 binary
+make -C flowtable/test bench-ctrl-avx512   # AVX512 最適化 binary (未対応 CPU では実行 skip)
+make -C flowtable/test bench-ctrl-build-all
 ```
 
 | フェーズ     | 内容                                              |
 |-------------|---------------------------------------------------|
 | Phase1:normal   | 定常: Q_add=64, Q_hit=2048, fill ≈ setpoint を維持 |
 | Phase2:DoS      | バースト: Q_add=512, miss_rate=20% → tmo 短縮、fill 抑制 |
-| Phase3:recovery | 復帰: バースト後 fill → 100%（期待動作）              |
+| Phase3:recovery | 復帰: Yellow/Red で timeout を短縮し Green 上限へ戻す |
 
 AVX2 での代表値（N=1M, setpoint=68%, 1.996 GHz TSC）:
 
 | フェーズ        | cy/pkt |
 |----------------|-------:|
-| Phase1:normal  |   95.5 |
-| Phase2:DoS     |  122.7 |
-| Phase3:recovery| 131,382 (table 満杯時の add 失敗コスト) |
+| Phase1:normal  |    84.9 |
+| Phase2:DoS     |   111.4 |
+| Phase3:recovery|    98.0 |
 
 ## 13. ファイル構成
 
@@ -717,4 +761,3 @@ flowtable/
     test_flow_table.c
     bench_fill_ctrl.c     (ft_fill_ctrl 動作検証ベンチ)
 ```
-
