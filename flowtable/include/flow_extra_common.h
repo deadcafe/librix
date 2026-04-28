@@ -85,10 +85,11 @@ struct ft_maint_extra_ctx {
  * into each record.  Bucket storage is carved from @p buckets of size
  * @p bucket_size bytes; the largest power-of-two block of correctly-aligned
  * struct rix_hash_bucket_extra_s entries that fits is used.  @p variant
- * selects the entry layout (currently only FT_TABLE_VARIANT_FLOW4).
+ * selects the entry layout.
  *
  * @param ft           Table handle to initialize (zeroed on success).
- * @param variant      Variant tag; only FT_TABLE_VARIANT_FLOW4 supported.
+ * @param variant      Variant tag; FT_TABLE_VARIANT_FLOW4,
+ *                     FT_TABLE_VARIANT_FLOW6, or FT_TABLE_VARIANT_FLOWU.
  * @param array        Record pool memory.
  * @param max_entries  Number of records in the pool.
  * @param stride       Per-record stride in bytes (>= sizeof(entry struct)).

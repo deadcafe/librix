@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog.
 
+## [0.4.0] - 2026-04-28
+
+Minor release focused on integrating the slot-extra flow-table variant into
+the normal flowtable build and extending it beyond IPv4.
+
+### Added
+
+- `flow6_extra` and `flowu_extra` public APIs, entry/key layouts, dispatch
+  wrappers, tests, and benchmark coverage.
+- `FT_TABLE_*` generic facade macros over classic `struct ft_table` and
+  slot-extra `struct ft_table_extra` for shared operations, including
+  maintenance facade helpers.
+- `bench-extra-full`, a full slot-extra benchmark sweep for
+  `flow4_extra`, `flow6_extra`, and `flowu_extra` across datapath,
+  maintenance, grow, fill levels, query sizes, and supported arch variants.
+
+### Changed
+
+- The former `flowtable/extra/` subtree is merged into the normal
+  `flowtable/include/` and `flowtable/src/` layout; `libftable.a` now carries
+  classic and slot-extra implementations together.
+- Extra arch builds are generated for `gen`, `sse`, `avx2`, and `avx512` in
+  the same cross-product style as classic `flow4/flow6/flowu`.
+- `make bench` keeps the representative best-supported-arch run, while
+  `bench-full` runs classic and slot-extra full sweeps over CPU-supported
+  arch variants.
+
+### Fixed
+
+- Slot-extra touch and maintenance helpers now resolve metadata offsets per
+  variant instead of assuming the `flow4_extra` entry layout.
+- Documentation now describes the classic/extra API boundary, the generic
+  facade exceptions, and the intended single-owner worker-local flow-cache
+  model.
+
+### Validation status
+
+- `git diff --check`: passed
+- `make -C flowtable/test test-extra-arch CC=gcc`: passed
+- `make -C flowtable/test test-extra CC=clang BUILDDIR=/tmp/librix-flowtable-clang-extra-all LIBFT=/tmp/librix-flowtable-clang-extra-all/lib/libftable.a`: passed
+- `ft_bench_extra_full` GCC and Clang builds: passed
+- Small `bench-extra-full` run over `flow4_extra`, `flow6_extra`, and
+  `flowu_extra`: passed
+- AVX-512 objects build on this machine; AVX-512 execution was skipped because
+  the local CPU does not advertise AVX512F.
+
 ## [0.3.0] - 2026-04-18
 
 Minor release focused on reusable index-ring primitives, flow-entry allocator

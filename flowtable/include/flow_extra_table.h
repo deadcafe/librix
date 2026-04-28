@@ -11,5 +11,7 @@
 #include "flow_extra_common.h"
 #include "flow_extra_key.h"
 #include "flow4_extra_table.h"
+#include "flow6_extra_table.h"
+#include "flowu_extra_table.h"
 
 #endif /* _FLOW_EXTRA_TABLE_H_ */

@@ -70,7 +70,7 @@ bench-flowtable: build-flowtable
 	@$(MAKE) -C flowtable/test bench
 
 bench-flowtable-extra: build-flowtable
-	@echo "[BENCH] flowtable/extra"
+	@echo "[BENCH] flowtable extra"
 	@$(MAKE) -C flowtable/test bench-extra
 
 $(BENCH_TARGETS): bench-%: build-%

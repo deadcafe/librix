@@ -62,6 +62,8 @@ caller-invoked and leaves reclaim ownership to the caller.
 The current implementation provides:
 
 - `ft_flow4_table`, `ft_flow6_table`, `ft_flowu_table`
+- `ft_table_extra` and `flow4_extra` / `flow6_extra` / `flowu_extra`
+  slot-extra table APIs
 - scalar and bulk `find`, `add_idx`, `del_idx`, `del_key`
 - intrusive `init()` with caller-defined record layout (stride + offset)
 - runtime arch dispatch with unsuffixed public APIs
@@ -163,6 +165,28 @@ Permanent entries are supported by setting the stored timestamp to zero.
   - marks a linked entry as permanent
   - `maintain` and `maintain_idx_bulk` never expire it
   - `find` and duplicate `add` keep the zero timestamp unchanged
+
+### 2.3 Slot-Extra Table Variant
+
+The slot-extra variant uses the `RIX_HASH_GENERATE_SLOT_EXTRA_EX` bucket
+layout (192 B bucket).  It relocates the per-entry expiry timestamp from
+`flow_entry_meta.timestamp` into the bucket-side
+`rix_hash_bucket_extra_s::extra[slot]` field.  This lets extra maintenance
+decide expiry by reading bucket memory first, without touching the entry
+record for every occupied slot.
+
+The public names intentionally coexist with the classic table:
+
+- classic: `ft_flow4_table_*`, `struct flow4_entry`
+- slot-extra: `ft_table_extra_*`, `flow4_extra_table_*`,
+  `flow6_extra_table_*`, `flowu_extra_table_*`,
+  `struct flow4_extra_entry`, `struct flow6_extra_entry`,
+  `struct flowu_extra_entry`
+
+The slot-extra family covers `flow4_extra`, `flow6_extra`, and
+`flowu_extra`.  They share the same `ft_table_extra` control plane and
+runtime arch dispatch; the family-specific wrappers provide the key and
+entry types for each protocol layout.
 
 ## 3. Storage Model
 
@@ -341,7 +365,90 @@ Public headers:
 - `flowtable/include/flow4_table.h`
 - `flowtable/include/flow6_table.h`
 - `flowtable/include/flowu_table.h`
+- `flowtable/include/flow_extra_table.h`
+- `flowtable/include/flow4_extra_table.h`
+- `flowtable/include/flow6_extra_table.h`
+- `flowtable/include/flowu_extra_table.h`
 - `flowtable/include/flow_common.h` — shared types and helpers
+
+`flow_table.h` includes both the classic APIs and the slot-extra APIs.
+The slot-extra implementation is part of the normal `flowtable/src/`
+build and is linked into `libftable.a`; there is no separate `extra/`
+source tree or include path.
+
+`flow_table.h` also provides an `FT_TABLE_*` generic facade over the
+operations shared by `struct ft_table` and `struct ft_table_extra`.
+The dispatch is compile-time `_Generic` on the table pointer type.
+
+Example:
+
+```c
+struct ft_table ft_c;
+struct ft_table_extra ft_e;
+
+FT_TABLE_INIT_TYPED(&ft_c, FT_TABLE_VARIANT_FLOW4,
+                    records_c, max_entries,
+                    struct my_flow4_record, entry,
+                    buckets_c, bucket_size_c, &cfg_c);
+
+FT_TABLE_INIT_TYPED(&ft_e, FT_TABLE_VARIANT_FLOW4,
+                    records_e, max_entries,
+                    struct my_flow4_extra_record, entry,
+                    buckets_e, bucket_size_e, &cfg_e);
+
+FT_TABLE_ADD_IDX(&ft_c, idx, now);
+FT_TABLE_ADD_IDX(&ft_e, idx, now);
+
+if (FT_TABLE_NB_ENTRIES(&ft_e) > high_watermark)
+    FT_TABLE_ADD_IDX_BULK_MAINT(&ft_e, idxv, nb_idx,
+                                FT_ADD_IGNORE_FORCE_EXPIRE,
+                                now, timeout,
+                                unused_idxv, max_unused, min_bk_used);
+
+FT_TABLE_DESTROY(&ft_c);
+FT_TABLE_DESTROY(&ft_e);
+```
+
+The generic facade covers `INIT_TYPED`, `DESTROY`, `FLUSH`,
+`NB_ENTRIES`, `NB_BK`, `STATS`, `STATUS`, `ADD_IDX`,
+`ADD_IDX_BULK`, `ADD_IDX_BULK_MAINT`, `DEL_IDX`, `DEL_IDX_BULK`,
+`WALK`, `MIGRATE`, `MAINT_CTX_INIT`, `MAINTAIN`, and
+`MAINTAIN_IDX_BULK`.
+
+Maintenance example:
+
+```c
+struct ft_maint_ctx ctx_c;
+struct ft_maint_extra_ctx ctx_e;
+
+FT_TABLE_MAINT_CTX_INIT(&ft_c, &ctx_c);
+FT_TABLE_MAINT_CTX_INIT(&ft_e, &ctx_e);
+
+n = FT_TABLE_MAINTAIN(&ctx_c, start_bk, now, timeout,
+                      expired_idxv, max_expired, min_bk_used, &next_bk);
+n = FT_TABLE_MAINTAIN(&ctx_e, start_bk, now, timeout,
+                      expired_idxv, max_expired, min_bk_used, &next_bk);
+```
+
+Exceptions:
+
+- Key-specific operations still use family-specific APIs:
+  `ft_flow4_table_find()`, `ft_flow4_table_find_bulk()`,
+  `ft_flow4_table_del_key_bulk()`, and the corresponding
+  `flow4_extra_table_*`, `flow6_extra_table_*`, and
+  `flowu_extra_table_*` find/delete APIs.  Classic and slot-extra use
+  different key and entry types.
+- Maintenance context structs remain variant-specific:
+  `struct ft_maint_ctx` for classic and `struct ft_maint_extra_ctx` for
+  slot-extra.  The `FT_TABLE_MAINT_*` macros hide the function names, but
+  the caller still allocates the correct context type.
+- Extra-only timestamp helpers such as `ft_table_extra_touch()` and
+  `ft_table_extra_touch_checked()` remain extra-specific.
+- Bucket sizing is variant-specific: use `ft_table_bucket_size()` for
+  classic and `ft_table_extra_bucket_size()` /
+  `flow4_extra_table_bucket_size()` /
+  `flow6_extra_table_bucket_size()` /
+  `flowu_extra_table_bucket_size()` for slot-extra.
 
 Private implementation headers live under `flowtable/src/`, and bench-only
 helpers live under `flowtable/test/`.
@@ -506,6 +613,18 @@ It covers (for all three variants: flow4, flow6, flowu):
 - `maintain_idx_bulk` expiry
 - fuzz testing with random operation sequences
 
+The slot-extra test program is `flowtable/test/test_flow4_extra.c` and is
+run by `test-extra` / `test-extra-arch`.  It covers `flow4_extra`,
+`flow6_extra`, and `flowu_extra` with matching density for:
+
+- add/find/delete and bulk find
+- bucket-side timestamp storage
+- `find_touch` and explicit `ft_table_extra_touch()`
+- rejected touch for stale/deleted idx
+- bucket sweep maintenance
+- migrate followed by touch using the current bucket mask
+- `FT_TABLE_*` generic facade, including maintenance facade macros
+
 Run:
 
 ```sh
@@ -521,8 +640,23 @@ producing the `ft_bench` binary.
 make -C flowtable/test bench
 ```
 
-- `bench` / `bench-light`: `flow4` only, `q=1/8/32/256`, fill `60%`
-- `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`
+- `bench` / `bench-light`: `flow4` only, `q=1/8/32/256`, fill `60%`,
+  `--arch auto` (the best supported runtime variant)
+- `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`, repeated
+  for all CPU-supported variants from `BENCH_FULL_ARCHES`
+- `bench-extra`: `bench_flow4_vs_extra.c`, a matched `flow4` classic vs
+  `flow4_extra` microbench for insert/find/miss/touch/delete/maintain
+- `bench-extra-full`: `bench_flow_extra_table.c`, a full slot-extra
+  family sweep for `flow4_extra`, `flow6_extra`, and `flowu_extra`
+  across datapath, maintain, grow, fill levels, query sizes, and
+  CPU-supported arch variants
+- `bench-sweep`, `bench-zoned`, and `bench-ctrl`: maintenance and
+  fill-controller focused benches
+
+Coverage note: `ft_bench` is the full classic benchmark across
+`flow4/flow6/flowu` and supported arch variants.  `bench-extra-full`
+provides the matching full-family slot-extra sweep.  `bench-extra` remains
+the focused `flow4` classic-vs-extra comparison.
 
 ### 11.1 Benchmark modes
 
@@ -607,20 +741,39 @@ flowtable/
     flow4_table.h
     flow6_table.h
     flowu_table.h
+    flow_extra_table.h
+    flow4_extra_table.h
+    flow6_extra_table.h
+    flowu_extra_table.h
     flow_common.h
+    flow_extra_common.h
+    flow_extra_key.h
   src/
     flow4.c
     flow6.c
     flowu.c
+    flow4_extra.c
+    flow6_extra.c
+    flowu_extra.c
     flow_core.h
+    flow_core_extra.h
     flow_hash.h
+    flow_hash_extra.h
     ft_dispatch.c
+    ft_dispatch_extra.c
     ft_maintain.c
+    ft_maintain_extra.c
     flow_dispatch.h
+    flow_dispatch_extra.h
     flow_table_generate.h
+    flow_table_generate_extra.h
   test/
     Makefile
     bench_flow_table.c
+    bench_flow4_vs_extra.c
+    bench_flow_extra_table.c
+    bench_fill_ctrl.c
     bench_scope.h
     test_flow_table.c
+    test_flow4_extra.c
 ```

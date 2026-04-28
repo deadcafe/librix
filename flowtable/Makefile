@@ -30,7 +30,6 @@ EXTRA_CFLAGS ?=
 CFLAGS_BASE  = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include \
                -I$(CURDIR)/include -I$(CURDIR)/src \
-               -I$(CURDIR)/extra/include -I$(CURDIR)/extra/src \
                -fPIC $(EXTRA_CFLAGS)
 DEPFLAGS     = -MMD -MP
 
@@ -40,12 +39,12 @@ LIBDIR      ?= $(BUILDDIR)/lib
 SRCDIR       = src
 INCDIR       = include
 DISPATCH_SRC  = $(SRCDIR)/ft_dispatch.c
-EXTRA_SRCDIR        = extra/src
-EXTRA_DISPATCH_SRC  = $(EXTRA_SRCDIR)/ft_dispatch_extra.c
+EXTRA_DISPATCH_SRC  = $(SRCDIR)/ft_dispatch_extra.c
 ARCH_VARIANTS := gen sse avx2 avx512
 FLOW_UNITS    := flow4 flow6 flowu
 ARCH_UNITS    := $(FLOW_UNITS) ft_maintain
-EXTRA_ARCH_UNITS := flow4_extra ft_maintain_extra
+EXTRA_FLOW_UNITS := flow4_extra flow6_extra flowu_extra
+EXTRA_ARCH_UNITS := $(EXTRA_FLOW_UNITS) ft_maintain_extra
 ARCH_CFLAGS_gen :=
 ARCH_CFLAGS_sse := -msse4.2
 ARCH_CFLAGS_avx2 := -mavx2 -msse4.2
@@ -83,7 +82,7 @@ $(foreach unit,$(ARCH_UNITS), \
     $(eval $(call COMPILE_ARCH_UNIT,$(unit),$(arch)))))
 
 define COMPILE_EXTRA_ARCH_UNIT
-$(OBJDIR)/$(1)_$(2).o: $(EXTRA_SRCDIR)/$(1).c | $(OBJDIR)
+$(OBJDIR)/$(1)_$(2).o: $(SRCDIR)/$(1).c | $(OBJDIR)
 	$$(CC) $$(CFLAGS_BASE) $$(DEPFLAGS) -MF $$(@:.o=.d) -MT $$@ \
 	    $$(ARCH_CFLAGS_$(2)) -DFT_ARCH_SUFFIX=_$(2) -c -o $$@ $$<
 endef

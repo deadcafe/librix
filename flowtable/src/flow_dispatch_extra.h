@@ -60,6 +60,8 @@ struct ft_##prefix##_extra_ops {                                               \
 }
 
 FT_OPS_EXTRA_DEFINE(flow4);
+FT_OPS_EXTRA_DEFINE(flow6);
+FT_OPS_EXTRA_DEFINE(flowu);
 
 /*===========================================================================
  * Per-arch ops table declarations
@@ -71,6 +73,14 @@ FT_OPS_EXTRA_DECLARE(flow4, _gen);
 FT_OPS_EXTRA_DECLARE(flow4, _sse);
 FT_OPS_EXTRA_DECLARE(flow4, _avx2);
 FT_OPS_EXTRA_DECLARE(flow4, _avx512);
+FT_OPS_EXTRA_DECLARE(flow6, _gen);
+FT_OPS_EXTRA_DECLARE(flow6, _sse);
+FT_OPS_EXTRA_DECLARE(flow6, _avx2);
+FT_OPS_EXTRA_DECLARE(flow6, _avx512);
+FT_OPS_EXTRA_DECLARE(flowu, _gen);
+FT_OPS_EXTRA_DECLARE(flowu, _sse);
+FT_OPS_EXTRA_DECLARE(flowu, _avx2);
+FT_OPS_EXTRA_DECLARE(flowu, _avx512);
 
 /*===========================================================================
  * Runtime selection helper

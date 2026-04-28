@@ -45,6 +45,61 @@ struct flow4_extra_entry {
 _Static_assert(offsetof(struct flow4_extra_entry, meta) == 16u,
                "flow4_extra_entry.meta must be at offset 16");
 
+struct flow6_extra_key {
+    u8  family;
+    u8  proto;
+    u16 src_port;
+    u16 dst_port;
+    u16 pad;
+    u32 vrfid;
+    u8 src_ip[16];
+    u8 dst_ip[16];
+} __attribute__((packed));
+
+_Static_assert(sizeof(struct flow6_extra_key) == sizeof(struct flow6_key),
+               "flow6_extra_key must match flow6_key size");
+
+struct flow6_extra_entry {
+    struct flow6_extra_key       key;
+    struct flow_entry_meta_extra meta;
+};
+
+_Static_assert(offsetof(struct flow6_extra_entry, meta)
+               == sizeof(struct flow6_extra_key),
+               "flow6_extra_entry.meta must follow key");
+
+struct flowu_extra_key {
+    u8  family;
+    u8  proto;
+    u16 src_port;
+    u16 dst_port;
+    u16 pad;
+    u32 vrfid;
+    union {
+        struct {
+            u32 src;
+            u32 dst;
+            u8  _pad[24];
+        } v4;
+        struct {
+            u8 src[16];
+            u8 dst[16];
+        } v6;
+    } addr;
+} __attribute__((packed));
+
+_Static_assert(sizeof(struct flowu_extra_key) == sizeof(struct flowu_key),
+               "flowu_extra_key must match flowu_key size");
+
+struct flowu_extra_entry {
+    struct flowu_extra_key       key;
+    struct flow_entry_meta_extra meta;
+};
+
+_Static_assert(offsetof(struct flowu_extra_entry, meta)
+               == sizeof(struct flowu_extra_key),
+               "flowu_extra_entry.meta must follow key");
+
 /*
  * Bare bucket-side timestamp accessors.  Use these only when (bk, slot) are
  * already fully derived in the local context (e.g. test setup, bench prep,
