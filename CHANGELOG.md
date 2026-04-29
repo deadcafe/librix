@@ -70,15 +70,14 @@ speed.
 - `make -C flowtable/test bench-sweep`: passed
 - `ft_bench --arch avx2 --query 64 --raw-repeat 1 --keep-n 1 --op find_hit
   flow4 65536 60`: passed
+- `ft_bench --arch avx2 --maint --raw-repeat 1 --keep-n 1 --query 16
+  flow4 65536 50`: passed
 - `ft_bench_zoned`: passed
 - `ft_bench_ctrl avx2`: passed
 - `ft_bench_extra_full --arch avx2 --query 64 --reps 1 flow4_extra 65536 60`:
   passed
 - `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
   passed
-- A local `ft_bench --maint` smoke run could not open perf events in this
-  environment; maintain code was compile-validated, and the perf requirement is
-  documented in `flowtable/BENCHMARKING.md`.
 - AVX-512 execution was skipped because the local CPU does not advertise
   AVX512F.
 

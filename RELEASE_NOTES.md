@@ -50,14 +50,14 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - `make -C flowtable/test bench-sweep`: passed
 - `ft_bench --arch avx2 --query 64 --raw-repeat 1 --keep-n 1 --op find_hit
   flow4 65536 60`: passed
+- `ft_bench --arch avx2 --maint --raw-repeat 1 --keep-n 1 --query 16
+  flow4 65536 50`: passed
 - `ft_bench_zoned`: passed
 - `ft_bench_ctrl avx2`: passed
 - `ft_bench_extra_full --arch avx2 --query 64 --reps 1 flow4_extra 65536 60`:
   passed
 - `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
   passed
-- `ft_bench --maint` requires local perf_event access; a smoke run could not
-  open perf events in this environment.
 
 ### Notes
 
