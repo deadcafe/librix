@@ -26,6 +26,9 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - update English and Japanese allocation-model documentation
 - add benchmark methodology documentation covering purpose, setup, and trust
   boundaries for each target
+- align full benchmark fill sweeps to `40/60/75/80/90%`
+- document fixed-environment AVX2 datapath reference results for `ft_bench`
+  and `ft_bench_extra_full`
 - correct slot-extra `find_bulk` return-value docs
 - correct the small `ft_bench_extra` add+inline-maint phase-1-only setup so it
   stays within the intended flowcache operating range
@@ -58,6 +61,11 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
   passed
 - `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
   passed
+- fixed-environment `ft_bench` datapath sweep over `flow4/flow6/flowu`,
+  fills `40/60/75/80/90`, 1M entries, q=256, AVX2, pinned core 2: passed
+- fixed-environment `ft_bench_extra_full` datapath sweep over
+  `flow4_extra/flow6_extra/flowu_extra`, fills `40/60/75/80/90`, 1M entries,
+  q=256, AVX2, taskset core 2, reps=7: passed
 
 ### Notes
 

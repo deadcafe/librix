@@ -678,14 +678,15 @@ Detailed measurement policy and per-target trust boundaries are documented in
 - `bench` / `bench-light`: `flow4` only, `q=1/8/32/256`, fill `60%`,
   `--arch auto` (the best supported runtime variant)
 - `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`, repeated
-  for all CPU-supported variants from `BENCH_FULL_ARCHES`
+  for fills `40/60/75/80/90%` and all CPU-supported variants from
+  `BENCH_FULL_ARCHES`
 - `bench-extra`: `bench_flow4_vs_extra.c`, a matched `flow4` pure vs
   `flow4_extra` microbench for insert/find/miss/touch/delete/maintain at
   75% active fill
 - `bench-extra-full`: `bench_flow_extra_table.c`, a full slot-extra
   family sweep for `flow4_extra`, `flow6_extra`, and `flowu_extra`
-  across datapath, maintain, grow, fill levels, query sizes, and
-  CPU-supported arch variants
+  across datapath, maintain, grow, fills `40/60/75/80/90%`, query sizes,
+  and CPU-supported arch variants
 - `bench-sweep`, `bench-zoned`, and `bench-ctrl`: maintenance and
   fill-controller focused benches
 

@@ -698,13 +698,14 @@ make -C flowtable/test bench
 - `bench` / `bench-light`: `flow4` のみ、`q=1/8/32/256`、fill `60%`、
   `--arch auto`（runtime で一番有利な supported variant）
 - `bench-full`: `flow4/6/u` の query sweep に `maint` と `grow` を加え、
-  `BENCH_FULL_ARCHES` のうち CPU が support する全 variant で評価する
+  fill `40/60/75/80/90%` と `BENCH_FULL_ARCHES` のうち CPU が support
+  する全 variant で評価する
 - `bench-extra`: `bench_flow4_vs_extra.c`。`flow4` pure と
   `flow4_extra` を同一条件で比較する microbench
   (75% active fill での insert/find/miss/touch/delete/maintain)
 - `bench-extra-full`: `bench_flow_extra_table.c`。`flow4_extra`,
   `flow6_extra`, `flowu_extra` について datapath / maintain / grow、
-  fill level、query size、CPU-supported arch variant を評価する
+  fill `40/60/75/80/90%`、query size、CPU-supported arch variant を評価する
   full-family slot-extra sweep
 - `bench-sweep`, `bench-zoned`, `bench-ctrl`: maintenance と
   fill-controller に焦点を置いた bench

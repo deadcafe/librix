@@ -59,7 +59,7 @@ Default Makefile policy:
 
 - `bench`: `flow4`, `q=1/8/32/256`, 1M capacity at 60% fill,
   `--pin-core 2 --raw-repeat 3 --keep-n 1`.
-- `bench-full`: `flow4/flow6/flowu`, fills `40/50/60/80/90`, all supported
+- `bench-full`: `flow4/flow6/flowu`, fills `40/60/75/80/90`, all supported
   arch variants, `--pin-core 2 --raw-repeat 11 --keep-n 7`.
 
 Datapath method:
@@ -165,7 +165,7 @@ Method:
   `ft_table_extra_maintain()` pass in cycles per bucket.
 - Grow mode prefills to requested active fill, allocates a 2x bucket region,
   migrates, and reports allocation/migration/total cycles per live entry.
-- The Makefile sweep uses fills `40/50/60/80/90`.  The standalone binary
+- The Makefile sweep uses fills `40/60/75/80/90`.  The standalone binary
   rejects fills above 95.
 
 Reasonableness:
@@ -174,6 +174,67 @@ Reasonableness:
   variants and fill levels.
 - For headline cold-cache datapath numbers, prefer `ft_bench`; this benchmark
   intentionally favors broad coverage and simple repeated timing.
+
+## Fixed Reference Results
+
+These are local reference datapath results for the 2026-04-29 brush-up pass.
+They are not cross-machine claims; use them as regression anchors for the same
+host and setup.
+
+Environment:
+
+- Host CPU: AMD Ryzen 7 5825U with Radeon Graphics, 16 logical CPUs, 8 cores,
+  16 MiB shared L3.
+- Kernel perf permission: `kernel.perf_event_paranoid=0`.
+- `ft_bench`: `--arch avx2 --pin-core 2 --query 256 --raw-repeat 3 --keep-n 1
+  FAMILY 1048576 FILL`, with default hugepage-backed allocations.
+- `ft_bench_extra_full`: `taskset -c 2 ... --arch avx2 --query 256 --reps 7
+  FAMILY 1048576 FILL`.
+- Units are cycles per key.  Fill is active entries divided by configured
+  entry capacity.  `90%` is Red-zone pressure data, not a normal operating
+  target.
+- In `ft_bench_extra_full`, `add_idx` is the bounded add-from-fill window
+  reported by the binary; for this 1M-entry setup the window is 32768 keys.
+
+`ft_bench` / pure table:
+
+| family | fill | find_hit | find_miss | add_idx | add_ignore | add_update | del_idx | del_key | find_del_idx |
+|--------|-----:|---------:|----------:|--------:|-----------:|-----------:|--------:|--------:|-------------:|
+| flow4 | 40 | 63.75 | 69.30 | 78.36 | 94.77 | 95.43 | 30.66 | 63.71 | 82.38 |
+| flow4 | 60 | 71.02 | 65.90 | 84.02 | 102.03 | 101.41 | 32.07 | 71.52 | 92.38 |
+| flow4 | 75 | 83.75 | 69.10 | 86.48 | 110.70 | 110.35 | 31.64 | 84.14 | 103.05 |
+| flow4 | 80 | 90.70 | 69.69 | 86.84 | 115.04 | 116.64 | 32.46 | 88.52 | 106.13 |
+| flow4 | 90 | 98.83 | 70.31 | 91.56 | 120.47 | 120.08 | 33.12 | 97.77 | 117.03 |
+| flow6 | 40 | 71.29 | 76.29 | 84.80 | 98.55 | 98.36 | 30.74 | 71.17 | 83.52 |
+| flow6 | 60 | 70.31 | 78.16 | 86.68 | 100.94 | 103.55 | 32.62 | 79.38 | 98.09 |
+| flow6 | 75 | 90.98 | 78.87 | 95.23 | 115.90 | 118.16 | 33.09 | 96.45 | 113.16 |
+| flow6 | 80 | 94.06 | 76.80 | 89.10 | 112.30 | 113.09 | 23.16 | 93.44 | 103.98 |
+| flow6 | 90 | 90.55 | 51.17 | 91.56 | 114.73 | 115.70 | 22.70 | 101.72 | 108.40 |
+| flowu | 40 | 60.55 | 49.22 | 74.77 | 86.84 | 87.42 | 21.76 | 66.68 | 79.84 |
+| flowu | 60 | 67.97 | 51.60 | 76.88 | 92.73 | 93.52 | 23.09 | 73.16 | 89.06 |
+| flowu | 75 | 81.25 | 52.34 | 82.58 | 104.30 | 104.73 | 22.34 | 85.08 | 97.93 |
+| flowu | 80 | 84.10 | 50.66 | 84.34 | 111.80 | 111.41 | 23.32 | 92.81 | 106.29 |
+| flowu | 90 | 91.68 | 51.09 | 91.41 | 116.64 | 117.85 | 23.36 | 99.22 | 109.06 |
+
+`ft_bench_extra_full` / slot-extra table:
+
+| family | fill | add_idx | find_hit_touch | find_miss | del_key |
+|--------|-----:|--------:|---------------:|----------:|--------:|
+| flow4_extra | 40 | 67.30 | 41.02 | 31.27 | 57.68 |
+| flow4_extra | 60 | 69.77 | 41.58 | 31.22 | 59.09 |
+| flow4_extra | 75 | 100.24 | 43.49 | 30.85 | 60.06 |
+| flow4_extra | 80 | 132.17 | 44.06 | 30.49 | 60.42 |
+| flow4_extra | 90 | 269.48 | 48.97 | 30.82 | 62.23 |
+| flow6_extra | 40 | 82.31 | 62.16 | 49.41 | 76.39 |
+| flow6_extra | 60 | 87.07 | 63.35 | 49.58 | 78.20 |
+| flow6_extra | 75 | 112.87 | 63.99 | 49.47 | 81.10 |
+| flow6_extra | 80 | 146.40 | 65.90 | 49.61 | 79.93 |
+| flow6_extra | 90 | 309.19 | 70.39 | 49.49 | 86.80 |
+| flowu_extra | 40 | 83.00 | 62.33 | 49.50 | 77.16 |
+| flowu_extra | 60 | 84.69 | 62.64 | 49.50 | 78.82 |
+| flowu_extra | 75 | 114.44 | 64.31 | 49.57 | 79.76 |
+| flowu_extra | 80 | 149.26 | 65.26 | 49.60 | 80.74 |
+| flowu_extra | 90 | 306.71 | 69.57 | 49.57 | 86.27 |
 
 ## `ft_bench_sweep`
 
@@ -288,4 +349,3 @@ Reasonableness:
 - Treat this as system behavior validation, not as the primary microbenchmark.
   It is useful for confirming that the cache remains in the configured fill
   band under traffic assumptions.
-

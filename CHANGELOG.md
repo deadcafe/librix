@@ -28,6 +28,11 @@ speed.
   bucket helpers.
 - Benchmark methodology is now documented in `flowtable/BENCHMARKING.md`,
   including each target's purpose, measurement setup, and trust boundary.
+- `bench-full` and `bench-extra-full` now use the fill sweep
+  `40/60/75/80/90%`, matching the documented Green/Yellow/Red operating
+  regions.
+- Fixed-environment `ft_bench` and `ft_bench_extra_full` datapath reference
+  result tables are documented for 1M entries, AVX2, q=256.
 
 ### Fixed
 
@@ -78,6 +83,12 @@ speed.
   passed
 - `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
   passed
+- Fixed-environment `ft_bench` datapath sweep:
+  `flow4/flow6/flowu`, fills `40/60/75/80/90`, 1M entries, q=256,
+  AVX2, pinned core 2: passed
+- Fixed-environment `ft_bench_extra_full` datapath sweep:
+  `flow4_extra/flow6_extra/flowu_extra`, fills `40/60/75/80/90`,
+  1M entries, q=256, AVX2, taskset core 2, reps=7: passed
 - AVX-512 execution was skipped because the local CPU does not advertise
   AVX512F.
 
