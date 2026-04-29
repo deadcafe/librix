@@ -33,6 +33,11 @@ speed.
   number of processed keys, matching the implementation contract.
 - Removed stale slot-extra dispatch documentation that still described the
   implementation as `flow4`-only.
+- `ft_bench_extra` now keeps the small add+inline-maint phase-1-only case at a
+  representative post-add fill level instead of unintentionally measuring a
+  pathological 100% table-fill case.
+- `ft_bench_extra` delta reporting now avoids unsigned underflow when the
+  extra result is faster than the pure result.
 
 ### Validation status
 
@@ -40,6 +45,7 @@ speed.
 - `make -C flowtable static`: passed
 - `make -C flowtable/test test-extra-arch`: passed
 - `make -C flowtable/test test-parity`: passed
+- `make -C flowtable/test bench-extra`: passed
 - AVX-512 execution was skipped because the local CPU does not advertise
   AVX512F.
 

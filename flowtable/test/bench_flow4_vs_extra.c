@@ -590,7 +590,8 @@ main(void)
             printf("  %-18s %10.2f %10.2f %+10.2f\n", label,
                    (double)c_bk / (double)(N_ENTRIES * REPS),
                    (double)e_bk / (double)(N_ENTRIES * REPS),
-                   (double)(e_bk - c_bk) / (double)(N_ENTRIES * REPS));
+                   ((double)e_bk - (double)c_bk)
+                   / (double)(N_ENTRIES * REPS));
         }
     }
 
@@ -673,7 +674,7 @@ main(void)
             printf("  %-18s %10.2f %10.2f %+10.2f\n", label,
                    (double)c_f / (double)(N_FILL * REPS),
                    (double)e_f / (double)(N_FILL * REPS),
-                   (double)(e_f - c_f) / (double)(N_FILL * REPS));
+                   ((double)e_f - (double)c_f) / (double)(N_FILL * REPS));
         }
     }
 
@@ -823,7 +824,8 @@ main(void)
             printf("  %-18s %10.2f %10.2f %+10.2f\n", label,
                    (double)c_combo / (double)(N_STALE * REPS),
                    (double)e_combo / (double)(N_STALE * REPS),
-                   (double)(e_combo - c_combo) / (double)(N_STALE * REPS));
+                   ((double)e_combo - (double)c_combo)
+                   / (double)(N_STALE * REPS));
         }
 
         free(freed_c);
@@ -839,15 +841,17 @@ main(void)
      * Setup: fill 75% with ts_stale=1<<TS_SHIFT (encodes to 1, clearly
      *         expired at now=1000000 with tmo=1<<18).  ts=0 is the permanent
      *         sentinel and must NOT be used here.
-     * Timed:  insert N_NEW=16384 free-pool entries via add_idx_bulk_maint
-     *         in Q-entry batches.
+     * Timed:  insert N_NEW free-pool entries via add_idx_bulk_maint in
+     *         Q-entry batches. Keep N_NEW modest so the phase-1-only row
+     *         stays comparable to the 2M-scale case instead of measuring
+     *         pathological 100% table fill.
      *
      * pure Phase 2: loads entry->meta per slot from the pool (cache miss).
      * extra   Phase 2: reads bk->extra[s] already warm from Phase 1 prefetch.
      */
     {
         const unsigned N_FILL    = N_ENTRIES * 3u / 4u;  /* 49152 */
-        const unsigned N_NEW     = N_ENTRIES - N_FILL;   /* 16384 */
+        const unsigned N_NEW     = N_ENTRIES / 32u;      /* +3.125% cap */
         const u64 tmo_inline     = 1u << 18;
         const u64 ts_stale       = 1u << TS_SHIFT; /* encodes to 1, never permanent */
         static const unsigned qs[] = { 32u, 64u, 128u, 256u };
@@ -856,7 +860,8 @@ main(void)
 
         assert(new_idxv);
 
-        printf("\n  add+inline-maint (cy/entry, 75%%%% fill, all-stale):\n");
+        printf("\n  add+inline-maint (cy/entry, 75%% fill, all-stale, N_new=%u):\n",
+               N_NEW);
         printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
 
         for (qi = 0u; qi < sizeof(qs) / sizeof(qs[0]); qi++) {
@@ -1010,7 +1015,8 @@ main(void)
     /* --- 2M-scale add+inline-maint (realistic environment) ---
      *
      * Target: N=2M entries, 75% fill (1.5M stale), N_NEW=64K new flows
-     * per batch (~3% of N_FILL).  Pool sizes: pure 72 MB, extra 48 MB.
+     * per batch (~3% of capacity, ~4% of N_FILL).  Pool sizes: pure 72 MB,
+     * extra 48 MB.
      * Both pools exceed typical L3; all pool accesses are DRAM-pressure.
      *
      * Pure Phase 2: pool[idx].meta.timestamp per slot -> random DRAM miss
@@ -1153,7 +1159,7 @@ main(void)
             }
         }
 
-        printf("\n  add+inline-maint 2M-scale (cy/entry, 75%%%% fill, all-stale, Q=%u):\n", Q_L);
+        printf("\n  add+inline-maint 2M-scale (cy/entry, 75%% fill, all-stale, Q=%u):\n", Q_L);
         printf("  (pure pool=72MB  extra pool=48MB  bucket_c=16MB  bucket_e=24MB)\n");
         printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
         printf("  %-18s %10.2f %10.2f %+10.2f  (phase1 only)\n", "add_only",

@@ -25,6 +25,9 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - reuse one slot-extra bucket-carve helper in init and migrate paths
 - update English and Japanese allocation-model documentation
 - correct slot-extra `find_bulk` return-value docs
+- correct the small `ft_bench_extra` add+inline-maint phase-1-only setup so it
+  no longer measures an unintended 100% fill case
+- fix `ft_bench_extra` delta formatting when extra is faster than pure
 
 ### Validation status
 
@@ -32,6 +35,7 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - `make -C flowtable static`: passed
 - `make -C flowtable/test test-extra-arch`: passed
 - `make -C flowtable/test test-parity`: passed
+- `make -C flowtable/test bench-extra`: passed
 
 ### Notes
 
