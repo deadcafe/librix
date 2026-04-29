@@ -1,5 +1,44 @@
 # Release Notes
 
+## librix v0.5.1
+
+Patch release focused on `flowtable` implementation brush-up while preserving
+the performance-oriented hot path.
+
+### Summary
+
+`v0.5.1` removes duplicate cold-path helper code in the pure and slot-extra
+dispatch layers, tightens the slot-extra bulk lookup wrapper path, and updates
+the public documentation to match the current allocation and `find_bulk`
+contracts.
+
+The most performance-relevant change is in slot-extra `find_bulk`: generated
+lookup code now writes `u32` result indices directly, so public wrappers no
+longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
+
+### Highlights
+
+- write slot-extra bulk lookup results directly as `u32` indices
+- share `flow4_extra`, `flow6_extra`, and `flowu_extra` wrapper generation
+- share pure/extra arch-enable and maintain selector code
+- share pure/extra bucket-size calculation logic
+- reuse one slot-extra bucket-carve helper in init and migrate paths
+- update English and Japanese allocation-model documentation
+- correct slot-extra `find_bulk` return-value docs
+
+### Validation status
+
+- `git diff --check`: passed
+- `make -C flowtable static`: passed
+- `make -C flowtable/test test-extra-arch`: passed
+- `make -C flowtable/test test-parity`: passed
+
+### Notes
+
+- AVX-512 objects build as part of `make -C flowtable static`; AVX-512
+  execution was skipped on the local machine because the CPU does not
+  advertise AVX512F.
+
 ## librix v0.5.0
 
 Release focused on public API brush-up for `flowtable`.

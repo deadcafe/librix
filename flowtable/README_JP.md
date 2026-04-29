@@ -374,7 +374,9 @@ table は `malloc`、`realloc`、特定 allocator を仮定しない。
   offset で index するだけ
 - **bucket memory**: caller が raw buffer を確保し（alignment 不要）、
   `init()` または `migrate()` に渡す。ライブラリが内部で
-  `ft_table_bucket_carve()` により最大の power-of-2 aligned 領域を切り出す
+  pure table では `ft_table_bucket_carve()`、slot-extra table では
+  `ft_table_extra_bucket_carve()` により最大の power-of-2 aligned 領域を
+  切り出す
 
 helper 関数:
 
@@ -382,6 +384,10 @@ helper 関数:
   を計算する（最小 4096 buckets = 512 KiB）
 - `ft_table_bucket_mem_size(nb_bk)` — bucket 数から bucket メモリサイズを
   計算する（grow/shrink 用: 2 倍や 1/2 に使う）
+- `ft_table_extra_bucket_size(max_entries)` — slot-extra init 用の推奨
+  bucket 確保サイズを計算する
+- `ft_table_extra_bucket_mem_size(nb_bk)` — bucket 数から slot-extra bucket
+  メモリサイズを計算する
 
 この形は hugepage、NUMA-aware、custom control-plane allocator を想定して
 いる。ライブラリ内部で `malloc` / `free` は一切呼ばない。

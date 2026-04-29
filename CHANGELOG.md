@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog.
 
+## [0.5.1] - 2026-04-29
+
+Patch release focused on flowtable brush-up without trading away datapath
+speed.
+
+### Changed
+
+- Slot-extra generated `find_bulk` code now writes `u32` result indices
+  directly, avoiding the public wrapper's former temporary
+  `struct ft_table_result[64]` chunk/copy path.
+- `flow4_extra`, `flow6_extra`, and `flowu_extra` key-addressable wrappers
+  now share the same wrapper macro implementation.
+- Pure and slot-extra dispatch now share arch-enable mapping, maintain
+  variant declarations, and maintain arch selection through
+  `flow_arch_common.h`.
+- Pure and slot-extra bucket-size calculations now share the same internal
+  sizing helper.
+- Slot-extra bucket carving is exposed as a common inline helper and reused by
+  init/migrate paths instead of being duplicated in generated and dispatch
+  code.
+- The allocation model documentation now describes both pure and slot-extra
+  bucket helpers.
+
+### Fixed
+
+- Slot-extra `find_bulk` public docs now describe the return value as the
+  number of processed keys, matching the implementation contract.
+- Removed stale slot-extra dispatch documentation that still described the
+  implementation as `flow4`-only.
+
+### Validation status
+
+- `git diff --check`: passed
+- `make -C flowtable static`: passed
+- `make -C flowtable/test test-extra-arch`: passed
+- `make -C flowtable/test test-parity`: passed
+- AVX-512 execution was skipped because the local CPU does not advertise
+  AVX512F.
+
 ## [0.5.0] - 2026-04-29
 
 Patch release focused on public header brush-up and release document cleanup.

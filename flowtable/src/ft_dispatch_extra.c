@@ -4,22 +4,17 @@
  * Copyright (c) 2026 deadcafe.beef@gmail.com
  * All rights reserved.
  *
- * ft_dispatch_extra.c - runtime arch dispatch for flowtable slot_extra
- * variant.  Only flow4 is supported; no variant switch.
+ * ft_dispatch_extra.c - runtime arch dispatch for flowtable slot_extra.
  */
 
 #include <stddef.h>
 #include <string.h>
 
-#include <rix/rix_hash_arch.h>
-
 #include "flowtable/flow_extra_common.h"
 #include "flowtable/flow_extra_key.h"
+#include "flow_arch_common.h"
 #include "flow_dispatch_extra.h"
 
-/*===========================================================================
- * Maintain arch-variant declarations
- *===========================================================================*/
 typedef unsigned (*ft_maintain_extra_fn_t)(const struct ft_maint_extra_ctx *,
                                            unsigned, u64, u64,
                                            u32 *, unsigned, unsigned,
@@ -28,18 +23,7 @@ typedef unsigned (*ft_maintain_extra_idx_bulk_fn_t)(
     const struct ft_maint_extra_ctx *, const u32 *, unsigned,
     u64, u64, u32 *, unsigned, unsigned, int);
 
-#define FT_MAINT_EXTRA_DECLARE(suffix)                                         \
-    extern unsigned ft_table_extra_maintain##suffix(                           \
-        const struct ft_maint_extra_ctx *, unsigned, u64, u64,                 \
-        u32 *, unsigned, unsigned, unsigned *);                                \
-    extern unsigned ft_table_extra_maintain_idx_bulk##suffix(                  \
-        const struct ft_maint_extra_ctx *, const u32 *, unsigned,              \
-        u64, u64, u32 *, unsigned, unsigned, int)
-
-FT_MAINT_EXTRA_DECLARE(_gen);
-FT_MAINT_EXTRA_DECLARE(_sse);
-FT_MAINT_EXTRA_DECLARE(_avx2);
-FT_MAINT_EXTRA_DECLARE(_avx512);
+FT_MAINT_DECLARE_VARIANTS(ft_table_extra_maintain, ft_maint_extra_ctx);
 
 /*===========================================================================
  * Active ops pointers (default to _gen)
@@ -56,82 +40,22 @@ static ft_maintain_extra_fn_t ft_maintain_extra_active =
 static ft_maintain_extra_idx_bulk_fn_t ft_maintain_extra_idx_bulk_active =
     ft_table_extra_maintain_idx_bulk_gen;
 
-/*===========================================================================
- * Arch init
- *===========================================================================*/
-static unsigned
-ft_rix_hash_arch_enable_(unsigned arch_enable)
-{
-    unsigned enable = 0u;
-
-    if (arch_enable == FT_ARCH_GEN)
-        return 0u;
-    if ((arch_enable & FT_ARCH_AVX512) != 0u)
-        enable |= RIX_HASH_ARCH_AVX512 | RIX_HASH_ARCH_AVX2 | RIX_HASH_ARCH_SSE;
-    else if ((arch_enable & FT_ARCH_AVX2) != 0u)
-        enable |= RIX_HASH_ARCH_AVX2 | RIX_HASH_ARCH_SSE;
-    else if ((arch_enable & FT_ARCH_SSE) != 0u)
-        enable |= RIX_HASH_ARCH_SSE;
-    return enable;
-}
-
 static void
 ft_maint_extra_select_(unsigned arch_enable)
 {
-    ft_maintain_extra_active = ft_table_extra_maintain_gen;
-    ft_maintain_extra_idx_bulk_active = ft_table_extra_maintain_idx_bulk_gen;
-#if defined(__x86_64__)
-    __builtin_cpu_init();
-    if ((arch_enable & FT_ARCH_AVX512) &&
-        __builtin_cpu_supports("avx512f")) {
-        ft_maintain_extra_active = ft_table_extra_maintain_avx512;
-        ft_maintain_extra_idx_bulk_active =
-            ft_table_extra_maintain_idx_bulk_avx512;
-    } else if ((arch_enable & (FT_ARCH_AVX2 | FT_ARCH_AVX512)) &&
-               __builtin_cpu_supports("avx2")) {
-        ft_maintain_extra_active = ft_table_extra_maintain_avx2;
-        ft_maintain_extra_idx_bulk_active =
-            ft_table_extra_maintain_idx_bulk_avx2;
-    } else if ((arch_enable & (FT_ARCH_SSE | FT_ARCH_AVX2 |
-                                FT_ARCH_AVX512)) &&
-               __builtin_cpu_supports("sse4.2")) {
-        ft_maintain_extra_active = ft_table_extra_maintain_sse;
-        ft_maintain_extra_idx_bulk_active =
-            ft_table_extra_maintain_idx_bulk_sse;
-    }
-#else
-    (void)arch_enable;
-#endif
+    FT_MAINT_SELECT(arch_enable, ft_maintain_extra_active,
+                    ft_maintain_extra_idx_bulk_active,
+                    ft_table_extra_maintain);
 }
 
 void
 ft_arch_extra_init(unsigned arch_enable)
 {
-    rix_hash_arch_init(ft_rix_hash_arch_enable_(arch_enable));
+    rix_hash_arch_init(ft_rix_hash_arch_enable(arch_enable));
     FT_OPS_EXTRA_SELECT(flow4, arch_enable, &ft_flow4_extra_active);
     FT_OPS_EXTRA_SELECT(flow6, arch_enable, &ft_flow6_extra_active);
     FT_OPS_EXTRA_SELECT(flowu, arch_enable, &ft_flowu_extra_active);
     ft_maint_extra_select_(arch_enable);
-}
-
-/*===========================================================================
- * Bucket carve helper (pow2-aligned subregion for rix_hash_bucket_extra_s)
- *===========================================================================*/
-static struct rix_hash_bucket_extra_s *
-ft_table_extra_bucket_carve(void *raw, size_t raw_size, unsigned *nb_bk_out)
-{
-    uintptr_t addr = (uintptr_t)raw;
-    uintptr_t aligned =
-        (addr + (_Alignof(struct rix_hash_bucket_extra_s) - 1u))
-        & ~(uintptr_t)(_Alignof(struct rix_hash_bucket_extra_s) - 1u);
-    size_t lost = (size_t)(aligned - addr);
-    size_t usable = raw_size > lost ? raw_size - lost : 0u;
-    unsigned nb = (unsigned)(usable /
-                             sizeof(struct rix_hash_bucket_extra_s));
-
-    nb = ft_rounddown_pow2_u32(nb);
-    *nb_bk_out = nb;
-    return (struct rix_hash_bucket_extra_s *)aligned;
 }
 
 /*===========================================================================
@@ -547,105 +471,10 @@ ft_table_extra_maintain_idx_bulk(const struct ft_maint_extra_ctx *ctx,
                                              min_bk_entries, enable_filter);
 }
 
-/*===========================================================================
- * flow4_extra_table_* per-prefix wrappers (key-addressable API)
- *===========================================================================*/
-u32
-flow4_extra_table_add(struct ft_table_extra *ft,
-                      struct flow4_extra_entry *entry, u64 now)
-{
-    u32 idx;
-
-    if (ft == NULL || entry == NULL)
-        return 0u;
-    idx = ft_record_index_from_member_ptr(ft->pool_base, ft->pool_stride,
-                                          ft->pool_entry_offset, entry);
-    if (idx == RIX_NIL)
-        return 0u;
-    return ft_table_extra_add_idx(ft, idx, now);
-}
-
-u32
-flow4_extra_table_find(struct ft_table_extra *ft,
-                       const struct flow4_extra_key *key)
-{
-    return flow4_extra_table_find_touch(ft, key, 0u);
-}
-
-u32
-flow4_extra_table_find_touch(struct ft_table_extra *ft,
-                             const struct flow4_extra_key *key,
-                             u64 now)
-{
-    struct ft_table_result result = { .entry_idx = 0u };
-
-    if (ft == NULL || key == NULL)
-        return 0u;
-    ft_flow4_extra_active->find_bulk(ft, key, 1u, now, &result);
-    return result.entry_idx;
-}
-
-u32
-flow4_extra_table_del(struct ft_table_extra *ft,
-                      const struct flow4_extra_key *key)
-{
-    u32 unused = 0u;
-
-    if (ft == NULL || key == NULL)
-        return 0u;
-    return ft_flow4_extra_active->del_key_bulk(ft, key, 1u, &unused)
-        ? unused : 0u;
-}
-
-unsigned
-flow4_extra_table_find_bulk(struct ft_table_extra *ft,
-                            const struct flow4_extra_key *keys,
-                            unsigned nb_keys, u64 now, u32 *results)
-{
-    struct ft_table_result r[64];
-    unsigned i, produced, chunk;
-
-    if (ft == NULL || keys == NULL || results == NULL || nb_keys == 0u)
-        return 0u;
-    produced = 0u;
-    while (produced < nb_keys) {
-        chunk = nb_keys - produced;
-        if (chunk > 64u)
-            chunk = 64u;
-        ft_flow4_extra_active->find_bulk(ft, keys + produced, chunk, now, r);
-        for (i = 0u; i < chunk; i++)
-            results[produced + i] = r[i].entry_idx;
-        produced += chunk;
-    }
-    return nb_keys;
-}
-
-unsigned
-flow4_extra_table_del_bulk(struct ft_table_extra *ft,
-                           const struct flow4_extra_key *keys,
-                           unsigned nb_keys, u32 *idx_out)
-{
-    if (ft == NULL || keys == NULL || idx_out == NULL)
-        return 0u;
-    return ft_flow4_extra_active->del_key_bulk(ft, keys, nb_keys, idx_out);
-}
-
 size_t
 ft_table_extra_bucket_size(unsigned max_entries)
 {
-    unsigned nb_bk;
-
-    nb_bk = (max_entries + (RIX_HASH_BUCKET_ENTRY_SZ - 1u))
-          / RIX_HASH_BUCKET_ENTRY_SZ;
-    if (nb_bk < FT_TABLE_MIN_NB_BK)
-        nb_bk = FT_TABLE_MIN_NB_BK;
-    return (size_t)ft_roundup_pow2_u32(nb_bk) * FT_TABLE_EXTRA_BUCKET_SIZE;
-}
-
-size_t
-flow4_extra_table_bucket_size(unsigned max_entries)
-{
-    return ft_table_extra_bucket_size(max_entries);
+    return ft_table_bucket_size_for(max_entries, FT_TABLE_EXTRA_BUCKET_SIZE);
 }
 
 #define FLOW_EXTRA_TABLE_WRAPPERS(prefix)                                      \
@@ -676,12 +505,12 @@ prefix##_extra_table_find_touch(struct ft_table_extra *ft,                     \
                                 const struct prefix##_extra_key *key,          \
                                 u64 now)                                       \
 {                                                                              \
-    struct ft_table_result result = { .entry_idx = 0u };                       \
+    u32 result = 0u;                                                           \
                                                                                \
     if (ft == NULL || key == NULL)                                             \
         return 0u;                                                             \
     ft_##prefix##_extra_active->find_bulk(ft, key, 1u, now, &result);          \
-    return result.entry_idx;                                                   \
+    return result;                                                             \
 }                                                                              \
                                                                                \
 u32                                                                            \
@@ -701,22 +530,9 @@ prefix##_extra_table_find_bulk(struct ft_table_extra *ft,                      \
                                const struct prefix##_extra_key *keys,          \
                                unsigned nb_keys, u64 now, u32 *results)       \
 {                                                                              \
-    struct ft_table_result r[64];                                              \
-    unsigned i, produced, chunk;                                               \
-                                                                               \
     if (ft == NULL || keys == NULL || results == NULL || nb_keys == 0u)        \
         return 0u;                                                             \
-    produced = 0u;                                                             \
-    while (produced < nb_keys) {                                               \
-        chunk = nb_keys - produced;                                            \
-        if (chunk > 64u)                                                       \
-            chunk = 64u;                                                       \
-        ft_##prefix##_extra_active->find_bulk(ft, keys + produced, chunk,      \
-                                              now, r);                         \
-        for (i = 0u; i < chunk; i++)                                           \
-            results[produced + i] = r[i].entry_idx;                           \
-        produced += chunk;                                                     \
-    }                                                                          \
+    ft_##prefix##_extra_active->find_bulk(ft, keys, nb_keys, now, results);    \
     return nb_keys;                                                            \
 }                                                                              \
                                                                                \
@@ -737,6 +553,7 @@ prefix##_extra_table_bucket_size(unsigned max_entries)                         \
     return ft_table_extra_bucket_size(max_entries);                            \
 }
 
+FLOW_EXTRA_TABLE_WRAPPERS(flow4)
 FLOW_EXTRA_TABLE_WRAPPERS(flow6)
 FLOW_EXTRA_TABLE_WRAPPERS(flowu)
 

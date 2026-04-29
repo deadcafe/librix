@@ -348,7 +348,8 @@ All memory is provided by the caller:
 - **Bucket memory**: caller allocates a raw buffer (no alignment requirement)
   and passes it to `init()` or `migrate()`. The library carves out the
   largest power-of-2 aligned bucket region internally via
-  `ft_table_bucket_carve()`.
+  `ft_table_bucket_carve()` for pure tables or
+  `ft_table_extra_bucket_carve()` for slot-extra tables.
 
 Helper functions:
 
@@ -357,6 +358,10 @@ Helper functions:
 - `ft_table_bucket_mem_size(nb_bk)` — compute bucket memory size from
   a known bucket count (useful for grow/shrink: multiply by 2 or divide
   by 2)
+- `ft_table_extra_bucket_size(max_entries)` — compute the slot-extra bucket
+  allocation size for init
+- `ft_table_extra_bucket_mem_size(nb_bk)` — compute slot-extra bucket memory
+  size from a known bucket count
 
 This model fits hugepage-backed, NUMA-aware, or custom control-plane
 allocators. The library never calls `malloc` or `free` internally.

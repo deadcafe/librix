@@ -26,6 +26,31 @@
 #define FT_TABLE_EXTRA_BUCKET_SIZE 192u
 #endif
 
+/**
+ * @brief Carve out an aligned extra-bucket region from a raw buffer.
+ *
+ * Given (raw, raw_size), aligns the pointer up to bucket-extra alignment,
+ * computes the largest power-of-2 bucket count that fits, and returns
+ * the aligned pointer.  *nb_bk_out is set to the bucket count (0 on
+ * failure).
+ */
+static inline struct rix_hash_bucket_extra_s *
+ft_table_extra_bucket_carve(void *raw, size_t raw_size, unsigned *nb_bk_out)
+{
+    uintptr_t addr = (uintptr_t)raw;
+    uintptr_t aligned =
+        (addr + (_Alignof(struct rix_hash_bucket_extra_s) - 1u))
+        & ~(uintptr_t)(_Alignof(struct rix_hash_bucket_extra_s) - 1u);
+    size_t lost = (size_t)(aligned - addr);
+    size_t usable = raw_size > lost ? raw_size - lost : 0u;
+    unsigned nb = (unsigned)(usable /
+                             sizeof(struct rix_hash_bucket_extra_s));
+
+    nb = ft_rounddown_pow2_u32(nb);
+    *nb_bk_out = nb;
+    return (struct rix_hash_bucket_extra_s *)aligned;
+}
+
 struct ft_table_extra_config {
     unsigned ts_shift;
 };

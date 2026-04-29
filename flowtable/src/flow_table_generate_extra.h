@@ -40,7 +40,7 @@
 #endif
 
 #define _FTG_KEY_T(p)       struct _FTG_CAT(p, _extra_key)
-#define _FTG_RESULT_T(p)    struct ft_table_result
+#define _FTG_RESULT_T(p)    u32
 #ifndef FTG_ENTRY_TYPE
 #define FTG_ENTRY_TYPE(p)   struct _FTG_CAT(ft_, _FTG_CAT(p, _entry))
 #endif
@@ -76,24 +76,6 @@
 #ifndef FTG_LAYOUT_ENTRY_INDEX
 #define FTG_LAYOUT_ENTRY_INDEX(ft, entry) RIX_IDX_FROM_PTR((ft)->pool, (entry))
 #endif
-
-/*===========================================================================
- * Bucket carve helper for extra variant (returns rix_hash_bucket_extra_s *)
- *===========================================================================*/
-static inline struct rix_hash_bucket_extra_s *
-ft_table_extra_bucket_carve_(void *raw, size_t raw_size, unsigned *nb_bk_out)
-{
-    uintptr_t addr = (uintptr_t)raw;
-    uintptr_t aligned = (addr + (_Alignof(struct rix_hash_bucket_extra_s) - 1u))
-                      & ~(uintptr_t)(_Alignof(struct rix_hash_bucket_extra_s) - 1u);
-    size_t lost = (size_t)(aligned - addr);
-    size_t usable = raw_size > lost ? raw_size - lost : 0u;
-    unsigned nb = (unsigned)(usable / sizeof(struct rix_hash_bucket_extra_s));
-
-    nb = ft_rounddown_pow2_u32(nb);
-    *nb_bk_out = nb;
-    return (struct rix_hash_bucket_extra_s *)aligned;
-}
 
 /*===========================================================================
  * Pipeline geometry
@@ -236,10 +218,10 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
                 }                                                             \
                 FCORE_EXTRA_TOUCH_TIMESTAMP(ft, entry, now);                  \
                 FCORE_EXTRA_ON_HIT(ft, entry, entry_idx);                     \
-                results[i].entry_idx = entry_idx;                             \
+                results[i] = entry_idx;                                       \
                 hit_count++;                                                  \
             } else {                                                          \
-                results[i].entry_idx = 0u;                                    \
+                results[i] = 0u;                                              \
                 miss_count++;                                                 \
             }                                                                 \
         }                                                                     \
@@ -271,10 +253,10 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
             }                                                                 \
             FCORE_EXTRA_TOUCH_TIMESTAMP(ft, entry, now);                      \
             FCORE_EXTRA_ON_HIT(ft, entry, entry_idx);                         \
-            results[i].entry_idx = entry_idx;                                 \
+            results[i] = entry_idx;                                           \
             hit_count++;                                                      \
         } else {                                                              \
-            results[i].entry_idx = 0u;                                        \
+            results[i] = 0u;                                                  \
             miss_count++;                                                     \
         }                                                                     \
     }                                                                         \
@@ -427,7 +409,7 @@ _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
         return;                                                               \
     if (ft == NULL || ft->buckets == NULL || keys == NULL) {                  \
         for (unsigned i = 0; i < nb_keys; i++)                                \
-            results[i].entry_idx = 0u;                                        \
+            results[i] = 0u;                                                  \
         return;                                                               \
     }                                                                         \
     if (nb_keys < FT_TABLE_EXTRA_FIND_BULK_MIN_KEYS) {                        \
@@ -435,7 +417,7 @@ _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
         return;                                                               \
     }                                                                         \
     _FTG_FCORE_EXTRA(p, find_key_bulk_)((ft), (keys), (nb_keys), (now),       \
-                                  &(results)[0].entry_idx);                   \
+                                        (results));                           \
 }                                                                             \
 /* --- add_idx_bulk ------------------------------------------------------ */ \
 static unsigned                                                               \
@@ -539,7 +521,7 @@ _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
         return -1;                                                            \
     if (new_buckets_raw == NULL || new_bucket_size == 0u)                     \
         return -1;                                                            \
-    new_buckets = ft_table_extra_bucket_carve_(new_buckets_raw,               \
+    new_buckets = ft_table_extra_bucket_carve(new_buckets_raw,                \
                                        new_bucket_size, &new_nb_bk);          \
     if (new_nb_bk <= ft->start_mask)                                          \
         return -1;                                                            \

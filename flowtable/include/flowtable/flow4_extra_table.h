@@ -105,7 +105,7 @@ u32 flow4_extra_table_del(struct ft_table_extra *ft,
  * @param now       If non-zero, refresh bucket extra[] timestamp on hit.
  *                  Pass 0 for non-touching lookup.
  * @param results   Output array (length @p nb_keys) of registered indices.
- * @return Number of hits.
+ * @return Number of processed keys.
  */
 unsigned flow4_extra_table_find_bulk(struct ft_table_extra *ft,
                                      const struct flow4_extra_key *keys,

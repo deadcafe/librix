@@ -33,7 +33,7 @@ struct ft_##prefix##_extra_ops {                                              \
                       const struct prefix##_extra_key *keys,                  \
                       unsigned nb_keys,                                       \
                       u64 now,                                                \
-                      struct ft_table_result *results);                       \
+                      u32 *results);                                          \
     unsigned (*add_idx_bulk)(struct ft_table_extra *ft,                       \
                              u32 *entry_idxv,                                 \
                              unsigned nb_keys,                                \

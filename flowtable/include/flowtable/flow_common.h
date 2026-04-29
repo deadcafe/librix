@@ -193,7 +193,23 @@ ft_table_bucket_carve(void *raw, size_t raw_size, unsigned *nb_bk_out)
 }
 
 /**
- * @brief Compute the required bucket memory size for a given max_entries.
+ * @brief Compute bucket memory size from max_entries and bucket byte size.
+ *
+ * Returns bucket_bytes * 2^n bytes (n >= 12, i.e. minimum 4096 buckets).
+ */
+static inline size_t
+ft_table_bucket_size_for(unsigned max_entries, size_t bucket_bytes)
+{
+    unsigned nb_bk;
+    nb_bk = (max_entries + (RIX_HASH_BUCKET_ENTRY_SZ - 1u))
+          / RIX_HASH_BUCKET_ENTRY_SZ;
+    if (nb_bk < FT_TABLE_MIN_NB_BK)
+        nb_bk = FT_TABLE_MIN_NB_BK;
+    return (size_t)ft_roundup_pow2_u32(nb_bk) * bucket_bytes;
+}
+
+/**
+ * @brief Compute the required pure-table bucket memory size.
  *
  * Returns 128 * 2^n bytes (n >= 12, i.e. minimum 4096 buckets = 512 KiB).
  * The caller allocates this many bytes and passes the pointer and size
@@ -203,12 +219,7 @@ ft_table_bucket_carve(void *raw, size_t raw_size, unsigned *nb_bk_out)
 static inline size_t
 ft_table_bucket_size(unsigned max_entries)
 {
-    unsigned nb_bk;
-    nb_bk = (max_entries + (RIX_HASH_BUCKET_ENTRY_SZ - 1u))
-          / RIX_HASH_BUCKET_ENTRY_SZ;
-    if (nb_bk < FT_TABLE_MIN_NB_BK)
-        nb_bk = FT_TABLE_MIN_NB_BK;
-    return (size_t)ft_roundup_pow2_u32(nb_bk) * FT_TABLE_BUCKET_SIZE;
+    return ft_table_bucket_size_for(max_entries, FT_TABLE_BUCKET_SIZE);
 }
 
 /**
