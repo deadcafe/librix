@@ -6,13 +6,13 @@
  */
 
 /*
- * sim_flow_cache.c — Flow cache simulation
+ * sim_flow_cache.c - Flow cache simulation
  *
  * Simulates a flow cache backed by the flowtable library under realistic
  * packet-processing conditions.  Parameters such as PPS, batch size,
  * miss rate, timeout, and maintenance expiration capacity are adjustable via the
  * command line so that the user can find the operating point where the
- * cache stabilises at 65–75 % fill.
+ * cache stabilises at 65-75 % fill.
  *
  * Simulated (wall-clock-free) time is used so the simulation runs as
  * fast as the CPU allows.
@@ -111,8 +111,8 @@ struct sim_config {
     unsigned attack_pct;           /* attack flow % of batch during burst */
     unsigned burst_on_sec;
     unsigned burst_off_sec;
-    unsigned dos_threshold_pct;    /* miss rate → DoS mode */
-    unsigned normal_threshold_pct; /* miss rate → Normal mode */
+    unsigned dos_threshold_pct;    /* miss rate -> DoS mode */
+    unsigned normal_threshold_pct; /* miss rate -> Normal mode */
     double   dos_timeout_sec;
 };
 
@@ -127,7 +127,7 @@ struct sim_record {
 } __attribute__((aligned(FT_TABLE_CACHE_LINE_SIZE)));
 
 /*===========================================================================
- * Active set — O(1) add / remove / random-access
+ * Active set - O(1) add / remove / random-access
  *===========================================================================*/
 
 struct active_set {
@@ -506,9 +506,9 @@ miss_vary_label(enum sim_miss_vary v)
 /*
  * Compute the effective miss percentage at a given simulation time.
  *
- *   step  — alternates between base/3 and base×3 every 10 s.
- *   sine  — sine wave, period 20 s, range [base×0.2 .. base×2.0].
- *   burst — baseline rate with 2 s burst at 5×base every 8 s.
+ *   step  - alternates between base/3 and base x 3 every 10 s.
+ *   sine  - sine wave, period 20 s, range [base x 0.2 .. base x 2.0].
+ *   burst - baseline rate with 2 s burst at 5xbase every 8 s.
  */
 static unsigned
 sim_current_miss_pct(unsigned base, enum sim_miss_vary vary, double sim_sec)
@@ -701,11 +701,11 @@ arch_label(unsigned enable)
 /*===========================================================================
  * Dynamic timeout controller
  *
- * Feed-forward:  T_ff = fill_setpoint × N × ln(1 + H/r) / H
+ * Feed-forward:  T_ff = fill_setpoint x N x ln(1 + H/r) / H
  *   where H = measured hit rate, r = measured new-flow rate, N = max_entries.
  * Proportional correction on fill error:
- *   correction = 1 − kp × (fill_actual − fill_setpoint)
- * EMA smoothing:  T = α × T_new + (1−α) × T_prev
+ *   correction = 1 - kp x (fill_actual - fill_setpoint)
+ * EMA smoothing:  T = alpha x T_new + (1-alpha) x T_prev
  *===========================================================================*/
 
 struct sim_timeout_ctrl {
@@ -1589,7 +1589,7 @@ main(int argc, char **argv)
             printf("  attack pct:    %u%%\n", cfg.attack_pct);
             printf("  burst cycle:   %u s on / %u s off\n",
                    cfg.burst_on_sec, cfg.burst_off_sec);
-            printf("  dos threshold: %u%% → DoS, %u%% → Normal\n",
+            printf("  dos threshold: %u%% -> DoS, %u%% -> Normal\n",
                    cfg.dos_threshold_pct, cfg.normal_threshold_pct);
             printf("  dos timeout:   %.1f s\n", cfg.dos_timeout_sec);
         }
@@ -1789,3 +1789,11 @@ cleanup:
     sim_generator_destroy(&gen);
     return rc;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

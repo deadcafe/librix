@@ -26,6 +26,10 @@ typedef uint16_t u16;
 typedef uint32_t u32;
 typedef uint64_t u64;
 
+#  ifndef RIX_CACHE_LINE_SIZE
+#    define RIX_CACHE_LINE_SIZE 64u
+#  endif
+
 #  ifdef __cplusplus
 extern "C" {
 #  endif
@@ -69,20 +73,20 @@ extern "C" {
 
 /* Return non-zero if i is within [1 .. cap]. RIX_NIL is NOT counted as valid.
  */
-#  define RIX_IDX_IS_VALID(i, cap) \
+#  define RIX_IDX_IS_VALID(i, cap)                                            \
     ((unsigned)(i) >= 1u && (unsigned)(i) <= (unsigned)(cap))
 
 /* Convert element pointer (p) to 1-origin index relative to array base (base).
  * If p == NULL, return RIX_NIL (0).
  * REQUIREMENT: (p) and (base) must be pointers to the SAME element type.
  */
-#  define RIX_IDX_FROM_PTR(base, p) \
+#  define RIX_IDX_FROM_PTR(base, p)                                           \
     ((unsigned)((p) ? (unsigned)((p) - (base)) + 1u : (unsigned)RIX_NIL))
 
 /* Convert 1-origin index (i) back to element pointer using array base (base).
  * If i == RIX_NIL (0), return NULL.
  */
-#  define RIX_PTR_FROM_IDX(base, i) \
+#  define RIX_PTR_FROM_IDX(base, i)                                           \
     (((unsigned)(i) != RIX_NIL) ? ((base) + ((unsigned)(i) - 1u)) : NULL)
 
 /* Internal helper when the caller has already proven i != RIX_NIL.
@@ -162,18 +166,18 @@ rix_ptr_from_idx_valid_(void *base, size_t elem_size, unsigned i)
 
 /* container_of: get struct pointer from pointer to its member. */
 #  ifndef RIX_CONTAINER_OF
-#    define RIX_CONTAINER_OF(ptr, type, member)                         \
-    ((type *)__builtin_assume_aligned(                                  \
+#    define RIX_CONTAINER_OF(ptr, type, member)                               \
+    ((type *)__builtin_assume_aligned(                                        \
         (void *)((char *)(ptr) - RIX_OFFSET_OF(type, member)), _Alignof(type)))
 #  endif
 
 /* Swap two variables of the same type. */
 #  ifndef RIX_SWAP
-#    define RIX_SWAP(T, a, b)                   \
-    do {                                        \
-        T __rix_tmp__ = (a);                    \
-        (a) = (b);                              \
-        (b) = __rix_tmp__;                      \
+#    define RIX_SWAP(T, a, b)                                                 \
+    do {                                                                      \
+        T __rix_tmp__ = (a);                                                  \
+        (a) = (b);                                                            \
+        (b) = __rix_tmp__;                                                    \
     } while (0)
 #  endif
 

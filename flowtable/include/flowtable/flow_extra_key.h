@@ -8,6 +8,7 @@
 #ifndef _FLOW_EXTRA_KEY_H_
 #define _FLOW_EXTRA_KEY_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <rix/rix_hash_slot_extra.h>
@@ -22,6 +23,8 @@ struct flow_entry_meta_extra {
 
 _Static_assert(sizeof(struct flow_entry_meta_extra) == 8u,
                "flow_entry_meta_extra must be 8 bytes");
+_Static_assert(_Alignof(struct flow_entry_meta_extra) == _Alignof(u32),
+               "flow_entry_meta_extra must keep u32 alignment");
 
 /* flow4_extra_key uses first 16B of flow4_key layout. */
 struct flow4_extra_key {
@@ -44,7 +47,10 @@ struct flow4_extra_entry {
 
 _Static_assert(offsetof(struct flow4_extra_entry, meta) == 16u,
                "flow4_extra_entry.meta must be at offset 16");
+_Static_assert(sizeof(struct flow4_extra_entry) == 24u,
+               "flow4_extra_entry must be 24 bytes");
 
+/* Packed intentionally: flow6_extra matches the pure flow6 key image. */
 struct flow6_extra_key {
     u8  family;
     u8  proto;
@@ -67,7 +73,10 @@ struct flow6_extra_entry {
 _Static_assert(offsetof(struct flow6_extra_entry, meta)
                == sizeof(struct flow6_extra_key),
                "flow6_extra_entry.meta must follow key");
+_Static_assert(sizeof(struct flow6_extra_entry) == 52u,
+               "flow6_extra_entry must be 52 bytes");
 
+/* Packed intentionally: flowu_extra matches the pure flowu key image. */
 struct flowu_extra_key {
     u8  family;
     u8  proto;
@@ -99,6 +108,8 @@ struct flowu_extra_entry {
 _Static_assert(offsetof(struct flowu_extra_entry, meta)
                == sizeof(struct flowu_extra_key),
                "flowu_extra_entry.meta must follow key");
+_Static_assert(sizeof(struct flowu_extra_entry) == 52u,
+               "flowu_extra_entry must be 52 bytes");
 
 /*
  * Bare bucket-side timestamp accessors.  Use these only when (bk, slot) are
@@ -139,8 +150,8 @@ flow_extra_ts_is_permanent(u32 encoded)
     return encoded == 0u;
 }
 
-/* Encode/decode re-use classic's flow_timestamp_encode /
- * flow_timestamp_is_expired_raw so classic <-> extra comparisons are
+/* Encode/decode re-use pure's flow_timestamp_encode /
+ * flow_timestamp_is_expired_raw so pure <-> extra comparisons are
  * bit-exact. */
 
 /**
@@ -158,3 +169,11 @@ flow_extra_timestamp_encode(u64 now, unsigned shift)
 }
 
 #endif /* _FLOW_EXTRA_KEY_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

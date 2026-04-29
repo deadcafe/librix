@@ -16,12 +16,12 @@
 #  include "rix_hash_arch.h"
 
 #  ifndef RIX_HASH_FIND_U32X16
-#    define RIX_HASH_FIND_U32X16(arr, val) \
+#    define RIX_HASH_FIND_U32X16(arr, val)                                    \
         rix_hash_arch->find_u32x16((arr), (val))
 #  endif
 
 #  ifndef RIX_HASH_FIND_U32X16_2
-#    define RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1) \
+#    define RIX_HASH_FIND_U32X16_2(arr, val0, val1, mask0, mask1)             \
         rix_hash_arch->find_u32x16_2((arr), (val0), (val1), (mask0), (mask1))
 #  endif
 
@@ -41,7 +41,15 @@
 struct rix_hash_bucket_s {
     u32 hash[RIX_HASH_BUCKET_ENTRY_SZ]; /* 64 bytes: fingerprints       */
     u32 idx [RIX_HASH_BUCKET_ENTRY_SZ]; /* 64 bytes: 1-origin node idx  */
-} __attribute__((aligned(64)));
+} __attribute__((aligned(RIX_CACHE_LINE_SIZE)));
+
+RIX_STATIC_ASSERT(sizeof(struct rix_hash_bucket_s) == 128u,
+                  "rix_hash_bucket_s must be 128 bytes");
+RIX_STATIC_ASSERT(_Alignof(struct rix_hash_bucket_s) == RIX_CACHE_LINE_SIZE,
+                  "rix_hash_bucket_s must be cache-line aligned");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_s, idx)
+                  == RIX_CACHE_LINE_SIZE,
+                  "rix_hash_bucket_s.idx must start at cache line 1");
 
 /*===========================================================================
  * Head struct and init macros
@@ -66,6 +74,17 @@ struct rix_hash_find_ctx_s {
     u32                  empties[2];      /*  8B  offset 44 */
     /* 52B + 4B tail padding = 56B (8B aligned) */
 };
+
+RIX_STATIC_ASSERT(sizeof(struct rix_hash_find_ctx_s) == 56u,
+                  "rix_hash_find_ctx_s must be 56 bytes");
+RIX_STATIC_ASSERT(_Alignof(struct rix_hash_find_ctx_s) == _Alignof(void *),
+                  "rix_hash_find_ctx_s must keep pointer alignment");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_find_ctx_s, fp) == 32u,
+                  "rix_hash_find_ctx_s.fp offset changed");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_find_ctx_s, fp_hits) == 36u,
+                  "rix_hash_find_ctx_s.fp_hits offset changed");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_find_ctx_s, empties) == 44u,
+                  "rix_hash_find_ctx_s.empties offset changed");
 
 /*---------------------------------------------------------------------------
  * rix_hash_prefetch_key - prefetch key data into L1/L2 before name_hash_key.
@@ -110,19 +129,19 @@ rix_hash_prefetch_entry_of(const void *entry)
 
 /* Return a pointer to buckets[bk_idx]. */
 #  ifndef rix_hash_bucket_of_idx
-#    define rix_hash_bucket_of_idx(buckets, bk_idx) \
+#    define rix_hash_bucket_of_idx(buckets, bk_idx)                           \
         (&(buckets)[(unsigned)(bk_idx)])
 #  endif
 
 /* Return buckets[bk_idx].hash[]. */
 #  ifndef rix_hash_bucket_hashes_of_idx
-#    define rix_hash_bucket_hashes_of_idx(buckets, bk_idx) \
+#    define rix_hash_bucket_hashes_of_idx(buckets, bk_idx)                    \
         (rix_hash_bucket_of_idx((buckets), (bk_idx))->hash)
 #  endif
 
 /* Return buckets[bk_idx].idx[]. */
 #  ifndef rix_hash_bucket_indices_of_idx
-#    define rix_hash_bucket_indices_of_idx(buckets, bk_idx) \
+#    define rix_hash_bucket_indices_of_idx(buckets, bk_idx)                   \
         (rix_hash_bucket_of_idx((buckets), (bk_idx))->idx)
 #  endif
 
@@ -284,30 +303,30 @@ rix_hash_fp(const union rix_hash_hash_u h, unsigned mask,
  *   (key_type = __typeof__(((struct type *)0)->key_field))
  *===========================================================================*/
 /* Derive the key type from key_field for use in typed API parameters. */
-#  define RIX_HASH_KEY_TYPE(type, key_field)     \
+#  define RIX_HASH_KEY_TYPE(type, key_field)                                  \
     __typeof__(((struct type *)0)->key_field)
 
-#  define RIX_HASH_SLOT_TYPE(type, slot_field)   \
+#  define RIX_HASH_SLOT_TYPE(type, slot_field)                                \
     __typeof__(((struct type *)0)->slot_field)
 
 #  define RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, attr) \
-    attr void name##_init(struct name *head, unsigned nb_bk);                  \
-    attr struct type *name##_insert(struct name *head,                         \
-                                    struct rix_hash_bucket_s *buckets,         \
-                                    struct type *base,                         \
-                                    struct type *elm);                         \
-    attr unsigned name##_remove_at(struct name *head,                          \
-                                   struct rix_hash_bucket_s *buckets,          \
-                                   unsigned bk,                                \
-                                   unsigned slot);                             \
-    attr struct type *name##_remove(struct name *head,                         \
-                                    struct rix_hash_bucket_s *buckets,         \
-                                    struct type *base,                         \
-                                    struct type *elm);                         \
-    attr int name##_walk(struct name *head,                                    \
-                         struct rix_hash_bucket_s *buckets,                    \
-                         struct type *base,                                    \
-                         int (*cb)(struct type *, void *),                     \
+    attr void name##_init(struct name *head, unsigned nb_bk);                 \
+    attr struct type *name##_insert(struct name *head,                        \
+                                    struct rix_hash_bucket_s *buckets,        \
+                                    struct type *base,                        \
+                                    struct type *elm);                        \
+    attr unsigned name##_remove_at(struct name *head,                         \
+                                   struct rix_hash_bucket_s *buckets,         \
+                                   unsigned bk,                               \
+                                   unsigned slot);                            \
+    attr struct type *name##_remove(struct name *head,                        \
+                                    struct rix_hash_bucket_s *buckets,        \
+                                    struct type *base,                        \
+                                    struct type *elm);                        \
+    attr int name##_walk(struct name *head,                                   \
+                         struct rix_hash_bucket_s *buckets,                   \
+                         struct type *base,                                   \
+                         int (*cb)(struct type *, void *),                    \
                          void *arg);
 
 #  define RIX_HASH_PROTOTYPE_EX(name, type, key_field, hash_field, cmp_fn, hash_fn) \
@@ -316,7 +335,7 @@ rix_hash_fp(const union rix_hash_hash_u h, unsigned mask,
 #  define RIX_HASH_PROTOTYPE_STATIC_EX(name, type, key_field, hash_field, cmp_fn, hash_fn) \
     RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
-#  define RIX_HASH_PROTOTYPE(name, type, key_field, hash_field, cmp_fn) \
+#  define RIX_HASH_PROTOTYPE(name, type, key_field, hash_field, cmp_fn)       \
     RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, )
 
 #  define RIX_HASH_PROTOTYPE_STATIC(name, type, key_field, hash_field, cmp_fn) \
@@ -337,13 +356,13 @@ rix_hash_fp(const union rix_hash_hash_u h, unsigned mask,
 #  define RIX_HASH_DEFAULT_HASH_FN_NAME(name) name ## _default_hash
 
 #  define RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)              \
-    static RIX_UNUSED RIX_FORCE_INLINE union rix_hash_hash_u                   \
+    static RIX_UNUSED RIX_FORCE_INLINE union rix_hash_hash_u                  \
     RIX_HASH_DEFAULT_HASH_FN_NAME(name)(                                      \
         const RIX_HASH_KEY_TYPE(type, key_field) *key, u32 mask)              \
-    {                                                                          \
-        return rix_hash_bytes_fast((const void *)key,                     \
+    {                                                                         \
+        return rix_hash_bytes_fast((const void *)key,                         \
                                         sizeof(((struct type *)0)->key_field), \
-                                        mask);                                 \
+                                        mask);                                \
     }
 
 /*===========================================================================

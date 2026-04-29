@@ -208,9 +208,13 @@ slot-extra variant は `RIX_HASH_GENERATE_SLOT_EXTRA_EX` の bucket layout
 maintenance は、occupied slot ごとに entry record を触る前に bucket
 memory だけで expire 判定できる。
 
-公開 symbol は classic と共存する。
+用語: **pure** は base flowtable model を指す。bucket は 128 B で、
+timestamp は caller-owned flow entry metadata に保存する。**slot-extra**
+は 192 B bucket と bucket-side `extra[]` timestamp slot を持つ model である。
 
-- classic: `ft_flow4_table_*`, `struct flow4_entry`
+公開 symbol は pure と共存する。
+
+- pure: `ft_flow4_table_*`, `struct flow4_entry`
 - slot-extra: `ft_table_extra_*`, `flow4_extra_table_*`,
   `flow6_extra_table_*`, `flowu_extra_table_*`,
   `struct flow4_extra_entry`, `struct flow6_extra_entry`,
@@ -386,19 +390,19 @@ helper 関数:
 
 公開ヘッダ:
 
-- `flowtable/include/flow_table.h` — umbrella header
-- `flowtable/include/flow4_table.h`
-- `flowtable/include/flow6_table.h`
-- `flowtable/include/flowu_table.h`
-- `flowtable/include/flow_extra_table.h`
-- `flowtable/include/flow4_extra_table.h`
-- `flowtable/include/flow6_extra_table.h`
-- `flowtable/include/flowu_extra_table.h`
-- `flowtable/include/flow_common.h` — 共通型と helper
+- `flowtable/include/flow_table.h` — primary umbrella header
+- `flowtable/include/ft_fill_ctrl.h` — optional fill-rate controller
+- `flowtable/include/flowtable/*.h` — advanced family/common headers
 
-`flow_table.h` は classic API と slot-extra API の両方を include する。
-slot-extra 実装は通常の `flowtable/src/` build に含まれ、`libftable.a`
-へ link される。分離された `extra/` source tree や include path は持たない。
+通常の利用では `flow_table.h` だけを include する。これは pure API と
+slot-extra API の両方を include する。slot-extra 実装は通常の
+`flowtable/src/` build に含まれ、`libftable.a` へ link される。
+分離された `extra/` source tree や include path は持たない。
+`flowtable/*.h` は、`flowtable/flow4_table.h` や
+`flowtable/flow6_extra_table.h` のように、意図的に family-specific な
+低レベル API だけを参照したい code のために残している。
+ここでいう pure は bucket-side `extra[]` slot を持たない base table model
+である。
 
 `flow_table.h` は、`struct ft_table` と `struct ft_table_extra` で共通な
 操作を `FT_TABLE_*` generic facade として提供する。dispatch は table
@@ -460,15 +464,15 @@ n = FT_TABLE_MAINTAIN(&ctx_e, start_bk, now, timeout,
   `ft_flow4_table_find()`, `ft_flow4_table_find_bulk()`,
   `ft_flow4_table_del_key_bulk()` と、対応する
   `flow4_extra_table_*`, `flow6_extra_table_*`, `flowu_extra_table_*`
-  の find/delete API を使う。classic と slot-extra で key/entry 型が
+  の find/delete API を使う。pure と slot-extra で key/entry 型が
   異なるためである。
 - maintenance context struct は variant-specific のままである。
-  classic は `struct ft_maint_ctx`、slot-extra は
+  pure は `struct ft_maint_ctx`、slot-extra は
   `struct ft_maint_extra_ctx` を使う。`FT_TABLE_MAINT_*` macro で関数名は
   隠蔽できるが、caller は正しい context 型を確保する。
 - `ft_table_extra_touch()` / `ft_table_extra_touch_checked()` のような
   extra-only timestamp helper は extra-specific のままとする。
-- bucket sizing は variant-specific である。classic は
+- bucket sizing は variant-specific である。pure は
   `ft_table_bucket_size()`、slot-extra は `ft_table_extra_bucket_size()` /
   `flow4_extra_table_bucket_size()` / `flow6_extra_table_bucket_size()` /
   `flowu_extra_table_bucket_size()` を使う。
@@ -579,8 +583,13 @@ helper API / macro:
 推奨:
 
 - `entry` は cache-line 境界に置く
+- flow entry を先頭 member に置く hot record は
+  `FT_TABLE_CACHE_LINE_SIZE` で align する
 - record stride を大きくしすぎない
 - body は必要以上に大きくしない
+- public な `flow*_key`, `flow*_entry`, `flow*_extra_entry` の
+  size/offset は固定 ABI として扱う。header 側で static assertion
+  により検証する
 
 確認できている性能リスク:
 
@@ -647,6 +656,27 @@ slot-extra の test program は `flowtable/test/test_flow4_extra.c` であり、
 make -C flowtable/test test
 ```
 
+### 10.1 API usage sample
+
+`flowtable/test/usage_flowtable.c` は、機能 test や benchmark ではなく、
+API の使い方を示すための読み物 sample code である。以下を単純な流れで
+示している。
+
+- primary API header として `flow_table.h` を include する
+- caller-owned record と bucket memory を確保する
+- `FT_TABLE_INIT_TYPED()` で pure / slot-extra table を初期化する
+- key lookup は family-specific API を使う
+- add/delete/stats/walk/migrate は `FT_TABLE_*` facade を使う
+- `FT_TABLE_MAINT_CTX_INIT()` と `FT_TABLE_MAINTAIN()` で明示 maintenance
+  を回す
+- optional な `ft_fill_ctrl` controller を使う
+
+build:
+
+```sh
+make -C flowtable/test sample
+```
+
 ## 11. benchmark
 
 benchmark program は `flowtable/test/bench_flow_table.c` であり、
@@ -660,7 +690,7 @@ make -C flowtable/test bench
   `--arch auto`（runtime で一番有利な supported variant）
 - `bench-full`: `flow4/6/u` の query sweep に `maint` と `grow` を加え、
   `BENCH_FULL_ARCHES` のうち CPU が support する全 variant で評価する
-- `bench-extra`: `bench_flow4_vs_extra.c`。`flow4` classic と
+- `bench-extra`: `bench_flow4_vs_extra.c`。`flow4` pure と
   `flow4_extra` を同一条件で比較する microbench
   (insert/find/miss/touch/delete/maintain)
 - `bench-extra-full`: `bench_flow_extra_table.c`。`flow4_extra`,
@@ -670,10 +700,10 @@ make -C flowtable/test bench
 - `bench-sweep`, `bench-zoned`, `bench-ctrl`: maintenance と
   fill-controller に焦点を置いた bench
 
-網羅性の注意: `ft_bench` は classic の `flow4/flow6/flowu` と supported
+網羅性の注意: `ft_bench` は pure の `flow4/flow6/flowu` と supported
 arch variant を広く評価する full benchmark である。`bench-extra-full`
 はそれに対応する slot-extra family の full sweep である。`bench-extra`
-は `flow4` classic-vs-extra の focused comparison として残す。
+は `flow4` pure-vs-extra の focused comparison として残す。
 
 ### 11.1 benchmark mode
 
@@ -872,17 +902,19 @@ flowtable/
   Makefile
   include/
     flow_table.h
-    flow4_table.h
-    flow6_table.h
-    flowu_table.h
-    flow_extra_table.h
-    flow4_extra_table.h
-    flow6_extra_table.h
-    flowu_extra_table.h
-    flow_common.h
-    flow_extra_common.h
-    flow_extra_key.h
     ft_fill_ctrl.h        (適応型 fill-rate コントローラ)
+    flowtable/
+      flow4_table.h
+      flow6_table.h
+      flowu_table.h
+      flow_extra_table.h
+      flow4_extra_table.h
+      flow6_extra_table.h
+      flowu_extra_table.h
+      flow_common.h
+      flow_key.h
+      flow_extra_common.h
+      flow_extra_key.h
   src/
     flow4.c
     flow6.c
@@ -908,6 +940,7 @@ flowtable/
     bench_flow4_vs_extra.c
     bench_flow_extra_table.c
     bench_scope.h
+    usage_flowtable.c      (API usage sample; test/bench ではない)
     test_flow_table.c
     test_flow4_extra.c
     bench_fill_ctrl.c     (ft_fill_ctrl 動作検証ベンチ)

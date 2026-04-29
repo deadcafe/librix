@@ -4,7 +4,7 @@
  * Copyright (c) 2026 deadcafe.beef@gmail.com
  * All rights reserved.
  *
- * bench_flow4_maint_sweep.c - maintain sweep matrix for classic vs
+ * bench_flow4_maint_sweep.c - maintain sweep matrix for pure vs
  * slot_extra flow4.  Iterates over (N_ENTRIES, fill%, expire%) per
  * spec section 9.3 and reports per-bucket cycle cost of one
  * ft_table_maintain pass for each variant.
@@ -21,9 +21,9 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_hash_slot_extra.h>
 
-#include "flow4_table.h"
-#include "flow4_extra_table.h"
-#include "flow_key.h"
+#include "flowtable/flow4_table.h"
+#include "flowtable/flow4_extra_table.h"
+#include "flowtable/flow_key.h"
 
 #define TS_SHIFT 4u
 
@@ -66,7 +66,7 @@ hugefree(void *p, size_t bytes)
 }
 
 static void
-fill_classic_keys(struct flow4_entry *pool, unsigned n)
+fill_pure_keys(struct flow4_entry *pool, unsigned n)
 {
     unsigned i;
 
@@ -98,7 +98,7 @@ fill_extra_keys(struct flow4_extra_entry *pool, unsigned n)
 }
 
 static void
-age_classic(struct flow4_entry *pool, unsigned n_total,
+age_pure(struct flow4_entry *pool, unsigned n_total,
             unsigned stale_n, u64 now, u64 old)
 {
     u32 enc_old = (u32)flow_timestamp_encode(old, TS_SHIFT);
@@ -223,14 +223,14 @@ run_one(unsigned n_entries, unsigned fill_pct, unsigned expire_pct)
         goto out;
     }
 
-    fill_classic_keys(pool_c, n_entries);
+    fill_pure_keys(pool_c, n_entries);
     fill_extra_keys(pool_e, n_entries);
 
     rc = FT_FLOW4_TABLE_INIT_TYPED(&ft_c, pool_c, n_entries,
                                    struct flow4_entry, key,
                                    bk_c, bk_c_mem, &cfg_c);
     if (rc != 0) {
-        fprintf(stderr, "  skip N=%u fill=%u expire=%u (classic init rc=%d)\n",
+        fprintf(stderr, "  skip N=%u fill=%u expire=%u (pure init rc=%d)\n",
                 n_entries, fill_pct, expire_pct, rc);
         goto out;
     }
@@ -248,7 +248,7 @@ run_one(unsigned n_entries, unsigned fill_pct, unsigned expire_pct)
         (void)flow4_extra_table_add(&ft_e, &pool_e[i], now);
     }
 
-    age_classic(pool_c, insert_n, stale_n, now, old);
+    age_pure(pool_c, insert_n, stale_n, now, old);
     age_extra(&ft_e, pool_e, insert_n, stale_n, now, old);
 
     {
@@ -330,7 +330,7 @@ main(void)
 
     printf("flow4 maintain sweep (cy/bucket, single pass)\n");
     printf("  %8s %5s  %5s  %8s %10s %10s %8s\n",
-           "N", "fill", "exp", "nb_bk", "classic", "extra", "e/c");
+           "N", "fill", "exp", "nb_bk", "pure", "extra", "e/c");
 
     for (ni = 0u; ni < sizeof(N_list) / sizeof(N_list[0]); ni++) {
         for (fi = 0u; fi < sizeof(fill_list) / sizeof(fill_list[0]); fi++) {

@@ -9,7 +9,7 @@
 
 #include <rix/rix_hash_slot.h>
 
-#include "flow4_table.h"
+#include "flowtable/flow4_table.h"
 #include "flow_hash.h"
 #include "flow_core.h"
 

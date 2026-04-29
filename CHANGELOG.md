@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog.
 
+## [0.5.0] - 2026-04-29
+
+Patch release focused on public header brush-up and release document cleanup.
+
+### Changed
+
+- Flowtable support headers now live under `flowtable/include/flowtable/`.
+  Normal users include `flow_table.h`; family-specific headers remain
+  available as `flowtable/*.h` for narrow advanced use.
+- Public flowtable headers now document the normal include path, generic
+  facade exceptions, and per-API usage for common and family-specific entry
+  points.
+- Flowtable C/H files now consistently carry the BSD 4-space soft-tab
+  coding-style footer.
+- Added `flowtable/test/usage_flowtable.c`, a readable API usage sample that
+  is built by `make -C flowtable/test sample` and is intentionally separate
+  from test/benchmark targets.
+- Public flowtable key/entry layouts now have static size, alignment, and
+  metadata-offset assertions for pure and slot-extra variants.
+- Public `include/rix/` hash bucket, staged-find context, dispatch, and ring
+  structs now have explicit cache-line/layout assertions and consistent
+  coding-style footers where they were missing.
+- Release notes are consolidated into `RELEASE_NOTES.md`, with new release
+  entries added at the head of the file.
+
+### Validation status
+
+- `git diff --check`: passed
+- `make -C flowtable static CC=gcc`: passed
+- `make -C flowtable/test test-extra-arch CC=gcc`: passed
+- `make -C flowtable/test test-extra CC=clang BUILDDIR=/tmp/librix-flowtable-clang-v050-extra LIBFT=/tmp/librix-flowtable-clang-v050-extra/lib/libftable.a`: passed
+- `make -C flowtable/test test-extra CC=clang BUILDDIR=/tmp/librix-flowtable-clang-v050-api-doc LIBFT=/tmp/librix-flowtable-clang-v050-api-doc/lib/libftable.a`: passed
+- `make -C flowtable/test sample CC=gcc`: passed
+- `make -C flowtable/test sample CC=clang BUILDDIR=/tmp/librix-flowtable-clang-sample LIBFT=/tmp/librix-flowtable-clang-sample/lib/libftable.a`: passed
+- `ft_usage_sample` GCC and Clang binaries: passed
+- `make -C flowtable/test test-extra CC=gcc`: passed
+- `make -C flowtable/test test-extra CC=clang BUILDDIR=/tmp/librix-flowtable-clang-align-extra LIBFT=/tmp/librix-flowtable-clang-align-extra/lib/libftable.a`: passed
+- `make build CC=gcc`: passed
+- `make -B build CC=clang`: passed
+- rix unit tests under `tests/slist`, `tests/list`, `tests/stailq`,
+  `tests/tailq`, `tests/circleq`, `tests/rbtree`, `tests/hashtbl`,
+  `tests/hashtbl_extra`, `tests/hashtbl32`, and `tests/hashtbl64`: passed
+- `make -C flowtable/test test CC=gcc`: stopped after `ft_test` produced no
+  output for more than 90 seconds
+
 ## [0.4.0] - 2026-04-28
 
 Minor release focused on integrating the slot-extra flow-table variant into
@@ -13,7 +58,7 @@ the normal flowtable build and extending it beyond IPv4.
 
 - `flow6_extra` and `flowu_extra` public APIs, entry/key layouts, dispatch
   wrappers, tests, and benchmark coverage.
-- `FT_TABLE_*` generic facade macros over classic `struct ft_table` and
+- `FT_TABLE_*` generic facade macros over pure `struct ft_table` and
   slot-extra `struct ft_table_extra` for shared operations, including
   maintenance facade helpers.
 - `bench-extra-full`, a full slot-extra benchmark sweep for
@@ -24,18 +69,18 @@ the normal flowtable build and extending it beyond IPv4.
 
 - The former `flowtable/extra/` subtree is merged into the normal
   `flowtable/include/` and `flowtable/src/` layout; `libftable.a` now carries
-  classic and slot-extra implementations together.
+  pure and slot-extra implementations together.
 - Extra arch builds are generated for `gen`, `sse`, `avx2`, and `avx512` in
-  the same cross-product style as classic `flow4/flow6/flowu`.
+  the same cross-product style as pure `flow4/flow6/flowu`.
 - `make bench` keeps the representative best-supported-arch run, while
-  `bench-full` runs classic and slot-extra full sweeps over CPU-supported
+  `bench-full` runs pure and slot-extra full sweeps over CPU-supported
   arch variants.
 
 ### Fixed
 
 - Slot-extra touch and maintenance helpers now resolve metadata offsets per
   variant instead of assuming the `flow4_extra` entry layout.
-- Documentation now describes the classic/extra API boundary, the generic
+- Documentation now describes the pure/extra API boundary, the generic
   facade exceptions, and the intended single-owner worker-local flow-cache
   model.
 

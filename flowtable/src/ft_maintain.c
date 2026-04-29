@@ -12,8 +12,8 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_defs_private.h>
 
-#include "flow_common.h"
-#include "flow_key.h"
+#include "flowtable/flow_common.h"
+#include "flowtable/flow_key.h"
 
 /*===========================================================================
  * Arch-suffix name mangling
@@ -384,3 +384,11 @@ _FTM_FN(ft_table_maintain_idx_bulk)(const struct ft_maint_ctx *ctx,
     ctx->stats->maint_evictions += count;
     return count;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

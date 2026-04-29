@@ -8,6 +8,7 @@
 #ifndef _FLOW_KEY_H_
 #define _FLOW_KEY_H_
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -19,6 +20,11 @@ struct flow_entry_meta {
     u16 reserved0;
     u32 timestamp;
 };
+
+_Static_assert(sizeof(struct flow_entry_meta) == 12u,
+               "flow_entry_meta must be 12 bytes");
+_Static_assert(_Alignof(struct flow_entry_meta) == _Alignof(u32),
+               "flow_entry_meta must keep u32 alignment");
 
 #ifndef FLOW_TIMESTAMP_DEFAULT_SHIFT
 #define FLOW_TIMESTAMP_DEFAULT_SHIFT 4u
@@ -138,11 +144,20 @@ struct flow4_key {
     u32 zero;
 };
 
+_Static_assert(sizeof(struct flow4_key) == 24u,
+               "flow4_key must be 24 bytes");
+
 struct flow4_entry {
     struct flow4_key key;
     struct flow_entry_meta meta;
 };
 
+_Static_assert(offsetof(struct flow4_entry, meta) == sizeof(struct flow4_key),
+               "flow4_entry.meta must follow key");
+_Static_assert(sizeof(struct flow4_entry) == 36u,
+               "flow4_entry must be 36 bytes");
+
+/* Packed intentionally: flow6 hash input is the exact 44-byte key image. */
 struct flow6_key {
     u8  family;
     u8  proto;
@@ -154,11 +169,20 @@ struct flow6_key {
     u8 dst_ip[16];
 } __attribute__((packed));
 
+_Static_assert(sizeof(struct flow6_key) == 44u,
+               "flow6_key must be 44 bytes");
+
 struct flow6_entry {
     struct flow6_key key;
     struct flow_entry_meta meta;
 };
 
+_Static_assert(offsetof(struct flow6_entry, meta) == sizeof(struct flow6_key),
+               "flow6_entry.meta must follow key");
+_Static_assert(sizeof(struct flow6_entry) == 56u,
+               "flow6_entry must be 56 bytes");
+
+/* Packed intentionally: flowu keeps IPv4/IPv6 keys in one 44-byte image. */
 struct flowu_key {
     u8  family;
     u8  proto;
@@ -179,10 +203,18 @@ struct flowu_key {
     } addr;
 } __attribute__((packed));
 
+_Static_assert(sizeof(struct flowu_key) == 44u,
+               "flowu_key must be 44 bytes");
+
 struct flowu_entry {
     struct flowu_key key;
     struct flow_entry_meta meta;
 };
+
+_Static_assert(offsetof(struct flowu_entry, meta) == sizeof(struct flowu_key),
+               "flowu_entry.meta must follow key");
+_Static_assert(sizeof(struct flowu_entry) == 56u,
+               "flowu_entry must be 56 bytes");
 
 #endif /* _FLOW_KEY_H_ */
 

@@ -15,3 +15,11 @@
 #include "flowu_extra_table.h"
 
 #endif /* _FLOW_EXTRA_TABLE_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

@@ -23,12 +23,17 @@
  */
 
 struct rix_ring {
-    u32 *data;
-    u32  capacity;
-    u32  head;
-    u32  tail;
-    u32  count;
+    u32 *data;      /* caller-owned u32 storage */
+    u32  capacity;  /* number of elements in data[] */
+    u32  head;      /* FIFO dequeue cursor */
+    u32  tail;      /* FIFO enqueue cursor */
+    u32  count;     /* live elements */
 };
+
+RIX_STATIC_ASSERT(sizeof(struct rix_ring) == sizeof(void *) + 16u,
+                  "rix_ring must contain one pointer and four u32 fields");
+RIX_STATIC_ASSERT(_Alignof(struct rix_ring) == _Alignof(void *),
+                  "rix_ring must keep pointer alignment");
 
 static RIX_UNUSED RIX_FORCE_INLINE void
 rix_ring_init(struct rix_ring *ring, u32 *storage, u32 capacity)
@@ -184,3 +189,12 @@ rix_ring_push_seq(struct rix_ring *ring, u32 first_idx, u32 count)
 }
 
 #endif /* _RIX_RING_H_ */
+
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

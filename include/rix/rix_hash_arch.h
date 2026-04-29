@@ -111,7 +111,7 @@
 #    define RIX_HASH_ARCH_AVX2   (1u << 0)
 #    define RIX_HASH_ARCH_AVX512 (1u << 1)
 #    define RIX_HASH_ARCH_SSE   (1u << 2)
-#    define RIX_HASH_ARCH_AUTO   \
+#    define RIX_HASH_ARCH_AUTO                                                \
     (RIX_HASH_ARCH_AVX2 | RIX_HASH_ARCH_AVX512 | RIX_HASH_ARCH_SSE)
 
 /*===========================================================================
@@ -121,6 +121,11 @@ union rix_hash_hash_u {
     u64 val64;
     u32 val32[2];
 };
+
+RIX_STATIC_ASSERT(sizeof(union rix_hash_hash_u) == 8u,
+                  "rix_hash_hash_u must be 8 bytes");
+RIX_STATIC_ASSERT(_Alignof(union rix_hash_hash_u) == _Alignof(u64),
+                  "rix_hash_hash_u must keep u64 alignment");
 
 /*===========================================================================
  * Arch handler - runtime dispatch
@@ -156,6 +161,17 @@ struct rix_hash_arch_s {
     /* hash u64 key */
     union rix_hash_hash_u (*hash_u64)(u64 key, u32 mask);
 };
+
+RIX_STATIC_ASSERT(sizeof(struct rix_hash_arch_s) ==
+                  sizeof(((struct rix_hash_arch_s *)0)->find_u32x16) +
+                  sizeof(((struct rix_hash_arch_s *)0)->find_u32x16_2) +
+                  sizeof(((struct rix_hash_arch_s *)0)->find_u64x16) +
+                  sizeof(((struct rix_hash_arch_s *)0)->hash_bytes) +
+                  sizeof(((struct rix_hash_arch_s *)0)->hash_u32) +
+                  sizeof(((struct rix_hash_arch_s *)0)->hash_u64),
+                  "rix_hash_arch_s must contain exactly six function pointers");
+RIX_STATIC_ASSERT(_Alignof(struct rix_hash_arch_s) == _Alignof(void *),
+                  "rix_hash_arch_s must keep pointer alignment");
 
 /* Per-TU dispatch handle.  Defaults to Generic until init enables SIMD. */
 static RIX_UNUSED const struct rix_hash_arch_s rix_hash_arch_GEN;
@@ -780,3 +796,12 @@ rix_hash_arch_init(u32 enable)
 #  endif /* _RIX_HASH_COMMON_ */
 
 #endif /* _RIX_HASH_ARCH_H_ */
+
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

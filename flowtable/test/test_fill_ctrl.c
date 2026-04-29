@@ -86,3 +86,11 @@ main(void)
     printf("fill_ctrl tests passed\n");
     return 0;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

@@ -313,3 +313,11 @@ ft_fill_ctrl_compute(struct ft_fill_ctrl *c,
 }
 
 #endif /* _FT_FILL_CTRL_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

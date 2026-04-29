@@ -54,45 +54,45 @@
 #endif
 
 #ifndef FT_PTR_IS_ALIGNED
-#define FT_PTR_IS_ALIGNED(ptr, align) \
+#define FT_PTR_IS_ALIGNED(ptr, align)                                         \
     ((FT_PTR_ADDR(ptr) & (uintptr_t)((align) - 1u)) == 0u)
 #endif
 
 #ifndef FT_BYTE_PTR_ADD
-#define FT_BYTE_PTR_ADD(base, bytes) \
+#define FT_BYTE_PTR_ADD(base, bytes)                                          \
     (FT_BYTE_PTR(base) + (size_t)(bytes))
 #endif
 
 #ifndef FT_BYTE_CPTR_ADD
-#define FT_BYTE_CPTR_ADD(base, bytes) \
+#define FT_BYTE_CPTR_ADD(base, bytes)                                         \
     (FT_BYTE_CPTR(base) + (size_t)(bytes))
 #endif
 
 #ifndef FT_RECORD_PTR
-#define FT_RECORD_PTR(base, stride, idx)                                       \
+#define FT_RECORD_PTR(base, stride, idx)                                      \
     ((idx) == RIX_NIL ? NULL : (void *)FT_BYTE_PTR_ADD(                       \
         (base), RIX_IDX_TO_OFF0(idx) * (stride)))
 #endif
 
 #ifndef FT_RECORD_CPTR
-#define FT_RECORD_CPTR(base, stride, idx)                                      \
+#define FT_RECORD_CPTR(base, stride, idx)                                     \
     ((idx) == RIX_NIL ? NULL : (const void *)FT_BYTE_CPTR_ADD(                \
         (base), RIX_IDX_TO_OFF0(idx) * (stride)))
 #endif
 
 #ifndef FT_RECORD_MEMBER_PTR
-#define FT_RECORD_MEMBER_PTR(base, stride, idx, member_offset, type)           \
-    ((type *)__builtin_assume_aligned(                                         \
+#define FT_RECORD_MEMBER_PTR(base, stride, idx, member_offset, type)          \
+    ((type *)__builtin_assume_aligned(                                        \
         FT_BYTE_PTR_ADD(FT_RECORD_PTR((base), (stride), (idx)),               \
-                        (member_offset)),                                      \
+                        (member_offset)),                                     \
         _Alignof(type)))
 #endif
 
 #ifndef FT_RECORD_MEMBER_CPTR
-#define FT_RECORD_MEMBER_CPTR(base, stride, idx, member_offset, type)          \
-    ((const type *)__builtin_assume_aligned(                                   \
+#define FT_RECORD_MEMBER_CPTR(base, stride, idx, member_offset, type)         \
+    ((const type *)__builtin_assume_aligned(                                  \
         FT_BYTE_CPTR_ADD(FT_RECORD_CPTR((base), (stride), (idx)),             \
-                         (member_offset)),                                     \
+                         (member_offset)),                                    \
         _Alignof(type)))
 #endif
 
@@ -285,10 +285,30 @@ struct ft_table {
     unsigned                  max_entries;
     u8                        variant;
     u8                        ts_shift;
+    u8                        reserved0[6];
     struct ft_table_stats     stats;
     struct flow_status        status;
 };
 
+/**
+ * @brief Initialize a pure table over caller-owned records and buckets.
+ *
+ * Use this directly when the variant is selected at runtime.  If the record
+ * type is known at compile time, prefer FT_TABLE_INIT_TYPED() or the
+ * FT_FLOW*_TABLE_INIT_TYPED() wrappers so stride and entry_offset are derived
+ * from the C type.
+ *
+ * @param ft           Table handle to initialize.
+ * @param variant      FT_TABLE_VARIANT_FLOW4, FLOW6, or FLOWU.
+ * @param array        Caller-owned record pool.
+ * @param max_entries  Number of records in @p array; indices are 1-origin.
+ * @param stride       Byte distance between adjacent records.
+ * @param entry_offset Offset of the flow entry member inside each record.
+ * @param buckets      Raw bucket memory. Alignment is not required.
+ * @param bucket_size  Size of @p buckets in bytes.
+ * @param cfg          Optional config; NULL selects defaults.
+ * @return 0 on success, -1 on invalid arguments or insufficient buckets.
+ */
 int ft_table_init(struct ft_table *ft,
                   enum ft_table_variant variant,
                   void *array,
@@ -298,19 +318,63 @@ int ft_table_init(struct ft_table *ft,
                   void *buckets,
                   size_t bucket_size,
                   const struct ft_table_config *cfg);
+/**
+ * @brief Reset a pure table handle; caller-owned memory is not freed.
+ */
 void ft_table_destroy(struct ft_table *ft);
+/**
+ * @brief Remove all registered entries while keeping allocated buckets.
+ */
 void ft_table_flush(struct ft_table *ft);
+/**
+ * @brief Return the current number of registered entries.
+ */
 unsigned ft_table_nb_entries(const struct ft_table *ft);
+/**
+ * @brief Return the number of active buckets in the hash table.
+ */
 unsigned ft_table_nb_bk(const struct ft_table *ft);
+/**
+ * @brief Copy cumulative table counters into @p out.
+ */
 void ft_table_stats(const struct ft_table *ft, struct ft_table_stats *out);
+/**
+ * @brief Copy current status counters into @p out.
+ */
 void ft_table_status(const struct ft_table *ft, struct flow_status *out);
+/**
+ * @brief Register an already-populated record by 1-origin index.
+ *
+ * The key is read from the record's embedded flow entry.  On duplicate, the
+ * existing index is returned according to the active add policy.
+ *
+ * @return Registered index on success or duplicate, RIX_NIL on failure.
+ */
 u32 ft_table_add_idx(struct ft_table *ft, u32 entry_idx, u64 now);
+/**
+ * @brief Bulk variant of ft_table_add_idx().
+ *
+ * Each @p entry_idxv[i] is read as the candidate index and overwritten with
+ * the registered index, or 0/RIX_NIL on failure depending on the handler.
+ * Indices that were not inserted are appended to @p unused_idxv.
+ *
+ * @return Number of indices written to @p unused_idxv.
+ */
 unsigned ft_table_add_idx_bulk(struct ft_table *ft,
                                u32 *entry_idxv,
                                unsigned nb_keys,
                                enum ft_add_policy policy,
                                u64 now,
                                u32 *unused_idxv);
+/**
+ * @brief Bulk add with inline maintenance on buckets touched by add results.
+ *
+ * @p unused_idxv stores both add-unused and maintenance-expired indices.
+ * @p max_unused must be >= @p nb_keys; the extra capacity
+ * (@p max_unused - @p nb_keys) is the maintenance expiration budget.
+ *
+ * @return Total number of indices written to @p unused_idxv.
+ */
 unsigned ft_table_add_idx_bulk_maint(struct ft_table *ft,
                                      u32 *entry_idxv,
                                      unsigned nb_keys,
@@ -320,14 +384,40 @@ unsigned ft_table_add_idx_bulk_maint(struct ft_table *ft,
                                      u32 *unused_idxv,
                                      unsigned max_unused,
                                      unsigned min_bk_used);
+/**
+ * @brief Remove the entry currently registered at @p entry_idx.
+ *
+ * @return The removed index, or RIX_NIL when it was not registered.
+ */
 u32 ft_table_del_idx(struct ft_table *ft, u32 entry_idx);
+/**
+ * @brief Bulk remove by 1-origin indices.
+ *
+ * Removed indices are appended to @p unused_idxv.
+ *
+ * @return Number of removed indices written to @p unused_idxv.
+ */
 unsigned ft_table_del_idx_bulk(struct ft_table *ft,
                                const u32 *entry_idxv,
                                unsigned nb_keys,
                                u32 *unused_idxv);
+/**
+ * @brief Iterate registered entries in bucket order.
+ *
+ * The callback receives a 1-origin entry index.  Returning non-zero stops the
+ * walk and that value is returned to the caller.
+ */
 int ft_table_walk(struct ft_table *ft,
                   int (*cb)(u32 entry_idx, void *arg),
                   void *arg);
+/**
+ * @brief Move all entries to a new caller-owned bucket array.
+ *
+ * The record pool does not move.  On success the table switches to
+ * @p new_buckets; on failure the old table remains active.
+ *
+ * @return 0 on success, -1 on invalid size or migration failure.
+ */
 int ft_table_migrate(struct ft_table *ft,
                      void *new_buckets,
                      size_t new_bucket_size);
@@ -349,7 +439,7 @@ struct ft_maint_ctx {
     size_t                    meta_off;
     unsigned                  max_entries;
     unsigned                  rhh_mask;
-    u8                   ts_shift;
+    u8                        ts_shift;
 };
 
 /**
@@ -428,3 +518,11 @@ unsigned ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
 void ft_arch_init(unsigned arch_enable);
 
 #endif /* _FLOW_COMMON_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

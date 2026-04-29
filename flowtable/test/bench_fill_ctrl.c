@@ -43,8 +43,8 @@
 #include <rix/rix_hash_arch.h>
 #include <rix/rix_hash_slot_extra.h>
 
-#include "flow4_extra_table.h"
-#include "flow_key.h"
+#include "flowtable/flow4_extra_table.h"
+#include "flowtable/flow_key.h"
 #include "ft_fill_ctrl.h"
 
 /* ------------------------------------------------------------------ */
@@ -446,3 +446,11 @@ main(int argc, char **argv)
     free(ring_mem); free(hit_ring);
     return 0;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

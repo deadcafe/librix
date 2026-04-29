@@ -10,7 +10,7 @@
 
 #include <string.h>
 
-#include "flow_key.h"
+#include "flowtable/flow_key.h"
 
 /*===========================================================================
  * flow4 key hash / cmp
@@ -96,3 +96,11 @@ flowu_key_cmp(const struct flowu_key *a, const struct flowu_key *b)
 }
 
 #endif /* _FLOW_HASH_EXTRA_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

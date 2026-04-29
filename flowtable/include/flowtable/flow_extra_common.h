@@ -54,6 +54,7 @@ struct ft_table_extra {
     unsigned                        max_entries;
     u8                              variant;
     u8                              ts_shift;
+    u8                              reserved0[6];
     struct ft_table_extra_stats     stats;
     struct flow_status              status;
 };
@@ -351,10 +352,18 @@ void ft_arch_extra_init(unsigned arch_enable);
  *        the entry struct type and member name, then calls
  *        ft_table_extra_init().
  */
-#define FT_TABLE_EXTRA_INIT_TYPED(ft, variant, array, max_entries, type,     \
-                                  member, buckets, bucket_size, cfg)         \
-    ft_table_extra_init((ft), (variant), (array), (max_entries),            \
-                        sizeof(type), offsetof(type, member),               \
+#define FT_TABLE_EXTRA_INIT_TYPED(ft, variant, array, max_entries, type,      \
+                                  member, buckets, bucket_size, cfg)          \
+    ft_table_extra_init((ft), (variant), (array), (max_entries),              \
+                        sizeof(type), offsetof(type, member),                 \
                         (buckets), (bucket_size), (cfg))
 
 #endif /* _FLOW_EXTRA_COMMON_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

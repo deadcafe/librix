@@ -147,7 +147,7 @@ mk_keyu(unsigned i)
 }
 
 static struct flow4_key
-mk_classic_key(unsigned i)
+mk_pure_key(unsigned i)
 {
     struct flow4_key k = { 0 };
 
@@ -200,7 +200,7 @@ test_any_macros_basic(void)
                                    struct test_any_flow4_extra_record, entry,
                                    bk_e, bk_e_sz, &cfg_e) == 0);
 
-    pool_c[0].entry.key = mk_classic_key(1u);
+    pool_c[0].entry.key = mk_pure_key(1u);
     pool_e[0].entry.key = mk_key(1u);
     assert(FT_TABLE_ADD_IDX(&ft_c, 1u, 1000u) == 1u);
     assert(FT_TABLE_ADD_IDX(&ft_e, 1u, 1000u) == 1u);
@@ -215,7 +215,7 @@ test_any_macros_basic(void)
     FT_TABLE_STATS(&ft_e, &stats_e);
 
     for (unsigned i = 1u; i < 3u; i++) {
-        pool_c[i].entry.key = mk_classic_key(i + 1u);
+        pool_c[i].entry.key = mk_pure_key(i + 1u);
         pool_e[i].entry.key = mk_key(i + 1u);
         idxv[i - 1u] = i + 1u;
     }
@@ -228,7 +228,7 @@ test_any_macros_basic(void)
     assert(FT_TABLE_NB_ENTRIES(&ft_c) == 3u);
     assert(FT_TABLE_NB_ENTRIES(&ft_e) == 3u);
 
-    pool_c[3].entry.key = mk_classic_key(4u);
+    pool_c[3].entry.key = mk_pure_key(4u);
     pool_e[3].entry.key = mk_key(4u);
     idxv[0] = 4u;
     n = FT_TABLE_ADD_IDX_BULK_MAINT(&ft_c, idxv, 1u, FT_ADD_IGNORE,
@@ -436,8 +436,7 @@ test_##prefix##_ts_in_bucket(void)                                            \
     unsigned bk_idx;                                                          \
     unsigned slot;                                                            \
     u32 idx;                                                                  \
-                                                                              \
-    printf("[T] " #prefix "_extra TS stored in bucket extra[]\n");           \
+    printf("[T] " #prefix "_extra TS stored in bucket extra[]\n");                                                                          \
     assert(prefix##_extra_table_init(&ft, pool, N_MAX, bk_raw,                \
                                      bk_sz, &cfg) == 0);                      \
     pool[0].key = make_key(0u);                                               \
@@ -451,7 +450,6 @@ test_##prefix##_ts_in_bucket(void)                                            \
     munmap(pool, N_MAX * sizeof(*pool));                                      \
     munmap(bk_raw, bk_sz);                                                    \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 test_##prefix##_maintain_expires(void)                                        \
 {                                                                             \
@@ -464,15 +462,14 @@ test_##prefix##_maintain_expires(void)                                        \
     u32 expired[64];                                                          \
     unsigned next = 0u;                                                       \
     unsigned n;                                                               \
-                                                                              \
-    printf("[T] " #prefix "_extra maintain expires stale entries\n");        \
+    printf("[T] " #prefix "_extra maintain expires stale entries\n");                                                                          \
     assert(prefix##_extra_table_init(&ft, pool, N_MAX, bk_raw,                \
                                      bk_sz, &cfg) == 0);                      \
     for (unsigned i = 0u; i < 50u; i++)                                       \
         pool[i].key = make_key(i);                                            \
     for (unsigned i = 0u; i < 50u; i++)                                       \
         assert(prefix##_extra_table_add(&ft, &pool[i], 1000u)                 \
-               != (u32)RIX_NIL);                                             \
+               != (u32)RIX_NIL);                                              \
     assert(ft_table_extra_maint_ctx_init(&ft, &ctx) == 0);                    \
     n = ft_table_extra_maintain(&ctx, 0u, 1000u + (1u << 20),                 \
                                 1u << 18, expired, 64u, 0u, &next);           \
@@ -482,7 +479,6 @@ test_##prefix##_maintain_expires(void)                                        \
     munmap(pool, N_MAX * sizeof(*pool));                                      \
     munmap(bk_raw, bk_sz);                                                    \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 test_##prefix##_find_touch_updates_bucket_extra(void)                         \
 {                                                                             \
@@ -495,8 +491,7 @@ test_##prefix##_find_touch_updates_bucket_extra(void)                         \
     unsigned bk_idx;                                                          \
     unsigned slot;                                                            \
     u32 idx;                                                                  \
-                                                                              \
-    printf("[T] " #prefix "_extra find_touch updates bucket extra[]\n");     \
+    printf("[T] " #prefix "_extra find_touch updates bucket extra[]\n");                                                                          \
     assert(prefix##_extra_table_init(&ft, pool, N_MAX, bk_raw,                \
                                      bk_sz, &cfg) == 0);                      \
     pool[0].key = make_key(0u);                                               \
@@ -512,7 +507,6 @@ test_##prefix##_find_touch_updates_bucket_extra(void)                         \
     munmap(pool, N_MAX * sizeof(*pool));                                      \
     munmap(bk_raw, bk_sz);                                                    \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 test_##prefix##_touch_updates_bucket_extra(void)                              \
 {                                                                             \
@@ -524,8 +518,7 @@ test_##prefix##_touch_updates_bucket_extra(void)                              \
     unsigned bk_idx;                                                          \
     unsigned slot;                                                            \
     u32 idx;                                                                  \
-                                                                              \
-    printf("[T] " #prefix "_extra touch updates bucket extra[]\n");          \
+    printf("[T] " #prefix "_extra touch updates bucket extra[]\n");                                                                          \
     assert(prefix##_extra_table_init(&ft, pool, N_MAX, bk_raw,                \
                                      bk_sz, &cfg) == 0);                      \
     pool[0].key = make_key(0u);                                               \
@@ -540,7 +533,6 @@ test_##prefix##_touch_updates_bucket_extra(void)                              \
     munmap(pool, N_MAX * sizeof(*pool));                                      \
     munmap(bk_raw, bk_sz);                                                    \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 test_##prefix##_touch_checked_rejects_deleted_idx(void)                       \
 {                                                                             \
@@ -550,8 +542,7 @@ test_##prefix##_touch_checked_rejects_deleted_idx(void)                       \
     struct ft_table_extra ft;                                                 \
     struct ft_table_extra_config cfg = { .ts_shift = 4u };                    \
     u32 idx;                                                                  \
-                                                                              \
-    printf("[T] " #prefix "_extra touch_checked rejects deleted idx\n");     \
+    printf("[T] " #prefix "_extra touch_checked rejects deleted idx\n");                                                                          \
     assert(prefix##_extra_table_init(&ft, pool, N_MAX, bk_raw,                \
                                      bk_sz, &cfg) == 0);                      \
     pool[0].key = make_key(0u);                                               \
@@ -563,7 +554,6 @@ test_##prefix##_touch_checked_rejects_deleted_idx(void)                       \
     munmap(pool, N_MAX * sizeof(*pool));                                      \
     munmap(bk_raw, bk_sz);                                                    \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 test_##prefix##_touch_after_migrate_uses_current_mask(void)                   \
 {                                                                             \
@@ -578,23 +568,21 @@ test_##prefix##_touch_after_migrate_uses_current_mask(void)                   \
     unsigned new_mask;                                                        \
     unsigned chosen = 0u;                                                     \
     int found = 0;                                                            \
-                                                                              \
-    printf("[T] " #prefix "_extra touch after migrate uses current mask\n"); \
+    printf("[T] " #prefix "_extra touch after migrate uses current mask\n");                                                                          \
     assert(prefix##_extra_table_init(&ft, pool, N_MAX, old_bk_raw,            \
                                      old_bk_sz, &cfg) == 0);                  \
     for (unsigned i = 0u; i < N_MAX; i++) {                                   \
         pool[i].key = make_key(i);                                            \
         assert(prefix##_extra_table_add(&ft, &pool[i], 1000u)                 \
-               != (u32)RIX_NIL);                                             \
+               != (u32)RIX_NIL);                                              \
     }                                                                         \
     old_mask = ft.ht_head.rhh_mask;                                           \
     assert(ft_table_extra_migrate(&ft, new_bk_raw, new_bk_sz) == 0);          \
     new_mask = ft.ht_head.rhh_mask;                                           \
     assert(new_mask > old_mask);                                              \
     for (unsigned i = 0u; i < N_MAX; i++) {                                   \
-        unsigned old_bk = pool[i].meta.cur_hash & old_mask;                  \
-        unsigned new_bk = pool[i].meta.cur_hash & new_mask;                  \
-                                                                              \
+        unsigned old_bk = pool[i].meta.cur_hash & old_mask;                   \
+        unsigned new_bk = pool[i].meta.cur_hash & new_mask;                   \
         if (old_bk != new_bk) {                                               \
             chosen = i;                                                       \
             found = 1;                                                        \
@@ -606,7 +594,6 @@ test_##prefix##_touch_after_migrate_uses_current_mask(void)                   \
     {                                                                         \
         unsigned bk_idx = pool[chosen].meta.cur_hash & new_mask;              \
         unsigned slot = (unsigned)pool[chosen].meta.slot;                     \
-                                                                              \
         assert(flow_extra_ts_get(&ft.buckets[bk_idx], slot) ==                \
                flow_extra_timestamp_encode(7000u, cfg.ts_shift));             \
     }                                                                         \
@@ -615,7 +602,6 @@ test_##prefix##_touch_after_migrate_uses_current_mask(void)                   \
     munmap(old_bk_raw, old_bk_sz);                                            \
     munmap(new_bk_raw, new_bk_sz);                                            \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 test_##prefix##_find_bulk_touches_bucket_extra(void)                          \
 {                                                                             \
@@ -628,22 +614,20 @@ test_##prefix##_find_bulk_touches_bucket_extra(void)                          \
     struct prefix##_extra_key keys[NB];                                       \
     u32 results[NB];                                                          \
     unsigned hit;                                                             \
-                                                                              \
-    printf("[T] " #prefix "_extra find_bulk path touches bucket extra[]\n"); \
+    printf("[T] " #prefix "_extra find_bulk path touches bucket extra[]\n");                                                                          \
     assert(prefix##_extra_table_init(&ft, pool, N_MAX, bk_raw,                \
                                      bk_sz, &cfg) == 0);                      \
     for (unsigned i = 0u; i < NB; i++) {                                      \
         pool[i].key = make_key(i);                                            \
         keys[i] = pool[i].key;                                                \
         assert(prefix##_extra_table_add(&ft, &pool[i], 1000u)                 \
-               != (u32)RIX_NIL);                                             \
+               != (u32)RIX_NIL);                                              \
     }                                                                         \
     hit = prefix##_extra_table_find_bulk(&ft, keys, NB, 9000u, results);      \
     assert(hit == NB);                                                        \
     for (unsigned i = 0u; i < NB; i++) {                                      \
         unsigned bk_idx = pool[i].meta.cur_hash & ft.ht_head.rhh_mask;        \
         unsigned slot = (unsigned)pool[i].meta.slot;                          \
-                                                                              \
         assert(results[i] == i + 1u);                                         \
         assert(flow_extra_ts_get(&ft.buckets[bk_idx], slot) ==                \
                flow_extra_timestamp_encode(9000u, cfg.ts_shift));             \
@@ -969,3 +953,11 @@ main(int argc, char **argv)
     printf("PASS\n");
     return 0;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

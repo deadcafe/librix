@@ -175,7 +175,6 @@ fill_##prefix(struct prefix##_extra_entry *pool,                              \
         miss_keys[i] = make_key(i + n + 17u, 17u);                            \
     }                                                                         \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 age_##prefix(struct ft_table_extra *ft,                                       \
              struct prefix##_extra_entry *pool, unsigned live,                \
@@ -184,38 +183,34 @@ age_##prefix(struct ft_table_extra *ft,                                       \
     u32 enc_old = flow_extra_timestamp_encode(old, TS_SHIFT);                 \
     u32 enc_now = flow_extra_timestamp_encode(now, TS_SHIFT);                 \
     unsigned mask = ft->ht_head.rhh_mask;                                     \
-                                                                              \
     for (unsigned i = 0u; i < live; i++) {                                    \
         unsigned bk_idx = pool[i].meta.cur_hash & mask;                       \
         unsigned slot = (unsigned)pool[i].meta.slot;                          \
-                                                                              \
         flow_extra_ts_set(&ft->buckets[bk_idx], slot,                         \
                           i < stale_n ? enc_old : enc_now);                   \
     }                                                                         \
 }                                                                             \
-                                                                              \
 static void                                                                   \
 bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
-               unsigned reps, int run_maint, int run_grow)                   \
+               unsigned reps, int run_maint, int run_grow)                    \
 {                                                                             \
     unsigned live = (unsigned)(((u64)entries * fill_pct) / 100u);             \
     size_t pool_sz = (size_t)entries * sizeof(struct prefix##_extra_entry);   \
     size_t bk_sz = prefix##_extra_table_bucket_size(entries);                 \
-    struct prefix##_extra_entry *pool = hugealloc(pool_sz);                  \
+    struct prefix##_extra_entry *pool = hugealloc(pool_sz);                   \
     struct prefix##_extra_key *hit_keys = hugealloc(                          \
         (size_t)entries * sizeof(*hit_keys));                                 \
     struct prefix##_extra_key *miss_keys = hugealloc(                         \
         (size_t)entries * sizeof(*miss_keys));                                \
-    struct ft_table_extra_config cfg = { .ts_shift = TS_SHIFT };             \
-    u32 *idxv = hugealloc((size_t)entries * sizeof(*idxv));                  \
-    u32 *unused = hugealloc((size_t)entries * sizeof(*unused));              \
-    u32 *expired = hugealloc((size_t)entries * sizeof(*expired));            \
-    u32 *results = hugealloc((size_t)query * sizeof(*results));              \
-    u64 add_cy = 0u, find_cy = 0u, miss_cy = 0u, del_cy = 0u;                \
-    u64 maint_cy = 0u, grow_alloc_cy = 0u, grow_mig_cy = 0u;                 \
+    struct ft_table_extra_config cfg = { .ts_shift = TS_SHIFT };              \
+    u32 *idxv = hugealloc((size_t)entries * sizeof(*idxv));                   \
+    u32 *unused = hugealloc((size_t)entries * sizeof(*unused));               \
+    u32 *expired = hugealloc((size_t)entries * sizeof(*expired));             \
+    u32 *results = hugealloc((size_t)query * sizeof(*results));               \
+    u64 add_cy = 0u, find_cy = 0u, miss_cy = 0u, del_cy = 0u;                 \
+    u64 maint_cy = 0u, grow_alloc_cy = 0u, grow_mig_cy = 0u;                  \
     unsigned maint_units = 0u;                                                \
     unsigned grow_units = 0u;                                                 \
-                                                                              \
     fill_##prefix(pool, hit_keys, miss_keys, entries);                        \
     for (unsigned r = 0u; r < reps; r++) {                                    \
         struct ft_table_extra ft;                                             \
@@ -223,7 +218,6 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
         void *bk = hugealloc(cur_bk_sz);                                      \
         int rc;                                                               \
         u64 t0, t1;                                                           \
-                                                                              \
         rc = prefix##_extra_table_init(&ft, pool, entries, bk,                \
                                        cur_bk_sz, &cfg);                      \
         if (rc != 0)                                                          \
@@ -237,11 +231,9 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
             (void)ft_table_extra_add_idx_bulk(&ft, &idxv[i], q,               \
                                               FT_ADD_IGNORE, 1000u, unused);  \
         }                                                                     \
-                                                                              \
         if (run_maint) {                                                      \
             struct ft_maint_extra_ctx ctx;                                    \
             unsigned next = 0u;                                               \
-                                                                              \
             rc = ft_table_extra_maint_ctx_init(&ft, &ctx);                    \
             if (rc != 0)                                                      \
                 abort();                                                      \
@@ -258,7 +250,6 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
             size_t new_sz = ft_table_extra_bucket_mem_size(                   \
                 ft_table_extra_nb_bk(&ft) * 2u);                              \
             void *new_bk;                                                     \
-                                                                              \
             t0 = tsc_start();                                                 \
             new_bk = hugealloc(new_sz);                                       \
             t1 = tsc_end();                                                   \
@@ -319,27 +310,27 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
         ft_table_extra_destroy(&ft);                                          \
         munmap(bk, cur_bk_sz);                                                \
     }                                                                         \
-    printf("\nextra full bench (%s_extra, entries=%u, fill=%u%%, q=%u, reps=%u)\n", \
+    printf("\nextra full bench (%s_extra, entries=%u, fill=%u%%, q=%u, reps=%u)\n",                                                                           \
            #prefix, entries, fill_pct, query, reps);                          \
     if (run_maint) {                                                          \
-        printf("  maintain_50pct %8.2f cy/bucket\n",                         \
+        printf("  maintain_50pct %8.2f cy/bucket\n",                                                                           \
                (double)maint_cy / (double)maint_units);                       \
     } else if (run_grow) {                                                    \
-        printf("  grow_alloc     %8.2f cy/live-entry\n",                     \
-               (double)grow_alloc_cy / (double)grow_units);                  \
-        printf("  grow_migrate   %8.2f cy/live-entry\n",                     \
-               (double)grow_mig_cy / (double)grow_units);                    \
-        printf("  grow_total     %8.2f cy/live-entry\n",                     \
-               (double)(grow_alloc_cy + grow_mig_cy) / (double)grow_units);  \
+        printf("  grow_alloc     %8.2f cy/live-entry\n",                                                                           \
+               (double)grow_alloc_cy / (double)grow_units);                   \
+        printf("  grow_migrate   %8.2f cy/live-entry\n",                                                                           \
+               (double)grow_mig_cy / (double)grow_units);                     \
+        printf("  grow_total     %8.2f cy/live-entry\n",                                                                           \
+               (double)(grow_alloc_cy + grow_mig_cy) / (double)grow_units);   \
     } else {                                                                  \
         double add_units = (double)(entries - live) * (double)reps;           \
         double live_units = (double)live * (double)reps;                      \
-        printf("  add_idx        %8.2f cy/key\n", (double)add_cy / add_units);\
-        printf("  find_hit_touch %8.2f cy/key\n",                            \
-               (double)find_cy / live_units);                                \
-        printf("  find_miss      %8.2f cy/key\n",                            \
-               (double)miss_cy / live_units);                                \
-        printf("  del_key        %8.2f cy/key\n", (double)del_cy / live_units);\
+        printf("  add_idx        %8.2f cy/key\n", (double)add_cy / add_units);                                              \
+        printf("  find_hit_touch %8.2f cy/key\n",                                                                           \
+               (double)find_cy / live_units);                                 \
+        printf("  find_miss      %8.2f cy/key\n",                                                                           \
+               (double)miss_cy / live_units);                                 \
+        printf("  del_key        %8.2f cy/key\n", (double)del_cy / live_units);                                             \
     }                                                                         \
     munmap(pool, pool_sz);                                                    \
     munmap(hit_keys, (size_t)entries * sizeof(*hit_keys));                    \
@@ -430,3 +421,11 @@ main(int argc, char **argv)
     }
     return 0;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

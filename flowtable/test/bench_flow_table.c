@@ -376,7 +376,7 @@ ftb_cycles_sample_value(const struct bench_scope_sample *sample)
     struct bench_scope_sample _ftb_perf_sample;                               \
     if (ftb_use_perf_cycles) {                                                \
         if (ftb_cycles_group_open(&_ftb_perf_group) != 0) {                   \
-            fprintf(stderr, "perf open failed for datapath cycle metrics\n"); \
+            fprintf(stderr, "perf open failed for datapath cycle metrics\n");                                                                          \
             exit(1);                                                          \
         }                                                                     \
         _ftb_use_perf_cycles = 1;                                             \
@@ -392,12 +392,12 @@ ftb_cycles_sample_value(const struct bench_scope_sample *sample)
     do {                                                                      \
         if (_ftb_use_perf_cycles) {                                           \
             if (bench_scope_begin(&_ftb_perf_group) != 0) {                   \
-                fprintf(stderr, "perf begin failed for datapath cycle metrics\n"); \
+                fprintf(stderr, "perf begin failed for datapath cycle metrics\n");                                                                          \
                 exit(1);                                                      \
             }                                                                 \
             do { body } while (0);                                            \
             if (bench_scope_end(&_ftb_perf_group, &_ftb_perf_sample) != 0) {  \
-                fprintf(stderr, "perf end failed for datapath cycle metrics\n"); \
+                fprintf(stderr, "perf end failed for datapath cycle metrics\n");                                                                          \
                 exit(1);                                                      \
             }                                                                 \
             (cycles_out) = ftb_cycles_sample_value(&_ftb_perf_sample);        \
@@ -761,178 +761,178 @@ ftb_keyu(unsigned i)
     return k;
 }
 
-#define FTB_VARIANT_WRAPPERS(tag,                                       \
-                             prefix,                                    \
-                             variant_id,                                \
-                             key_t,                                     \
-                             entry_member,                              \
-                             init_fn,                                   \
-                             destroy_fn,                                \
-                             flush_fn,                                  \
-                             nb_bk_fn,                                  \
-                             entry_ptr_fn,                              \
-                             add_idx_fn,                                \
-                             find_bulk_fn,                              \
-                             add_idx_bulk_fn,                           \
-                             del_idx_bulk_fn,                           \
-                             del_key_bulk_fn,                           \
-                             migrate_fn,                                \
-                             maintain_fn,                               \
-                             maintain_idx_bulk_fn,                      \
-                             make_key_fn)                               \
-static int                                                              \
-ftb_init_##tag(struct ft_table *ft,                                     \
-               struct ftb_user_record *records,                         \
-               unsigned max_entries,                                    \
-               const struct ft_table_config *cfg)                       \
-{                                                                       \
-    size_t bsz = ft_table_bucket_size(max_entries);                     \
-    void *bk = ftb_alloc_buckets(bsz);                                  \
-    if (bk == NULL)                                                     \
-        return -1;                                                      \
-    return init_fn((struct ft_table *)ft, (variant_id),                 \
-                   records,                                             \
-                   max_entries,                                         \
-                   sizeof(struct ftb_user_record),                      \
-                   offsetof(struct ftb_user_record, entry_member),      \
-                   bk,                                                  \
-                   bsz,                                                 \
-                   cfg);                                                \
-}                                                                       \
-static void                                                             \
-ftb_destroy_##tag(struct ft_table *ft)                                  \
-{                                                                       \
-    void *bk = ft->buckets;                                             \
-    size_t bsz = (size_t)ft->nb_bk * FT_TABLE_BUCKET_SIZE;              \
-    destroy_fn(ft);                                                     \
-    ftb_free_buckets(bk, bsz);                                          \
-}                                                                       \
-static void                                                             \
-ftb_flush_##tag(struct ft_table *ft)                                    \
-{                                                                       \
-    flush_fn(ft);                                                       \
-}                                                                       \
-static unsigned                                                         \
-ftb_nb_bk_##tag(const struct ft_table *ft)                              \
-{                                                                       \
-    return nb_bk_fn(ft);                                                \
-}                                                                       \
-static void *                                                           \
-ftb_entry_ptr_##tag(struct ft_table *ft,                                \
-                    u32 entry_idx)                                      \
-{                                                                       \
-    return entry_ptr_fn(ft, entry_idx);                                 \
-}                                                                       \
-static struct flow_entry_meta *                                         \
-ftb_entry_meta_##tag(void *entry)                                       \
-{                                                                       \
-    return &((struct prefix##_entry *)entry)->meta;                     \
-}                                                                       \
-static u32                                                              \
-ftb_add_idx_##tag(struct ft_table *ft,                                  \
-                  u32 entry_idx,                                        \
-                  u64 now)                                              \
-{                                                                       \
-    return add_idx_fn(ft, entry_idx, now);                              \
-}                                                                       \
-static void                                                             \
-ftb_find_bulk_##tag(struct ft_table *ft,                                \
-                    const void *keys,                                   \
-                    unsigned nb_keys,                                   \
-                    u64 now,                                            \
-                    struct ft_table_result *results)                    \
-{                                                                       \
-    find_bulk_fn(ft, (const key_t *)keys, nb_keys, now, results);       \
-}                                                                       \
-static unsigned                                                         \
-ftb_add_idx_bulk_##tag(struct ft_table *ft,                             \
-                       u32 *entry_idxv,                                 \
-                       unsigned nb_keys,                                \
-                       enum ft_add_policy policy,                       \
-                       u64 now,                                         \
-                       u32 *unused_idxv)                                \
-{                                                                       \
-    return add_idx_bulk_fn(ft, entry_idxv, nb_keys, policy, now,        \
-                           unused_idxv);                                \
-}                                                                       \
-static unsigned                                                         \
-ftb_del_idx_bulk_##tag(struct ft_table *ft,                             \
-                       const u32 *entry_idxv,                           \
-                       unsigned nb_keys,                                \
-                       u32 *unused_idxv)                                \
-{                                                                       \
-    return del_idx_bulk_fn(ft, entry_idxv, nb_keys, unused_idxv);       \
-}                                                                       \
-static unsigned                                                         \
-ftb_del_key_bulk_##tag(struct ft_table *ft,                             \
-                       const void *keys,                                 \
-                       unsigned nb_keys,                                 \
-                       u32 *unused_idxv)                                \
-{                                                                       \
-    return del_key_bulk_fn(ft, (const key_t *)keys, nb_keys,            \
-                           unused_idxv);                                \
-}                                                                       \
-static int                                                              \
-ftb_migrate_##tag(struct ft_table *ft,                                  \
-                  void *new_buckets,                                    \
-                  size_t new_bucket_size)                               \
-{                                                                       \
-    return migrate_fn(ft, new_buckets, new_bucket_size);                \
-}                                                                       \
-static unsigned                                                         \
-ftb_maintain_##tag(struct ft_table *ft,                                 \
-                   unsigned start_bk,                                   \
-                   u64 now,                                             \
-                   u64 expire_tsc,                                      \
-                   u32 *expired_idxv,                                   \
-                   unsigned max_expired,                                \
-                   unsigned min_bk_entries,                             \
-                   unsigned *next_bk)                                   \
-{                                                                       \
-    return maintain_fn(ft, start_bk, now, expire_tsc,                   \
-                       expired_idxv, max_expired,                       \
-                       min_bk_entries, next_bk);                        \
-}                                                                       \
-static unsigned                                                         \
-ftb_maintain_idx_bulk_##tag(struct ft_table *ft,                        \
-                            const u32 *entry_idxv,                      \
-                            unsigned nb_idx,                            \
-                            u64 now,                                    \
-                            u64 expire_tsc,                             \
-                            u32 *expired_idxv,                          \
-                            unsigned max_expired,                       \
-                            unsigned min_bk_entries,                    \
-                            int enable_filter)                          \
-{                                                                       \
-    return maintain_idx_bulk_fn(ft, entry_idxv, nb_idx, now,           \
-                                expire_tsc,                             \
-                                expired_idxv, max_expired,              \
-                                min_bk_entries, enable_filter);         \
-}                                                                       \
-static void                                                             \
-ftb_make_key_##tag(void *out,                                           \
-                   unsigned i)                                          \
-{                                                                       \
-    *(key_t *)out = make_key_fn(i);                                     \
-}                                                                       \
-static const struct ftb_variant_ops ftb_ops_##tag = {                   \
-    .name              = #prefix,                                       \
-    .key_size          = sizeof(key_t),                                 \
-    .init              = ftb_init_##tag,                                \
-    .destroy           = ftb_destroy_##tag,                             \
-    .flush             = ftb_flush_##tag,                               \
-    .nb_bk             = ftb_nb_bk_##tag,                               \
-    .entry_ptr         = ftb_entry_ptr_##tag,                           \
-    .add_idx           = ftb_add_idx_##tag,                             \
-    .find_bulk         = ftb_find_bulk_##tag,                           \
-    .add_idx_bulk      = ftb_add_idx_bulk_##tag,                        \
-    .del_idx_bulk      = ftb_del_idx_bulk_##tag,                        \
-    .del_key_bulk      = ftb_del_key_bulk_##tag,                        \
-    .migrate           = ftb_migrate_##tag,                             \
-    .maintain          = ftb_maintain_##tag,                            \
-    .maintain_idx_bulk = ftb_maintain_idx_bulk_##tag,                   \
-    .entry_meta        = ftb_entry_meta_##tag,                          \
-    .make_key          = ftb_make_key_##tag                             \
+#define FTB_VARIANT_WRAPPERS(tag,                                             \
+                             prefix,                                          \
+                             variant_id,                                      \
+                             key_t,                                           \
+                             entry_member,                                    \
+                             init_fn,                                         \
+                             destroy_fn,                                      \
+                             flush_fn,                                        \
+                             nb_bk_fn,                                        \
+                             entry_ptr_fn,                                    \
+                             add_idx_fn,                                      \
+                             find_bulk_fn,                                    \
+                             add_idx_bulk_fn,                                 \
+                             del_idx_bulk_fn,                                 \
+                             del_key_bulk_fn,                                 \
+                             migrate_fn,                                      \
+                             maintain_fn,                                     \
+                             maintain_idx_bulk_fn,                            \
+                             make_key_fn)                                     \
+static int                                                                    \
+ftb_init_##tag(struct ft_table *ft,                                           \
+               struct ftb_user_record *records,                               \
+               unsigned max_entries,                                          \
+               const struct ft_table_config *cfg)                             \
+{                                                                             \
+    size_t bsz = ft_table_bucket_size(max_entries);                           \
+    void *bk = ftb_alloc_buckets(bsz);                                        \
+    if (bk == NULL)                                                           \
+        return -1;                                                            \
+    return init_fn((struct ft_table *)ft, (variant_id),                       \
+                   records,                                                   \
+                   max_entries,                                               \
+                   sizeof(struct ftb_user_record),                            \
+                   offsetof(struct ftb_user_record, entry_member),            \
+                   bk,                                                        \
+                   bsz,                                                       \
+                   cfg);                                                      \
+}                                                                             \
+static void                                                                   \
+ftb_destroy_##tag(struct ft_table *ft)                                        \
+{                                                                             \
+    void *bk = ft->buckets;                                                   \
+    size_t bsz = (size_t)ft->nb_bk * FT_TABLE_BUCKET_SIZE;                    \
+    destroy_fn(ft);                                                           \
+    ftb_free_buckets(bk, bsz);                                                \
+}                                                                             \
+static void                                                                   \
+ftb_flush_##tag(struct ft_table *ft)                                          \
+{                                                                             \
+    flush_fn(ft);                                                             \
+}                                                                             \
+static unsigned                                                               \
+ftb_nb_bk_##tag(const struct ft_table *ft)                                    \
+{                                                                             \
+    return nb_bk_fn(ft);                                                      \
+}                                                                             \
+static void *                                                                 \
+ftb_entry_ptr_##tag(struct ft_table *ft,                                      \
+                    u32 entry_idx)                                            \
+{                                                                             \
+    return entry_ptr_fn(ft, entry_idx);                                       \
+}                                                                             \
+static struct flow_entry_meta *                                               \
+ftb_entry_meta_##tag(void *entry)                                             \
+{                                                                             \
+    return &((struct prefix##_entry *)entry)->meta;                           \
+}                                                                             \
+static u32                                                                    \
+ftb_add_idx_##tag(struct ft_table *ft,                                        \
+                  u32 entry_idx,                                              \
+                  u64 now)                                                    \
+{                                                                             \
+    return add_idx_fn(ft, entry_idx, now);                                    \
+}                                                                             \
+static void                                                                   \
+ftb_find_bulk_##tag(struct ft_table *ft,                                      \
+                    const void *keys,                                         \
+                    unsigned nb_keys,                                         \
+                    u64 now,                                                  \
+                    struct ft_table_result *results)                          \
+{                                                                             \
+    find_bulk_fn(ft, (const key_t *)keys, nb_keys, now, results);             \
+}                                                                             \
+static unsigned                                                               \
+ftb_add_idx_bulk_##tag(struct ft_table *ft,                                   \
+                       u32 *entry_idxv,                                       \
+                       unsigned nb_keys,                                      \
+                       enum ft_add_policy policy,                             \
+                       u64 now,                                               \
+                       u32 *unused_idxv)                                      \
+{                                                                             \
+    return add_idx_bulk_fn(ft, entry_idxv, nb_keys, policy, now,              \
+                           unused_idxv);                                      \
+}                                                                             \
+static unsigned                                                               \
+ftb_del_idx_bulk_##tag(struct ft_table *ft,                                   \
+                       const u32 *entry_idxv,                                 \
+                       unsigned nb_keys,                                      \
+                       u32 *unused_idxv)                                      \
+{                                                                             \
+    return del_idx_bulk_fn(ft, entry_idxv, nb_keys, unused_idxv);             \
+}                                                                             \
+static unsigned                                                               \
+ftb_del_key_bulk_##tag(struct ft_table *ft,                                   \
+                       const void *keys,                                      \
+                       unsigned nb_keys,                                      \
+                       u32 *unused_idxv)                                      \
+{                                                                             \
+    return del_key_bulk_fn(ft, (const key_t *)keys, nb_keys,                  \
+                           unused_idxv);                                      \
+}                                                                             \
+static int                                                                    \
+ftb_migrate_##tag(struct ft_table *ft,                                        \
+                  void *new_buckets,                                          \
+                  size_t new_bucket_size)                                     \
+{                                                                             \
+    return migrate_fn(ft, new_buckets, new_bucket_size);                      \
+}                                                                             \
+static unsigned                                                               \
+ftb_maintain_##tag(struct ft_table *ft,                                       \
+                   unsigned start_bk,                                         \
+                   u64 now,                                                   \
+                   u64 expire_tsc,                                            \
+                   u32 *expired_idxv,                                         \
+                   unsigned max_expired,                                      \
+                   unsigned min_bk_entries,                                   \
+                   unsigned *next_bk)                                         \
+{                                                                             \
+    return maintain_fn(ft, start_bk, now, expire_tsc,                         \
+                       expired_idxv, max_expired,                             \
+                       min_bk_entries, next_bk);                              \
+}                                                                             \
+static unsigned                                                               \
+ftb_maintain_idx_bulk_##tag(struct ft_table *ft,                              \
+                            const u32 *entry_idxv,                            \
+                            unsigned nb_idx,                                  \
+                            u64 now,                                          \
+                            u64 expire_tsc,                                   \
+                            u32 *expired_idxv,                                \
+                            unsigned max_expired,                             \
+                            unsigned min_bk_entries,                          \
+                            int enable_filter)                                \
+{                                                                             \
+    return maintain_idx_bulk_fn(ft, entry_idxv, nb_idx, now,                  \
+                                expire_tsc,                                   \
+                                expired_idxv, max_expired,                    \
+                                min_bk_entries, enable_filter);               \
+}                                                                             \
+static void                                                                   \
+ftb_make_key_##tag(void *out,                                                 \
+                   unsigned i)                                                \
+{                                                                             \
+    *(key_t *)out = make_key_fn(i);                                           \
+}                                                                             \
+static const struct ftb_variant_ops ftb_ops_##tag = {                         \
+    .name              = #prefix,                                             \
+    .key_size          = sizeof(key_t),                                       \
+    .init              = ftb_init_##tag,                                      \
+    .destroy           = ftb_destroy_##tag,                                   \
+    .flush             = ftb_flush_##tag,                                     \
+    .nb_bk             = ftb_nb_bk_##tag,                                     \
+    .entry_ptr         = ftb_entry_ptr_##tag,                                 \
+    .add_idx           = ftb_add_idx_##tag,                                   \
+    .find_bulk         = ftb_find_bulk_##tag,                                 \
+    .add_idx_bulk      = ftb_add_idx_bulk_##tag,                              \
+    .del_idx_bulk      = ftb_del_idx_bulk_##tag,                              \
+    .del_key_bulk      = ftb_del_key_bulk_##tag,                              \
+    .migrate           = ftb_migrate_##tag,                                   \
+    .maintain          = ftb_maintain_##tag,                                  \
+    .maintain_idx_bulk = ftb_maintain_idx_bulk_##tag,                         \
+    .entry_meta        = ftb_entry_meta_##tag,                                \
+    .make_key          = ftb_make_key_##tag                                   \
 }
 
 FTB_VARIANT_WRAPPERS(flow4,
@@ -995,11 +995,11 @@ FTB_VARIANT_WRAPPERS(flowu,
                      ft_flowu_table_maintain_idx_bulk,
                      ftb_keyu);
 
-#define FTB_KEY_AT(base, ops, i)                                        \
+#define FTB_KEY_AT(base, ops, i)                                              \
     ((void *)((unsigned char *)(base) + (size_t)(i) * (ops)->key_size))
 
-#define FTB_KEY_AT_CONST(base, ops, i)                                  \
-    ((const void *)((const unsigned char *)(base) +                     \
+#define FTB_KEY_AT_CONST(base, ops, i)                                        \
+    ((const void *)((const unsigned char *)(base) +                           \
                     (size_t)(i) * (ops)->key_size))
 
 static unsigned
@@ -1121,8 +1121,8 @@ ftb_warm_query_entries(const struct ftb_variant_ops *ops,
 /*
  * Warm icache + ft metadata after cold_touch.
  *
- * 1) find_bulk(ft, NULL, 0) — executes the handler prologue, touching
- *    ft struct metadata (buckets ptr, mask, pool_base, …) and pulling
+ * 1) find_bulk(ft, NULL, 0) - executes the handler prologue, touching
+ *    ft struct metadata (buckets ptr, mask, pool_base, ...) and pulling
  *    handler code into L1i.  nb_keys=0 returns immediately after the
  *    prologue so no bucket/entry DRAM traffic, no table-state change.
  * 2) Code prefetch via prefetcht0 for remaining handlers (add/del_idx/
@@ -1211,7 +1211,7 @@ ftb_setup_hot_round(const struct ftb_variant_ops *ops,
 /*
  * Common cold-state setup for all datapath benchmarks.
  *
- * flush → prefill(live) → make_key/bind_key(query) → add_idx_bulk → cold_touch
+ * flush -> prefill(live) -> make_key/bind_key(query) -> add_idx_bulk -> cold_touch
  *
  * After this call the table has live+query entries inserted,
  * keys[] holds the query keys, idxv[] holds the query entry indices,
@@ -2171,18 +2171,18 @@ ftb_run_datapath(const struct ftb_variant_ops *ops,
     printf("[desired=%u entries=%u nb_bk=%u live=%u fill=%u%%]\n",
            desired, max_entries, ops->nb_bk(&ft), live, fill_pct);
 
-#define FTB_RUN_OP(tag, expr) do {                              \
-    if (!ftb_op_filter || strcmp(ftb_op_filter, tag) == 0) {    \
-        double _v = (expr);                                     \
-        printf("  %-12s %8.2f cy/key\n", tag, _v);             \
-        if (ftb_show_samples) {                                 \
-            printf("               total median=%8.2f cycles"   \
-                   "  kept=[%8.2f, %8.2f] cy/key\n",            \
-                   _v * (double)ftb_query_n,                    \
-                   ftb_last_agg.keep_lo,                        \
-                   ftb_last_agg.keep_hi);                       \
-        }                                                       \
-    }                                                           \
+#define FTB_RUN_OP(tag, expr) do {                                            \
+    if (!ftb_op_filter || strcmp(ftb_op_filter, tag) == 0) {                  \
+        double _v = (expr);                                                   \
+        printf("  %-12s %8.2f cy/key\n", tag, _v);                                                                 \
+        if (ftb_show_samples) {                                               \
+            printf("               total median=%8.2f cycles"                 \
+                   "  kept=[%8.2f, %8.2f] cy/key\n",                                                                           \
+                   _v * (double)ftb_query_n,                                  \
+                   ftb_last_agg.keep_lo,                                      \
+                   ftb_last_agg.keep_hi);                                     \
+        }                                                                     \
+    }                                                                         \
 } while (0)
 
     FTB_RUN_OP("find_hit",    ftb_sample_find_hit(ops, &ft, &alloc, live,
@@ -2323,3 +2323,11 @@ main(int argc,
     ftb_run_datapath(ops, pos_argc, pos_argv, 0u);
     return 0;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

@@ -13,8 +13,8 @@
 
 #include <rix/rix_hash_arch.h>
 
-#include "flow_extra_common.h"
-#include "flow_extra_key.h"
+#include "flowtable/flow_extra_common.h"
+#include "flowtable/flow_extra_key.h"
 #include "flow_dispatch_extra.h"
 
 /*===========================================================================

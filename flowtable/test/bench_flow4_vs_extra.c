@@ -4,7 +4,7 @@
  * Copyright (c) 2026 deadcafe.beef@gmail.com
  * All rights reserved.
  *
- * bench_flow4_vs_extra.c - matched classic-vs-extra microbench.
+ * bench_flow4_vs_extra.c - matched pure-vs-extra microbench.
  *
  * Same N, same bucket count, same keys, same rep count for both
  * variants.  Runs insert / find_hit / find_miss / touch / remove /
@@ -22,9 +22,9 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_hash_slot_extra.h>
 
-#include "flow4_table.h"
-#include "flow4_extra_table.h"
-#include "flow_key.h"
+#include "flowtable/flow4_table.h"
+#include "flowtable/flow4_extra_table.h"
+#include "flowtable/flow_key.h"
 
 #define N_ENTRIES (1u << 16)
 #define REPS      8u
@@ -62,7 +62,7 @@ hugealloc(size_t bytes)
 }
 
 static void
-fill_classic_keys(struct flow4_entry *pool, unsigned n)
+fill_pure_keys(struct flow4_entry *pool, unsigned n)
 {
     unsigned i;
 
@@ -94,11 +94,11 @@ fill_extra_keys(struct flow4_extra_entry *pool, unsigned n)
 }
 
 static void
-make_miss_classic(struct flow4_key *k, unsigned i)
+make_miss_pure(struct flow4_key *k, unsigned i)
 {
     memset(k, 0, sizeof(*k));
     k->family   = 4u;
-    k->proto    = 17u;        /* UDP — never collides with TCP fill */
+    k->proto    = 17u;        /* UDP - never collides with TCP fill */
     k->src_ip   = 0xDEAD0000u | i;
     k->dst_ip   = 0xBEEF0000u | i;
     k->src_port = (u16)(i & 0xFFFFu);
@@ -119,7 +119,7 @@ make_miss_extra(struct flow4_extra_key *k, unsigned i)
 
 /* Mark first `stale_n` entries as stale (direct TS write). */
 static void
-age_classic(struct flow4_entry *pool, unsigned stale_n,
+age_pure(struct flow4_entry *pool, unsigned stale_n,
             u64 now, u64 old)
 {
     unsigned i;
@@ -196,7 +196,7 @@ main(void)
     unused_idxv = calloc(N_ENTRIES, sizeof(*unused_idxv));
     assert(pool_c && pool_e && bk_c && bk_e && expired && idxv && unused_idxv);
 
-    fill_classic_keys(pool_c, N_ENTRIES);
+    fill_pure_keys(pool_c, N_ENTRIES);
     fill_extra_keys(pool_e, N_ENTRIES);
 
     for (r = 0u; r < REPS; r++) {
@@ -273,7 +273,7 @@ main(void)
         for (i = 0u; i < N_ENTRIES; i++) {
             struct flow4_key k;
 
-            make_miss_classic(&k, i);
+            make_miss_pure(&k, i);
             (void)ft_flow4_table_find(&ft_c, &k, 0u);
         }
         t1 = tsc_end();
@@ -328,7 +328,7 @@ main(void)
             };
             unsigned next = 0u;
 
-            age_classic(pool_c, 0u, now, old);
+            age_pure(pool_c, 0u, now, old);
             age_extra(&ft_e, pool_e, 0u, now, old);
 
             t0 = tsc_start();
@@ -343,10 +343,10 @@ main(void)
             t1 = tsc_end();
             e_m0 += (t1 - t0);
 
-            /* 50% stale — re-fill both tables first because the 0%
+            /* 50% stale - re-fill both tables first because the 0%
              * pass did not remove anything, but the extra-side path
              * must refresh slot extra[] after age_extra. */
-            age_classic(pool_c, N_ENTRIES / 2u, now, old);
+            age_pure(pool_c, N_ENTRIES / 2u, now, old);
             age_extra(&ft_e, pool_e, N_ENTRIES / 2u, now, old);
             t0 = tsc_start();
             (void)ft_table_maintain(&mc, 0u, now, tmo,
@@ -381,7 +381,7 @@ main(void)
                 (void)flow4_extra_table_add(&ft_e, &pool_e[i], now);
             }
 
-            age_classic(pool_c, N_ENTRIES, now, old);
+            age_pure(pool_c, N_ENTRIES, now, old);
             age_extra(&ft_e, pool_e, N_ENTRIES, now, old);
             t0 = tsc_start();
             (void)ft_table_maintain(&mc, 0u, now, tmo,
@@ -414,7 +414,7 @@ main(void)
                 (void)ft_flow4_table_add_idx(&ft_c, i + 1u, now);
                 (void)flow4_extra_table_add(&ft_e, &pool_e[i], now);
             }
-            age_classic(pool_c, N_ENTRIES / 2u, now, old);
+            age_pure(pool_c, N_ENTRIES / 2u, now, old);
             age_extra(&ft_e, pool_e, N_ENTRIES / 2u, now, old);
 
             for (i = 0u; i < N_ENTRIES; i++)
@@ -483,14 +483,14 @@ main(void)
 
         printf("matched flow4 bench (N=%u, reps=%u, ts_shift=%u)\n",
                N_ENTRIES, REPS, TS_SHIFT);
-        printf("  classic entry : %zu B    extra entry  : %zu B\n",
+        printf("  pure entry : %zu B    extra entry  : %zu B\n",
                sizeof(struct flow4_entry),
                sizeof(struct flow4_extra_entry));
-        printf("  classic bucket: %zu B    extra bucket : %zu B\n",
+        printf("  pure bucket: %zu B    extra bucket : %zu B\n",
                sizeof(struct rix_hash_bucket_s),
                sizeof(struct rix_hash_bucket_extra_s));
         printf("  %-18s %10s %10s %10s\n",
-               "op", "classic", "extra", "delta");
+               "op", "pure", "extra", "delta");
         printf("  %-18s %10.2f %10.2f %+10.2f\n", "insert",
                (double)c_ins / per_op, (double)e_ins / per_op,
                ((double)e_ins - (double)c_ins) / per_op);
@@ -530,7 +530,7 @@ main(void)
         unsigned qi;
 
         printf("\n  bulk insert (cy/entry):\n");
-        printf("  %-18s %10s %10s %10s\n", "op", "classic", "extra", "delta");
+        printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
 
         for (qi = 0u; qi < sizeof(qs) / sizeof(qs[0]); qi++) {
             unsigned Q = qs[qi];
@@ -547,7 +547,7 @@ main(void)
                 for (i = 0u; i < N_ENTRIES; i++)
                     idxv[i] = i + 1u;
 
-                /* classic bulk insert */
+                /* pure bulk insert */
                 memset(bk_c, 0, bk_c_mem);
                 for (i = 0u; i < N_ENTRIES; i++)
                     memset(&pool_c[i].meta, 0, sizeof(pool_c[i].meta));
@@ -601,7 +601,7 @@ main(void)
         unsigned qi;
 
         printf("\n  insert @ 75%% fill (N_fill=%u, cy/entry):\n", N_FILL);
-        printf("  %-18s %10s %10s %10s\n", "op", "classic", "extra", "delta");
+        printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
 
         for (qi = 0u; qi < sizeof(qs) / sizeof(qs[0]); qi++) {
             unsigned Q = qs[qi];
@@ -614,7 +614,7 @@ main(void)
                 int rc;
                 u64 t0, t1;
 
-                /* --- classic --- */
+                /* --- pure --- */
                 for (i = 0u; i < N_FILL; i++)
                     idxv[i] = i + 1u;
 
@@ -683,7 +683,7 @@ main(void)
      *   1. (untimed) reset, fill N_FILL=49152 entries (75%), age N_STALE=24576
      *      stale (50% of filled).  Pre-flip a key bit on stale entries so
      *      re-insertion after maint produces genuinely new hash positions.
-     *   2. (TIMED)   full maint sweep → frees ~N_STALE slots
+     *   2. (TIMED)   full maint sweep -> frees ~N_STALE slots
      *   3. (TIMED)   insert freed entries (now with modified keys)
      *
      * Report: total_timed_cy / (N_STALE * REPS) = cy per entry turned over.
@@ -699,7 +699,7 @@ main(void)
         assert(freed_c && freed_e);
 
         printf("\n  insert+maint combined @ 75%% fill, 50%% turnover (cy/entry):\n");
-        printf("  %-18s %10s %10s %10s\n", "op", "classic", "extra", "delta");
+        printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
 
         for (qi = 0u; qi < sizeof(qs) / sizeof(qs[0]); qi++) {
             unsigned Q = qs[qi];
@@ -715,8 +715,8 @@ main(void)
                 int rc;
                 u64 t0, t1;
 
-                /* ---- classic setup (not timed) ---- */
-                fill_classic_keys(pool_c, N_ENTRIES);
+                /* ---- pure setup (not timed) ---- */
+                fill_pure_keys(pool_c, N_ENTRIES);
                 memset(bk_c, 0, bk_c_mem);
                 for (i = 0u; i < N_ENTRIES; i++)
                     memset(&pool_c[i].meta, 0, sizeof(pool_c[i].meta));
@@ -729,12 +729,12 @@ main(void)
                 (void)ft_flow4_table_add_idx_bulk(&ft_c, idxv, N_FILL,
                                                   FT_ADD_IGNORE, now,
                                                   unused_idxv);
-                age_classic(pool_c, N_STALE, now, old);
+                age_pure(pool_c, N_STALE, now, old);
                 /* pre-flip key bit on stale entries so re-insert is fresh */
                 for (i = 0u; i < N_STALE; i++)
                     pool_c[i].key.src_ip ^= 0x01000000u;
 
-                /* ---- classic timed: maint + re-insert ---- */
+                /* ---- pure timed: maint + re-insert ---- */
                 {
                     struct ft_maint_ctx mc = {
                         .buckets     = ft_c.buckets,
@@ -834,7 +834,7 @@ main(void)
      *
      * Models the actual flow cache pattern: each add also proactively
      * expires stale entries from the same bucket (bk->extra[] for extra,
-     * entry->meta for classic).  No separate full-sweep maint needed.
+     * entry->meta for pure).  No separate full-sweep maint needed.
      *
      * Setup: fill 75% with ts_stale=1<<TS_SHIFT (encodes to 1, clearly
      *         expired at now=1000000 with tmo=1<<18).  ts=0 is the permanent
@@ -842,7 +842,7 @@ main(void)
      * Timed:  insert N_NEW=16384 free-pool entries via add_idx_bulk_maint
      *         in Q-entry batches.
      *
-     * classic Phase 2: loads entry->meta per slot from the pool (cache miss).
+     * pure Phase 2: loads entry->meta per slot from the pool (cache miss).
      * extra   Phase 2: reads bk->extra[s] already warm from Phase 1 prefetch.
      */
     {
@@ -857,7 +857,7 @@ main(void)
         assert(new_idxv);
 
         printf("\n  add+inline-maint (cy/entry, 75%%%% fill, all-stale):\n");
-        printf("  %-18s %10s %10s %10s\n", "op", "classic", "extra", "delta");
+        printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
 
         for (qi = 0u; qi < sizeof(qs) / sizeof(qs[0]); qi++) {
             unsigned Q       = qs[qi];
@@ -876,8 +876,8 @@ main(void)
                 int rc;
                 u64 t0, t1;
 
-                /* ---- classic setup (untimed) ---- */
-                fill_classic_keys(pool_c, N_ENTRIES);
+                /* ---- pure setup (untimed) ---- */
+                fill_pure_keys(pool_c, N_ENTRIES);
                 memset(bk_c, 0, bk_c_mem);
                 for (i = 0u; i < N_ENTRIES; i++)
                     memset(&pool_c[i].meta, 0, sizeof(pool_c[i].meta));
@@ -891,7 +891,7 @@ main(void)
                                                   FT_ADD_IGNORE, ts_stale,
                                                   unused_idxv);
 
-                /* Phase-1-only classic: call add_idx_bulk directly */
+                /* Phase-1-only pure: call add_idx_bulk directly */
                 for (i = 0u; i < N_NEW; i++)
                     new_idxv[i] = N_FILL + 1u + i;
                 t0 = tsc_start();
@@ -904,7 +904,7 @@ main(void)
                 t1 = tsc_end();
                 c_p1 += (t1 - t0);
 
-                /* Re-fill classic and measure Phase 1 + Phase 2 */
+                /* Re-fill pure and measure Phase 1 + Phase 2 */
                 memset(bk_c, 0, bk_c_mem);
                 for (i = 0u; i < N_ENTRIES; i++)
                     memset(&pool_c[i].meta, 0, sizeof(pool_c[i].meta));
@@ -1010,14 +1010,14 @@ main(void)
     /* --- 2M-scale add+inline-maint (realistic environment) ---
      *
      * Target: N=2M entries, 75% fill (1.5M stale), N_NEW=64K new flows
-     * per batch (~3% of N_FILL).  Pool sizes: classic 72 MB, extra 48 MB.
+     * per batch (~3% of N_FILL).  Pool sizes: pure 72 MB, extra 48 MB.
      * Both pools exceed typical L3; all pool accesses are DRAM-pressure.
      *
-     * Classic Phase 2: pool[idx].meta.timestamp per slot → random DRAM miss
-     * Extra  Phase 2: bk->extra[s] already warm from Phase 1 → ~0 extra cy
+     * Pure Phase 2: pool[idx].meta.timestamp per slot -> random DRAM miss
+     * Extra  Phase 2: bk->extra[s] already warm from Phase 1 -> ~0 extra cy
      *
-     * Classic bucket: 131072 × 128B = 16 MB (fits L3)
-     * Extra   bucket: 131072 × 192B = 24 MB (borderline L3)
+     * Pure bucket: 131072 x 128B = 16 MB (fits L3)
+     * Extra   bucket: 131072 x 192B = 24 MB (borderline L3)
      */
     {
         const unsigned N_LARGE   = 1u << 21;          /* 2,097,152 */
@@ -1055,7 +1055,7 @@ main(void)
         assert(pool_c_l && pool_e_l && bk_c_l && bk_e_l);
         assert(idxv_l && unused_l && new_idxv_l && mb_c_l && mb_e_l);
 
-        fill_classic_keys(pool_c_l, N_USED_L);
+        fill_pure_keys(pool_c_l, N_USED_L);
         fill_extra_keys(pool_e_l, N_USED_L);
 
         for (rl = 0u; rl < REPS_L; rl++) {
@@ -1063,7 +1063,7 @@ main(void)
             int rcl = 0;
             (void)rcl;
 
-            /* ---- classic Phase-1-only ---- */
+            /* ---- pure Phase-1-only ---- */
             for (il = 0u; il < N_USED_L; il++)
                 memset(&pool_c_l[il].meta, 0, sizeof(pool_c_l[il].meta));
             memset(bk_c_l, 0, bc_l_sz);
@@ -1085,7 +1085,7 @@ main(void)
                 c_p1_l += tsc_end() - t0;
             }
 
-            /* ---- classic Phase-1+2 ---- */
+            /* ---- pure Phase-1+2 ---- */
             for (il = 0u; il < N_USED_L; il++)
                 memset(&pool_c_l[il].meta, 0, sizeof(pool_c_l[il].meta));
             memset(bk_c_l, 0, bc_l_sz);
@@ -1154,8 +1154,8 @@ main(void)
         }
 
         printf("\n  add+inline-maint 2M-scale (cy/entry, 75%%%% fill, all-stale, Q=%u):\n", Q_L);
-        printf("  (classic pool=72MB  extra pool=48MB  bucket_c=16MB  bucket_e=24MB)\n");
-        printf("  %-18s %10s %10s %10s\n", "op", "classic", "extra", "delta");
+        printf("  (pure pool=72MB  extra pool=48MB  bucket_c=16MB  bucket_e=24MB)\n");
+        printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
         printf("  %-18s %10.2f %10.2f %+10.2f  (phase1 only)\n", "add_only",
                (double)c_p1_l / (double)(N_NEW_L * REPS_L),
                (double)e_p1_l / (double)(N_NEW_L * REPS_L),

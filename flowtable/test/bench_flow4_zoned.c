@@ -38,9 +38,9 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_hash_slot_extra.h>
 
-#include "flow4_table.h"
-#include "flow4_extra_table.h"
-#include "flow_key.h"
+#include "flowtable/flow4_table.h"
+#include "flowtable/flow4_extra_table.h"
+#include "flowtable/flow_key.h"
 
 /* ------------------------------------------------------------------ */
 /* timing helpers                                                       */
@@ -182,11 +182,11 @@ typedef struct {
 } zstat_t;
 
 /* ------------------------------------------------------------------ */
-/* classic variant zoned benchmark                                      */
+/* pure variant zoned benchmark                                      */
 /* ------------------------------------------------------------------ */
 
 static void
-run_classic(const char *scenario,
+run_pure(const char *scenario,
             struct ft_table *ft,
             struct flow4_entry *pool,
             unsigned N,
@@ -271,7 +271,7 @@ run_classic(const char *scenario,
     }
     st->n_batches += REPS_Z;
 
-    printf("  classic/%-7s Q_add=%3u  cy/add=%7.1f  cy/hit=%7.1f"
+    printf("  pure/%-7s Q_add=%3u  cy/add=%7.1f  cy/hit=%7.1f"
            "  cy/pkt=%7.1f  fill=%4.1f%%  G=%u Y=%u R=%u\n",
            scenario, q_add,
            (double)st->cy_add / (double)(REPS_Z * n_take),
@@ -387,8 +387,8 @@ run_extra(const char *scenario,
  * Setup a scenario:
  *  - fill_pct:   total fill level (e.g. 70, 80, 90)
  *  - stale_pct:  fraction of filled entries that are stale (e.g. 8, 20, 30)
- *  - fresh entries: fill_pct - stale_pct → used as hit targets
- *  - free pool:  100 - fill_pct → available for adds
+ *  - fresh entries: fill_pct - stale_pct -> used as hit targets
+ *  - free pool:  100 - fill_pct -> available for adds
  *  - stale entries: available for Phase 2 eviction
  */
 typedef struct {
@@ -399,7 +399,7 @@ typedef struct {
 } scenario_state_t;
 
 static void
-setup_scenario_classic(scenario_state_t *ss,
+setup_scenario_pure(scenario_state_t *ss,
                         struct ft_table *ft,
                         struct flow4_entry *pool,
                         unsigned N,
@@ -547,7 +547,7 @@ bench_one_size(unsigned N)
 
     static const unsigned q_adds[] = { 64u, 128u }; /* 1 Mpps, 2 Mpps */
 
-    printf("\n--- N=%uM (classic pool=%zuMB  extra pool=%zuMB"
+    printf("\n--- N=%uM (pure pool=%zuMB  extra pool=%zuMB"
            "  bk_c=%zuMB  bk_e=%zuMB) ---\n",
            N >> 20,
            pc_sz >> 20, pe_sz >> 20,
@@ -567,7 +567,7 @@ bench_one_size(unsigned N)
             int rc;
             (void)rc;
 
-            /* --- classic --- */
+            /* --- pure --- */
             memset(bk_c, 0, bc_sz);
             for (unsigned i = 0u; i < N; i++)
                 memset(&pool_c[i].meta, 0, sizeof(pool_c[i].meta));
@@ -575,13 +575,13 @@ bench_one_size(unsigned N)
                                             struct flow4_entry, key,
                                             bk_c, bc_sz, &cfg_c);
             assert(rc == 0);
-            setup_scenario_classic(&ss_c, &ft_c, pool_c, N,
+            setup_scenario_pure(&ss_c, &ft_c, pool_c, N,
                                    scenarios[si].fill_pct,
                                    scenarios[si].stale_pct);
             {
                 zstat_t st;
                 memset(&st, 0, sizeof(st));
-                run_classic(scenarios[si].name, &ft_c, pool_c, N,
+                run_pure(scenarios[si].name, &ft_c, pool_c, N,
                             &ss_c.fpool,
                             ss_c.hit_ring, ss_c.n_fresh, &hit_pos_c,
                             &sweep_c,
@@ -648,3 +648,11 @@ main(void)
 
     return 0;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

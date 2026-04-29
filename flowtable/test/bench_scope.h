@@ -328,3 +328,11 @@ bench_scope_end(struct bench_scope_group *group,
 #endif
 
 #endif
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

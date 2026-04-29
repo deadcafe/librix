@@ -175,9 +175,13 @@ layout (192 B bucket).  It relocates the per-entry expiry timestamp from
 decide expiry by reading bucket memory first, without touching the entry
 record for every occupied slot.
 
-The public names intentionally coexist with the classic table:
+Terminology: **pure** means the base flowtable model: 128 B buckets and
+timestamps stored in caller-owned flow entry metadata.  **slot-extra** means
+192 B buckets with bucket-side `extra[]` timestamp slots.
 
-- classic: `ft_flow4_table_*`, `struct flow4_entry`
+The public names intentionally coexist with the pure table:
+
+- pure: `ft_flow4_table_*`, `struct flow4_entry`
 - slot-extra: `ft_table_extra_*`, `flow4_extra_table_*`,
   `flow6_extra_table_*`, `flowu_extra_table_*`,
   `struct flow4_extra_entry`, `struct flow6_extra_entry`,
@@ -361,20 +365,17 @@ allocators. The library never calls `malloc` or `free` internally.
 
 Public headers:
 
-- `flowtable/include/flow_table.h` — umbrella header
-- `flowtable/include/flow4_table.h`
-- `flowtable/include/flow6_table.h`
-- `flowtable/include/flowu_table.h`
-- `flowtable/include/flow_extra_table.h`
-- `flowtable/include/flow4_extra_table.h`
-- `flowtable/include/flow6_extra_table.h`
-- `flowtable/include/flowu_extra_table.h`
-- `flowtable/include/flow_common.h` — shared types and helpers
+- `flowtable/include/flow_table.h` — primary umbrella header
+- `flowtable/include/ft_fill_ctrl.h` — optional fill-rate controller
+- `flowtable/include/flowtable/*.h` — advanced family/common headers
 
-`flow_table.h` includes both the classic APIs and the slot-extra APIs.
-The slot-extra implementation is part of the normal `flowtable/src/`
-build and is linked into `libftable.a`; there is no separate `extra/`
-source tree or include path.
+Normal users should include `flow_table.h`.  It includes both the pure
+APIs and the slot-extra APIs.  The slot-extra implementation is part of the
+normal `flowtable/src/` build and is linked into `libftable.a`; there is no
+separate `extra/` source tree or include path.  The `flowtable/*.h` headers
+are kept for code that intentionally wants a narrow family-specific API, for
+example `flowtable/flow4_table.h` or `flowtable/flow6_extra_table.h`.
+Here, pure is the base table model without bucket-side `extra[]` slots.
 
 `flow_table.h` also provides an `FT_TABLE_*` generic facade over the
 operations shared by `struct ft_table` and `struct ft_table_extra`.
@@ -436,16 +437,16 @@ Exceptions:
   `ft_flow4_table_find()`, `ft_flow4_table_find_bulk()`,
   `ft_flow4_table_del_key_bulk()`, and the corresponding
   `flow4_extra_table_*`, `flow6_extra_table_*`, and
-  `flowu_extra_table_*` find/delete APIs.  Classic and slot-extra use
+  `flowu_extra_table_*` find/delete APIs.  Pure and slot-extra use
   different key and entry types.
 - Maintenance context structs remain variant-specific:
-  `struct ft_maint_ctx` for classic and `struct ft_maint_extra_ctx` for
+  `struct ft_maint_ctx` for pure and `struct ft_maint_extra_ctx` for
   slot-extra.  The `FT_TABLE_MAINT_*` macros hide the function names, but
   the caller still allocates the correct context type.
 - Extra-only timestamp helpers such as `ft_table_extra_touch()` and
   `ft_table_extra_touch_checked()` remain extra-specific.
 - Bucket sizing is variant-specific: use `ft_table_bucket_size()` for
-  classic and `ft_table_extra_bucket_size()` /
+  pure and `ft_table_extra_bucket_size()` /
   `flow4_extra_table_bucket_size()` /
   `flow6_extra_table_bucket_size()` /
   `flowu_extra_table_bucket_size()` for slot-extra.
@@ -559,8 +560,13 @@ matters for performance.
 Recommended:
 
 - place `entry` on a cache-line boundary
+- align hot record structs to `FT_TABLE_CACHE_LINE_SIZE` when the flow
+  entry is the first member
 - keep record stride under control
 - avoid making the record body larger than needed
+- treat public `flow*_key`, `flow*_entry`, and `flow*_extra_entry`
+  sizes/offsets as fixed ABI; the headers enforce these with static
+  assertions
 
 Observed risks:
 
@@ -631,6 +637,27 @@ Run:
 make -C flowtable/test test
 ```
 
+### 10.1 API Usage Sample
+
+`flowtable/test/usage_flowtable.c` is a readable API usage sample, not a
+functional test and not a benchmark.  It shows the normal application-facing
+flow:
+
+- include `flow_table.h` as the primary API header
+- allocate caller-owned records and bucket memory
+- initialize pure and slot-extra tables with `FT_TABLE_INIT_TYPED()`
+- use family-specific key lookup APIs
+- use `FT_TABLE_*` for protocol-independent add/delete/stats/walk/migrate
+- run explicit maintenance with `FT_TABLE_MAINT_CTX_INIT()` and
+  `FT_TABLE_MAINTAIN()`
+- drive the optional `ft_fill_ctrl` controller
+
+Build it with:
+
+```sh
+make -C flowtable/test sample
+```
+
 ## 11. Benchmark
 
 The benchmark program is `flowtable/test/bench_flow_table.c`,
@@ -644,7 +671,7 @@ make -C flowtable/test bench
   `--arch auto` (the best supported runtime variant)
 - `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`, repeated
   for all CPU-supported variants from `BENCH_FULL_ARCHES`
-- `bench-extra`: `bench_flow4_vs_extra.c`, a matched `flow4` classic vs
+- `bench-extra`: `bench_flow4_vs_extra.c`, a matched `flow4` pure vs
   `flow4_extra` microbench for insert/find/miss/touch/delete/maintain
 - `bench-extra-full`: `bench_flow_extra_table.c`, a full slot-extra
   family sweep for `flow4_extra`, `flow6_extra`, and `flowu_extra`
@@ -653,10 +680,10 @@ make -C flowtable/test bench
 - `bench-sweep`, `bench-zoned`, and `bench-ctrl`: maintenance and
   fill-controller focused benches
 
-Coverage note: `ft_bench` is the full classic benchmark across
+Coverage note: `ft_bench` is the full pure benchmark across
 `flow4/flow6/flowu` and supported arch variants.  `bench-extra-full`
 provides the matching full-family slot-extra sweep.  `bench-extra` remains
-the focused `flow4` classic-vs-extra comparison.
+the focused `flow4` pure-vs-extra comparison.
 
 ### 11.1 Benchmark modes
 
@@ -738,16 +765,19 @@ flowtable/
   Makefile
   include/
     flow_table.h
-    flow4_table.h
-    flow6_table.h
-    flowu_table.h
-    flow_extra_table.h
-    flow4_extra_table.h
-    flow6_extra_table.h
-    flowu_extra_table.h
-    flow_common.h
-    flow_extra_common.h
-    flow_extra_key.h
+    ft_fill_ctrl.h
+    flowtable/
+      flow4_table.h
+      flow6_table.h
+      flowu_table.h
+      flow_extra_table.h
+      flow4_extra_table.h
+      flow6_extra_table.h
+      flowu_extra_table.h
+      flow_common.h
+      flow_key.h
+      flow_extra_common.h
+      flow_extra_key.h
   src/
     flow4.c
     flow6.c
@@ -774,6 +804,7 @@ flowtable/
     bench_flow_extra_table.c
     bench_fill_ctrl.c
     bench_scope.h
+    usage_flowtable.c
     test_flow_table.c
     test_flow4_extra.c
 ```

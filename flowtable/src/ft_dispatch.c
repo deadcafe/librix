@@ -104,7 +104,7 @@ ft_arch_init(unsigned arch_enable)
 }
 
 /*===========================================================================
- * Dispatch: init (inlined — not in ops table, compiled once per variant)
+ * Dispatch: init (inlined - not in ops table, compiled once per variant)
  *===========================================================================*/
 #define FT_DISPATCH_INIT(prefix, entry_type, table_variant)                    \
                                                                                \
@@ -659,3 +659,11 @@ ft_table_maintain_idx_bulk(const struct ft_maint_ctx *ctx,
                                        expired_idxv, max_expired,
                                        min_bk_entries, enable_filter);
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

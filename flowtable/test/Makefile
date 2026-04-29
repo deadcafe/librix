@@ -64,6 +64,7 @@ BENCH_EXTRA_FULL_NAME = ft_bench_extra_full
 BENCH_SWEEP_NAME = ft_bench_sweep
 BENCH_ZONED_NAME = ft_bench_zoned
 BENCH_CTRL_NAME  = ft_bench_ctrl
+SAMPLE_NAME      = ft_usage_sample
 TARGET        = $(BINDIR)/$(TARGET_NAME)
 BENCH         = $(BINDIR)/$(BENCH_NAME)
 SIM           = $(BINDIR)/$(SIM_NAME)
@@ -75,6 +76,7 @@ BENCH_EXTRA_FULL = $(BINDIR)/$(BENCH_EXTRA_FULL_NAME)
 BENCH_SWEEP   = $(BINDIR)/$(BENCH_SWEEP_NAME)
 BENCH_ZONED   = $(BINDIR)/$(BENCH_ZONED_NAME)
 BENCH_CTRL    = $(BINDIR)/$(BENCH_CTRL_NAME)
+SAMPLE        = $(BINDIR)/$(SAMPLE_NAME)
 BENCH_CTRL_GEN    = $(BINDIR)/$(BENCH_CTRL_NAME)_gen
 BENCH_CTRL_SSE    = $(BINDIR)/$(BENCH_CTRL_NAME)_sse
 BENCH_CTRL_AVX2   = $(BINDIR)/$(BENCH_CTRL_NAME)_avx2
@@ -90,10 +92,11 @@ BENCH_EXTRA_FULL_SRC = bench_flow_extra_table.c
 BENCH_SWEEP_SRC = bench_flow4_maint_sweep.c
 BENCH_ZONED_SRC = bench_flow4_zoned.c
 BENCH_CTRL_SRC  = bench_fill_ctrl.c
+SAMPLE_SRC      = usage_flowtable.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
-DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(TEST_CTRL).d $(BENCH_EXTRA).d $(BENCH_EXTRA_FULL).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d $(BENCH_CTRL_GEN).d $(BENCH_CTRL_SSE).d $(BENCH_CTRL_AVX2).d $(BENCH_CTRL_AVX512).d
+DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(TEST_CTRL).d $(BENCH_EXTRA).d $(BENCH_EXTRA_FULL).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d $(BENCH_CTRL_GEN).d $(BENCH_CTRL_SSE).d $(BENCH_CTRL_AVX2).d $(BENCH_CTRL_AVX512).d $(SAMPLE).d
 
-.PHONY: all help test test-classic test-extra test-extra-arch test-parity test-ctrl bench bench-light bench-full bench-extra bench-extra-full bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 bench-ctrl-avx512 bench-ctrl-build-all sim clean libft FORCE
+.PHONY: all help test test-pure test-extra test-extra-arch test-parity test-ctrl bench bench-light bench-full bench-extra bench-extra-full bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 bench-ctrl-avx512 bench-ctrl-build-all sample sim clean libft FORCE
 
 all: test
 
@@ -102,11 +105,13 @@ help:
 	  'flowtable/test targets:' \
 	  '  help         Show this help' \
 	  '  test         Build and run functional tests' \
+	  '  test-pure    Build and run the pure flowtable functional tests' \
 	  '  test-extra-arch  Run ft_test_extra for each CPU-supported arch' \
 	  '  bench        Run the light benchmark set (flow4 only, q=1/8/32/256 @ fill=60%)' \
 	  '  bench-light  Same as bench' \
 	  '  bench-full   Run the full benchmark sweep (flow4/6/u query, maintain, grow)' \
 	  '  bench-extra-full  Run full slot-extra sweep (flow4/6/u extra)' \
+	  '  sample       Build the readable API usage sample (not a test/bench)' \
 	  '  sim          Build and run the flow cache simulation' \
 	  '  clean        Remove generated binaries and dependency files' \
 	  '' \
@@ -158,6 +163,9 @@ $(BENCH_ZONED): $(BENCH_ZONED_SRC) $(LIBFT) | $(BINDIR)
 $(BENCH_CTRL): $(BENCH_CTRL_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_CTRL_SRC) $(LIBFT)
 
+$(SAMPLE): $(SAMPLE_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(SAMPLE_SRC) $(LIBFT)
+
 define BENCH_CTRL_ARCH_RULE
 $(BINDIR)/$(BENCH_CTRL_NAME)_$(1): $(BENCH_CTRL_SRC) $(LIBFT) | $(BINDIR)
 	$$(CC) $$(CFLAGS_COMMON) $$(ARCH_CFLAGS_$(1)) -DNDEBUG $$(DEPFLAGS) \
@@ -175,9 +183,9 @@ FORCE:
 
 libft: $(LIBFT)
 
-test: test-classic test-extra test-extra-arch test-parity test-ctrl
+test: test-pure test-extra test-extra-arch test-parity test-ctrl
 
-test-classic: $(TARGET)
+test-pure: $(TARGET)
 	$(TARGET)
 
 test-extra: $(TEST_EXTRA)
@@ -255,6 +263,8 @@ bench-ctrl: $(BENCH_CTRL)
 	$(BENCH_CTRL)
 
 bench-ctrl-build-all: $(BENCH_CTRL_GEN) $(BENCH_CTRL_SSE) $(BENCH_CTRL_AVX2) $(BENCH_CTRL_AVX512)
+
+sample: $(SAMPLE)
 
 bench-ctrl-gen: $(BENCH_CTRL_GEN)
 	$(BENCH_CTRL_GEN) gen

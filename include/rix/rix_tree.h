@@ -13,25 +13,25 @@
 /*
  * RB Tree
  */
-#  define RIX_RB_HEAD(name)  \
-    struct name {          \
-        unsigned rrh_root; \
+#  define RIX_RB_HEAD(name)                                                   \
+    struct name {                                                             \
+        unsigned rrh_root;                                                    \
     }
 
-#  define RIX_RB_HEAD_INITIALIZER(var) \
+#  define RIX_RB_HEAD_INITIALIZER(var)                                        \
     { RIX_NIL }
 
-#  define RIX_RB_INIT(head)           \
-    do {                            \
-        (head)->rrh_root = RIX_NIL; \
+#  define RIX_RB_INIT(head)                                                   \
+    do {                                                                      \
+        (head)->rrh_root = RIX_NIL;                                           \
     } while (0)
 
-#  define RIX_RB_ENTRY(type)   \
-    struct {                 \
-        unsigned rbe_parent; \
-        unsigned rbe_left;   \
-        unsigned rbe_right;  \
-        unsigned rbe_color;  \
+#  define RIX_RB_ENTRY(type)                                                  \
+    struct {                                                                  \
+        unsigned rbe_parent;                                                  \
+        unsigned rbe_left;                                                    \
+        unsigned rbe_right;                                                   \
+        unsigned rbe_color;                                                   \
     }
 
 #  define RIX_RB_RED ((unsigned)0)
@@ -39,59 +39,59 @@
 
 #  define RIX_RB_ROOT(head, base) (RIX_PTR_FROM_IDX((base), (head)->rrh_root))
 #  define RIX_RB_EMPTY(head) ((head)->rrh_root == RIX_NIL)
-#  define RIX_RB_PARENT(elm, base, field) \
+#  define RIX_RB_PARENT(elm, base, field)                                     \
     (RIX_PTR_FROM_IDX((base), (elm)->field.rbe_parent))
-#  define RIX_RB_LEFT(elm, base, field) \
+#  define RIX_RB_LEFT(elm, base, field)                                       \
     (RIX_PTR_FROM_IDX((base), (elm)->field.rbe_left))
-#  define RIX_RB_RIGHT(elm, base, field) \
+#  define RIX_RB_RIGHT(elm, base, field)                                      \
     (RIX_PTR_FROM_IDX((base), (elm)->field.rbe_right))
 #  define RIX_RB_COLOR(elm, field) ((elm)->field.rbe_color)
 
-#  define RIX_RB_PROTOTYPE_INTERNAL(name, type, field, cmp, attr)                \
+#  define RIX_RB_PROTOTYPE_INTERNAL(name, type, field, cmp, attr)             \
     attr type *name##_RIX_RB_INSERT(struct name *head, type *base, type *elm); \
     attr type *name##_RIX_RB_REMOVE(struct name *head, type *base, type *elm); \
-    attr type *name##_RIX_RB_FIND(struct name *head, type *base,               \
-                                   const type *key);                           \
-    attr type *name##_RIX_RB_NFIND(struct name *head, type *base,              \
-                                    const type *key);                          \
-    attr type *name##_RIX_RB_MINMAX(struct name *head, type *base, int dir);   \
-    attr type *name##_RIX_RB_NEXT(type *base, type *elm);                      \
+    attr type *name##_RIX_RB_FIND(struct name *head, type *base,              \
+                                   const type *key);                          \
+    attr type *name##_RIX_RB_NFIND(struct name *head, type *base,             \
+                                    const type *key);                         \
+    attr type *name##_RIX_RB_MINMAX(struct name *head, type *base, int dir);  \
+    attr type *name##_RIX_RB_NEXT(type *base, type *elm);                     \
     attr type *name##_RIX_RB_PREV(type *base, type *elm);
 
-#  define RIX_RB_PROTOTYPE(name, type, field, cmp) \
+#  define RIX_RB_PROTOTYPE(name, type, field, cmp)                            \
     RIX_RB_PROTOTYPE_INTERNAL(name, type, field, cmp, )
 
-#  define RIX_RB_PROTOTYPE_STATIC(name, type, field, cmp) \
+#  define RIX_RB_PROTOTYPE_STATIC(name, type, field, cmp)                     \
     RIX_RB_PROTOTYPE_INTERNAL(name, type, field, cmp, RIX_UNUSED static)
 
-#  define RIX_RB_INSERT(name, head, base, elm) \
+#  define RIX_RB_INSERT(name, head, base, elm)                                \
     name##_RIX_RB_INSERT((head), (base), (elm))
-#  define RIX_RB_REMOVE(name, head, base, elm) \
+#  define RIX_RB_REMOVE(name, head, base, elm)                                \
     name##_RIX_RB_REMOVE((head), (base), (elm))
-#  define RIX_RB_FIND(name, head, base, key) \
+#  define RIX_RB_FIND(name, head, base, key)                                  \
     name##_RIX_RB_FIND((head), (base), (key))
-#  define RIX_RB_NFIND(name, head, base, key) \
+#  define RIX_RB_NFIND(name, head, base, key)                                 \
     name##_RIX_RB_NFIND((head), (base), (key))
 #  define RIX_RB_MIN(name, head, base) name##_RIX_RB_MINMAX((head), (base), -1)
 #  define RIX_RB_MAX(name, head, base) name##_RIX_RB_MINMAX((head), (base), +1)
 #  define RIX_RB_NEXT(name, base, elm) name##_RIX_RB_NEXT((base), (elm))
 #  define RIX_RB_PREV(name, base, elm) name##_RIX_RB_PREV((base), (elm))
 
-#  define RIX_RB_FOREACH(x, name, head, base)                   \
-    for ((x) = RIX_RB_MIN(name, (head), (base)); (x) != NULL; \
+#  define RIX_RB_FOREACH(x, name, head, base)                                 \
+    for ((x) = RIX_RB_MIN(name, (head), (base)); (x) != NULL;                 \
          (x) = name##_RIX_RB_NEXT((base), (x)))
 
-#  define RIX_RB_FOREACH_REVERSE(x, name, head, base)           \
-    for ((x) = RIX_RB_MAX(name, (head), (base)); (x) != NULL; \
+#  define RIX_RB_FOREACH_REVERSE(x, name, head, base)                         \
+    for ((x) = RIX_RB_MAX(name, (head), (base)); (x) != NULL;                 \
          (x) = name##_RIX_RB_PREV((base), (x)))
 
-#  define RIX_RB_GENERATE(name, type, field, cmp) \
+#  define RIX_RB_GENERATE(name, type, field, cmp)                             \
     RIX_RB_GENERATE_INTERNAL(name, type, field, cmp, )
 
-#  define RIX_RB_GENERATE_STATIC(name, type, field, cmp) \
+#  define RIX_RB_GENERATE_STATIC(name, type, field, cmp)                      \
     RIX_RB_GENERATE_INTERNAL(name, type, field, cmp, RIX_UNUSED static)
 
-#  define RIX_RB_GENERATE_INTERNAL(name, type, field, cmp, attr)                \
+#  define RIX_RB_GENERATE_INTERNAL(name, type, field, cmp, attr)              \
     static RIX_FORCE_INLINE unsigned name##_idx(type *base, const type *p) {  \
         return RIX_IDX_FROM_PTR(base, (type *)p);                             \
     }                                                                         \
@@ -103,13 +103,13 @@
         return (idx == RIX_NIL) ? RIX_RB_BLACK                                \
                                 : name##_ptr(base, idx)->field.rbe_color;     \
     }                                                                         \
-    static RIX_FORCE_INLINE void name##_set_color_idx(type *base, unsigned idx,     \
+    static RIX_FORCE_INLINE void name##_set_color_idx(type *base, unsigned idx, \
                                                       unsigned char c) {      \
         if (idx != RIX_NIL)                                                   \
             name##_ptr(base, idx)->field.rbe_color = c;                       \
     }                                                                         \
-    static RIX_FORCE_INLINE unsigned name##_left_idx(type *base, unsigned idx) {    \
-        return (idx == RIX_NIL) ? RIX_NIL : name##_ptr(base, idx)->field.rbe_left;  \
+    static RIX_FORCE_INLINE unsigned name##_left_idx(type *base, unsigned idx) { \
+        return (idx == RIX_NIL) ? RIX_NIL : name##_ptr(base, idx)->field.rbe_left; \
     }                                                                         \
     static RIX_FORCE_INLINE unsigned name##_right_idx(type *base,             \
                                                       unsigned idx) {         \
@@ -210,7 +210,7 @@
             name##_set_right(base, y, z);                                     \
         /* fix-up */                                                          \
         while ((z != (head)->rrh_root) &&                                     \
-               name##_color_idx(base, name##_parent_idx(base, z)) == RIX_RB_RED) {  \
+               name##_color_idx(base, name##_parent_idx(base, z)) == RIX_RB_RED) { \
             unsigned p = name##_parent_idx(base, z);                          \
             unsigned g = name##_parent_idx(base, p);                          \
             if (p == name##_left_idx(base, g)) {                              \
@@ -256,7 +256,7 @@
             name##_ptr(base, (head)->rrh_root)->field.rbe_parent = RIX_NIL;   \
         return NULL;                                                          \
     }                                                                         \
-    attr type *name##_RIX_RB_MINMAX(struct name *head, type *base, int dir) {  \
+    attr type *name##_RIX_RB_MINMAX(struct name *head, type *base, int dir) { \
         unsigned x = (head)->rrh_root;                                        \
         if (x == RIX_NIL)                                                     \
             return NULL;                                                      \
@@ -270,7 +270,7 @@
         return name##_ptr(base, x);                                           \
     }                                                                         \
     /* ---- successor / predecessor ---- */                                   \
-    attr type *name##_RIX_RB_NEXT(type *base, type *elm) {                     \
+    attr type *name##_RIX_RB_NEXT(type *base, type *elm) {                    \
         unsigned x = RIX_IDX_FROM_PTR(base, elm);                             \
         if (x == RIX_NIL)                                                     \
             return NULL;                                                      \
@@ -289,7 +289,7 @@
             return name##_ptr(base, p);                                       \
         }                                                                     \
     }                                                                         \
-    attr type *name##_RIX_RB_PREV(type *base, type *elm) {                     \
+    attr type *name##_RIX_RB_PREV(type *base, type *elm) {                    \
         unsigned x = RIX_IDX_FROM_PTR(base, elm);                             \
         if (x == RIX_NIL)                                                     \
             return NULL;                                                      \
@@ -308,8 +308,8 @@
             return name##_ptr(base, p);                                       \
         }                                                                     \
     }                                                                         \
-    attr type *name##_RIX_RB_FIND(struct name *head, type *base,               \
-                                   const type *key) {                          \
+    attr type *name##_RIX_RB_FIND(struct name *head, type *base,              \
+                                   const type *key) {                         \
         unsigned x = (head)->rrh_root;                                        \
         while (x != RIX_NIL) {                                                \
             int c = (cmp)(key, name##_ptr(base, x));                          \
@@ -322,8 +322,8 @@
         }                                                                     \
         return NULL;                                                          \
     }                                                                         \
-    attr type *name##_RIX_RB_NFIND(struct name *head, type *base,              \
-                                    const type *key) {                         \
+    attr type *name##_RIX_RB_NFIND(struct name *head, type *base,             \
+                                    const type *key) {                        \
         unsigned x = (head)->rrh_root, res = RIX_NIL;                         \
         while (x != RIX_NIL) {                                                \
             int c = (cmp)(key, name##_ptr(base, x));                          \
@@ -391,9 +391,9 @@
                         xi = xpi;                                             \
                         xpi = name##_parent_idx(base, xi);                    \
                     } else {                                                  \
-                        if (name##_color_idx(base, name##_right_idx(base, w)) ==    \
+                        if (name##_color_idx(base, name##_right_idx(base, w)) == \
                             RIX_RB_BLACK) {                                   \
-                            name##_set_color_idx(base, name##_left_idx(base, w),    \
+                            name##_set_color_idx(base, name##_left_idx(base, w), \
                                                  RIX_RB_BLACK);               \
                             name##_set_color_idx(base, w, RIX_RB_RED);        \
                             name##_rotate_right(head, base, w);               \
@@ -423,9 +423,9 @@
                         xi = xpi;                                             \
                         xpi = name##_parent_idx(base, xi);                    \
                     } else {                                                  \
-                        if (name##_color_idx(base, name##_left_idx(base, w)) ==     \
+                        if (name##_color_idx(base, name##_left_idx(base, w)) == \
                             RIX_RB_BLACK) {                                   \
-                            name##_set_color_idx(base, name##_right_idx(base, w),   \
+                            name##_set_color_idx(base, name##_right_idx(base, w), \
                                                  RIX_RB_BLACK);               \
                             name##_set_color_idx(base, w, RIX_RB_RED);        \
                             name##_rotate_left(head, base, w);                \

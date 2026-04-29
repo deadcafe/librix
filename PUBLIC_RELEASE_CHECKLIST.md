@@ -16,7 +16,7 @@ Use this checklist before publishing a public release of `librix`.
 - [ ] README includes the current validation status
 - [ ] README includes the supported sample variants (`flow4`, `flow6`, `flowu`)
 - [ ] `CHANGELOG.md` is updated for the release
-- [ ] `RELEASE_NOTES_vX.Y.Z.md` is updated or copied to the actual release note
+- [ ] `RELEASE_NOTES.md` has the new release entry at the file head
 
 ## Validation
 

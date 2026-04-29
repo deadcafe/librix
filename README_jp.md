@@ -706,10 +706,12 @@ entry64 *ht64_remove(&head, buckets, pool, key_value);
 - stride + entry_offset を持つ caller-owned record array
 
 設計・API・性能データは [flowtable/README_JP.md](flowtable/README_JP.md) を参照してください。
+単純な API 使用例として
+[flowtable/test/usage_flowtable.c](flowtable/test/usage_flowtable.c) も用意しています。
+これは test/bench 目的ではなく、使い方を読むための sample code です。
 公開向けの要約文書としては
 [CHANGELOG.md](CHANGELOG.md)、
-[RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)、
-[RELEASE_NOTES_v0.4.0_SHORT.md](RELEASE_NOTES_v0.4.0_SHORT.md)、
+[RELEASE_NOTES.md](RELEASE_NOTES.md)、
 [GITHUB_ABOUT.md](GITHUB_ABOUT.md)、
 [PUBLIC_RELEASE_CHECKLIST.md](PUBLIC_RELEASE_CHECKLIST.md)
 も用意しています。

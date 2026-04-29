@@ -23,7 +23,7 @@
 /**
  * @brief Initialise a flow4 table.
  *
- * @p buckets / @p bucket_size need not be aligned — the library carves
+ * @p buckets / @p bucket_size need not be aligned - the library carves
  * out the largest power-of-2 aligned region internally
  * (see ft_table_bucket_carve()).  The resulting bucket count must be
  * >= FT_TABLE_MIN_NB_BK (4096), otherwise init fails.
@@ -41,12 +41,18 @@ int ft_flow4_table_init(struct ft_table *ft,
                         size_t bucket_size,
                         const struct ft_table_config *cfg);
 
+/** @brief Destroy the table handle; caller-owned records/buckets are not freed. */
 void ft_flow4_table_destroy(struct ft_table *ft);
+/** @brief Remove all registered flow4 entries while keeping memory attached. */
 void ft_flow4_table_flush(struct ft_table *ft);
+/** @brief Return the current number of registered flow4 entries. */
 unsigned ft_flow4_table_nb_entries(const struct ft_table *ft);
+/** @brief Return the number of active hash buckets. */
 unsigned ft_flow4_table_nb_bk(const struct ft_table *ft);
+/** @brief Copy cumulative counters into @p out. */
 void ft_flow4_table_stats(const struct ft_table *ft,
                           struct ft_table_stats *out);
+/** @brief Copy current status counters into @p out. */
 void ft_flow4_table_status(const struct ft_table *ft,
                            struct flow_status *out);
 
@@ -54,20 +60,42 @@ void ft_flow4_table_status(const struct ft_table *ft,
  * Single-key operations
  *===========================================================================*/
 
+/**
+ * @brief Look up a flow4 key and optionally refresh its timestamp.
+ *
+ * @param now Current time. Pass 0 for non-touching lookup.
+ * @return Registered entry index on hit, RIX_NIL on miss.
+ */
 u32 ft_flow4_table_find(struct ft_table *ft,
-                             const struct flow4_key *key,
-                             u64 now);
+                        const struct flow4_key *key,
+                        u64 now);
 
+/**
+ * @brief Bulk lookup for @p nb_keys flow4 keys.
+ *
+ * Each result contains the matching entry index or RIX_NIL on miss.
+ * Pass @p now as 0 for non-touching lookup.
+ */
 void ft_flow4_table_find_bulk(struct ft_table *ft,
                               const struct flow4_key *keys,
                               unsigned nb_keys,
                               u64 now,
                               struct ft_table_result *results);
 
+/**
+ * @brief Register an already-populated flow4 entry by 1-origin index.
+ *
+ * The key is read from the caller-owned record pool.
+ *
+ * @return Registered index on success or duplicate, RIX_NIL on failure.
+ */
 u32 ft_flow4_table_add_idx(struct ft_table *ft,
-                                u32 entry_idx,
-                                u64 now);
+                           u32 entry_idx,
+                           u64 now);
 
+/**
+ * @brief Mark @p entry_idx as permanent so timeout maintenance will skip it.
+ */
 static inline int
 ft_flow4_table_set_permanent_idx(struct ft_table *ft, u32 entry_idx)
 {
@@ -81,6 +109,14 @@ ft_flow4_table_set_permanent_idx(struct ft_table *ft, u32 entry_idx)
     return 0;
 }
 
+/**
+ * @brief Bulk register already-populated flow4 entries by index.
+ *
+ * @p entry_idxv is input/output: candidates in, registered indices out.
+ * Unused or replaced indices are appended to @p unused_idxv.
+ *
+ * @return Number of indices written to @p unused_idxv.
+ */
 unsigned ft_flow4_table_add_idx_bulk(struct ft_table *ft,
                                      u32 *entry_idxv,
                                      unsigned nb_keys,
@@ -98,27 +134,27 @@ unsigned ft_flow4_table_add_idx_bulk(struct ft_table *ft,
  *
  * Two knobs control the maint cost:
  *
- *  - **Scan budget** = @p max_unused - @p nb_keys  (called "α").
+ *  - **Scan budget** = @p max_unused - @p nb_keys  (called "alpha").
  *    The first @p nb_keys slots of @p unused_idxv are reserved for
- *    add-phase results; the remaining α slots are the budget for
- *    maint-expired entries.  When α == 0 (or @p timeout == 0) the
+ *    add-phase results; the remaining alpha slots are the budget for
+ *    maint-expired entries.  When alpha == 0 (or @p timeout == 0) the
  *    maint phase is skipped entirely and the function behaves
  *    identically to add_idx_bulk.
  *
  *  - **Bucket occupancy threshold** (@p min_bk_used).
  *    Before scanning a bucket for expired entries the function counts
  *    occupied slots.  If the count is less than @p min_bk_used the
- *    bucket is skipped — avoiding expensive per-entry meta reads on
+ *    bucket is skipped - avoiding expensive per-entry meta reads on
  *    sparse buckets.  Pass 0 to disable the filter.
  *
  * Tuning guide (with auto-timeout fill-target controller):
  *
- *    α and min_bk_used together determine expire capacity per batch.
- *    Increasing α or decreasing min_bk_used raises the expire rate
+ *    alpha and min_bk_used together determine expire capacity per batch.
+ *    Increasing alpha or decreasing min_bk_used raises the expire rate
  *    (lowers steady-state fill) but increases per-key cost.
- *    Recommended starting point for batch=256, target fill ≤ 75%:
+ *    Recommended starting point for batch=256, target fill <= 75%:
  *
- *      max_unused  = nb_keys + 64          (α = 64)
+ *      max_unused  = nb_keys + 64          (alpha = 64)
  *      min_bk_used = 10                    (skip buckets < 10/16)
  *      fill-target = 65%
  *
@@ -135,8 +171,8 @@ unsigned ft_flow4_table_add_idx_bulk(struct ft_table *ft,
  * @param unused_idxv [out] Buffer for unused + expired entry indices.
  *                    Must hold at least @p max_unused elements.
  * @param max_unused  Capacity of @p unused_idxv.  Must be >= @p nb_keys.
- *                    max_unused - nb_keys is the maint scan budget (α).
- * @param min_bk_used Bucket occupancy threshold (0–16).  Buckets with
+ *                    max_unused - nb_keys is the maint scan budget (alpha).
+ * @param min_bk_used Bucket occupancy threshold (0-16).  Buckets with
  *                    fewer occupied slots are skipped.
  *
  * @return Total entries written to @p unused_idxv
@@ -152,24 +188,45 @@ unsigned ft_flow4_table_add_idx_bulk_maint(struct ft_table *ft,
                                            unsigned max_unused,
                                            unsigned min_bk_used);
 
-
+/**
+ * @brief Bulk delete by flow4 key.
+ *
+ * Removed indices are appended to @p unused_idxv.
+ *
+ * @return Number of removed entries.
+ */
 unsigned ft_flow4_table_del_key_bulk(struct ft_table *ft,
-                                    const struct flow4_key *keys,
-                                    unsigned nb_keys,
-                                    u32 *unused_idxv);
+                                     const struct flow4_key *keys,
+                                     unsigned nb_keys,
+                                     u32 *unused_idxv);
 
+/**
+ * @brief Delete one registered flow4 entry by index.
+ *
+ * @return Removed index, or RIX_NIL when not registered.
+ */
 u32 ft_flow4_table_del_idx(struct ft_table *ft,
-                                      u32 entry_idx);
+                           u32 entry_idx);
 
+/**
+ * @brief Bulk delete by 1-origin entry indices.
+ *
+ * Removed indices are appended to @p unused_idxv.
+ *
+ * @return Number of removed entries.
+ */
 unsigned ft_flow4_table_del_idx_bulk(struct ft_table *ft,
-                                       const u32 *entry_idxv,
-                                       unsigned nb_keys,
-                                       u32 *unused_idxv);
+                                     const u32 *entry_idxv,
+                                     unsigned nb_keys,
+                                     u32 *unused_idxv);
 
 /*===========================================================================
  * Walk / grow
  *===========================================================================*/
 
+/**
+ * @brief Iterate registered flow4 entries in bucket order.
+ */
 int ft_flow4_table_walk(struct ft_table *ft,
                         int (*cb)(u32 entry_idx, void *arg),
                         void *arg);
@@ -177,7 +234,7 @@ int ft_flow4_table_walk(struct ft_table *ft,
 /**
  * @brief Migrate entries to a new bucket region (grow, shrink, or rehash).
  *
- * @p new_buckets / @p new_bucket_size need not be aligned — the library
+ * @p new_buckets / @p new_bucket_size need not be aligned - the library
  * carves out the largest power-of-2 aligned region internally.
  *
  * Constraints on the carved bucket count (new_nb_bk):
@@ -196,12 +253,13 @@ int ft_flow4_table_migrate(struct ft_table *ft,
  * Convenience macros / inline helpers
  *===========================================================================*/
 
-#define FT_FLOW4_TABLE_INIT_TYPED(ft, array, max_entries, type, member, \
-                                  buckets, bucket_size, cfg)           \
-    FT_TABLE_INIT_TYPED((ft), FT_TABLE_VARIANT_FLOW4, (array),          \
-                        (max_entries), type, member,                    \
+#define FT_FLOW4_TABLE_INIT_TYPED(ft, array, max_entries, type, member,       \
+                                  buckets, bucket_size, cfg)                  \
+    FT_TABLE_INIT_TYPED((ft), FT_TABLE_VARIANT_FLOW4, (array),                \
+                        (max_entries), type, member,                          \
                         (buckets), (bucket_size), (cfg))
 
+/** @brief Return the containing record pointer for a 1-origin entry index. */
 static inline void *
 ft_flow4_table_record_ptr(struct ft_table *ft, u32 entry_idx)
 {
@@ -210,6 +268,7 @@ ft_flow4_table_record_ptr(struct ft_table *ft, u32 entry_idx)
     return FT_RECORD_PTR(ft->pool_base, ft->pool_stride, entry_idx);
 }
 
+/** @brief Const variant of ft_flow4_table_record_ptr(). */
 static inline const void *
 ft_flow4_table_record_cptr(const struct ft_table *ft, u32 entry_idx)
 {
@@ -218,6 +277,7 @@ ft_flow4_table_record_cptr(const struct ft_table *ft, u32 entry_idx)
     return FT_RECORD_CPTR(ft->pool_base, ft->pool_stride, entry_idx);
 }
 
+/** @brief Return the embedded flow4_entry pointer for @p entry_idx. */
 static inline struct flow4_entry *
 ft_flow4_table_entry_ptr(struct ft_table *ft, u32 entry_idx)
 {
@@ -227,6 +287,7 @@ ft_flow4_table_entry_ptr(struct ft_table *ft, u32 entry_idx)
                                 ft->pool_entry_offset, struct flow4_entry);
 }
 
+/** @brief Const variant of ft_flow4_table_entry_ptr(). */
 static inline const struct flow4_entry *
 ft_flow4_table_entry_cptr(const struct ft_table *ft, u32 entry_idx)
 {
@@ -237,6 +298,7 @@ ft_flow4_table_entry_cptr(const struct ft_table *ft, u32 entry_idx)
                                  struct flow4_entry);
 }
 
+/** @brief Convert an embedded flow4_entry pointer back to a 1-origin index. */
 static inline u32
 ft_flow4_table_entry_idx(const struct ft_table *ft,
                          const struct flow4_entry *entry)
@@ -259,16 +321,16 @@ ft_flow4_table_entry_offset(const struct ft_table *ft)
     return ft == NULL ? 0u : ft->pool_entry_offset;
 }
 
-#define FT_FLOW4_TABLE_RECORD_PTR_AS(ft, type, entry_idx) \
+#define FT_FLOW4_TABLE_RECORD_PTR_AS(ft, type, entry_idx)                     \
     ((type *)ft_flow4_table_record_ptr((ft), (entry_idx)))
 
-#define FT_FLOW4_TABLE_RECORD_CPTR_AS(ft, type, entry_idx) \
+#define FT_FLOW4_TABLE_RECORD_CPTR_AS(ft, type, entry_idx)                    \
     ((const type *)ft_flow4_table_record_cptr((ft), (entry_idx)))
 
-#define FT_FLOW4_TABLE_RECORD_FROM_ENTRY(type, member, entry_ptr) \
+#define FT_FLOW4_TABLE_RECORD_FROM_ENTRY(type, member, entry_ptr)             \
     RIX_CONTAINER_OF((entry_ptr), type, member)
 
-#define FT_FLOW4_TABLE_ENTRY_FROM_RECORD(record_ptr, member) \
+#define FT_FLOW4_TABLE_ENTRY_FROM_RECORD(record_ptr, member)                  \
     FT_MEMBER_PTR((record_ptr), member)
 
 
@@ -353,3 +415,11 @@ ft_flow4_table_maintain_idx_bulk(struct ft_table *ft,
 }
 
 #endif /* _FLOW4_TABLE_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

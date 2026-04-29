@@ -20,7 +20,7 @@
 
 #include "bench_scope.h"
 
-#include "flow4_table.h"
+#include "flowtable/flow4_table.h"
 
 enum {
     PAD_ALIGN = 64u,
@@ -386,3 +386,11 @@ main(int argc, char **argv)
         return 1;
     return 0;
 }
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

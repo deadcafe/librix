@@ -24,8 +24,8 @@
 #include <rix/rix_hash_slot_extra.h>
 #include <rix/rix_defs_private.h>
 
-#include "flow_extra_common.h"
-#include "flow_extra_key.h"
+#include "flowtable/flow_extra_common.h"
+#include "flowtable/flow_extra_key.h"
 
 /*===========================================================================
  * Arch-suffix name mangling

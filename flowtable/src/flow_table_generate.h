@@ -8,7 +8,7 @@
  *
  * Usage in .c files:
  *
- *   #include "flow4_table.h"
+ *   #include "flowtable/flow4_table.h"
  *   // define layout hooks, hash_fn, cmp ...
  *   #include "flow_table_generate.h"
  *
@@ -108,28 +108,23 @@
  * Bulk operations delegate to the FCORE_GENERATE functions (_fcore_<p>_*).
  *===========================================================================*/
 #define FT_TABLE_GENERATE(p, hash_fn, cmp_fn)                                 \
-                                                                               \
 /* --- Internal helpers -------------------------------------------------- */ \
-                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE _FTG_ENTRY_T(p) *                          \
 _FTG_INT(p, hash_base_)(_FTG_TABLE_T(p) *ft)                                  \
 {                                                                             \
     return (_FTG_ENTRY_T(p) *)(void *)ft;                                     \
 }                                                                             \
-                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 _FTG_INT(p, entry_meta_clear_)(_FTG_ENTRY_T(p) *entry)                        \
 {                                                                             \
     flow_timestamp_clear(&entry->meta);                                       \
     entry->meta.reserved0 = 0u;                                               \
 }                                                                             \
-                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE size_t                                     \
 _FTG_INT(p, bucket_bytes_)(unsigned nb_bk)                                    \
 {                                                                             \
     return (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);                  \
 }                                                                             \
-                                                                               \
 /* find_hashed_: single-key lookup using precomputed hash */                  \
 static RIX_UNUSED RIX_FORCE_INLINE _FTG_ENTRY_T(p) *                          \
 _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
@@ -139,9 +134,8 @@ _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
     unsigned bk0, bk1;                                                        \
     u32 fp;                                                                   \
     u32 hits;                                                                 \
-                                                                               \
-    fp = rix_hash_fp(h, ft->ht_head.rhh_mask, &bk0, &bk1);              \
-    hits = RIX_HASH_FIND_U32X16(ft->buckets[bk0].hash, fp);                  \
+    fp = rix_hash_fp(h, ft->ht_head.rhh_mask, &bk0, &bk1);                    \
+    hits = RIX_HASH_FIND_U32X16(ft->buckets[bk0].hash, fp);                   \
     while (hits != 0u) {                                                      \
         unsigned bit = (unsigned)__builtin_ctz(hits);                         \
         unsigned idx = ft->buckets[bk0].idx[bit];                             \
@@ -156,7 +150,7 @@ _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
     }                                                                         \
     if (bk1 == bk0)                                                           \
         return NULL;                                                          \
-    hits = RIX_HASH_FIND_U32X16(ft->buckets[bk1].hash, fp);                  \
+    hits = RIX_HASH_FIND_U32X16(ft->buckets[bk1].hash, fp);                   \
     while (hits != 0u) {                                                      \
         unsigned bit = (unsigned)__builtin_ctz(hits);                         \
         unsigned idx = ft->buckets[bk1].idx[bit];                             \
@@ -171,7 +165,6 @@ _FTG_INT(p, find_hashed_)(_FTG_TABLE_T(p) *ft,                                \
     }                                                                         \
     return NULL;                                                              \
 }                                                                             \
-                                                                               \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
 _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
                          const _FTG_KEY_T(p) *keys,                           \
@@ -182,10 +175,8 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
     const u32 hash_mask = ft->start_mask;                                     \
     u64 hit_count = 0u;                                                       \
     u64 miss_count = 0u;                                                      \
-                                                                              \
     if (nb_keys > 1u && nb_keys < 4u) {                                       \
         struct rix_hash_find_ctx_s ctx[3];                                    \
-                                                                              \
         for (unsigned i = 0u; i < nb_keys; i++)                               \
             rix_hash_prefetch_key(&keys[i]);                                  \
         for (unsigned i = 0u; i < nb_keys; i++)                               \
@@ -193,15 +184,13 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
                                             hash_mask, ft->ht_head.rhh_mask); \
         for (unsigned i = 0u; i < nb_keys; i++) {                             \
             _FTG_HT(p, scan_bk)(&ctx[i], (_FTG_HT_T(p) *)0, ft->buckets);     \
-            _FTG_HT(p, prefetch_node)(&ctx[i], FTG_LAYOUT_HASH_BASE(ft));      \
+            _FTG_HT(p, prefetch_node)(&ctx[i], FTG_LAYOUT_HASH_BASE(ft));     \
         }                                                                     \
         for (unsigned i = 0u; i < nb_keys; i++) {                             \
             _FTG_ENTRY_T(p) *entry =                                          \
-                _FTG_HT(p, cmp_key)(&ctx[i], FTG_LAYOUT_HASH_BASE(ft));        \
-                                                                              \
+                _FTG_HT(p, cmp_key)(&ctx[i], FTG_LAYOUT_HASH_BASE(ft));       \
             if (RIX_LIKELY(entry != NULL)) {                                  \
                 u32 entry_idx = FTG_LAYOUT_ENTRY_INDEX(ft, entry);            \
-                                                                              \
                 FCORE_TOUCH_TIMESTAMP(ft, entry, now);                        \
                 FCORE_ON_HIT(ft, entry, entry_idx);                           \
                 results[i].entry_idx = entry_idx;                             \
@@ -216,20 +205,16 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
         ft->stats.core.misses += miss_count;                                  \
         return;                                                               \
     }                                                                         \
-                                                                              \
     for (unsigned i = 0u; i < nb_keys; i++) {                                 \
         struct rix_hash_find_ctx_s ctx;                                       \
         _FTG_ENTRY_T(p) *entry;                                               \
-                                                                              \
         _FTG_HT(p, hash_key_2bk_masked)(&ctx, ft->buckets, &keys[i],          \
                                         hash_mask, ft->ht_head.rhh_mask);     \
         _FTG_HT(p, scan_bk)(&ctx, (_FTG_HT_T(p) *)0, ft->buckets);            \
         _FTG_HT(p, prefetch_node)(&ctx, FTG_LAYOUT_HASH_BASE(ft));            \
         entry = _FTG_HT(p, cmp_key)(&ctx, FTG_LAYOUT_HASH_BASE(ft));          \
-                                                                              \
         if (RIX_LIKELY(entry != NULL)) {                                      \
             u32 entry_idx = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                \
-                                                                              \
             FCORE_TOUCH_TIMESTAMP(ft, entry, now);                            \
             FCORE_ON_HIT(ft, entry, entry_idx);                               \
             results[i].entry_idx = entry_idx;                                 \
@@ -243,17 +228,16 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
     ft->stats.core.hits += hit_count;                                         \
     ft->stats.core.misses += miss_count;                                      \
 }                                                                             \
-                                                                               \
 /* insert_hashed_: insert pre-hashed entry into hash table */                 \
 static RIX_UNUSED int                                                         \
 _FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
                             _FTG_ENTRY_T(p) *entry,                           \
                             const union rix_hash_hash_u h,                    \
-                            u32 *entry_idx_out)                          \
+                            u32 *entry_idx_out)                               \
 {                                                                             \
     _FTG_ENTRY_T(p) *ret;                                                     \
     _Pragma("GCC diagnostic push")                                            \
-    _Pragma("GCC diagnostic ignored \"-Wstrict-aliasing\"")                   \
+    _Pragma("GCC diagnostic ignored \"-Wstrict-aliasing\"")                                                                           \
     ret = _FTG_HT(p, insert_hashed)((_FTG_HT_T(p) *)(void *)&ft->ht_head,     \
                                     ft->buckets,                              \
                                     _FTG_INT(p, hash_base_)(ft),              \
@@ -270,7 +254,6 @@ _FTG_INT(p, insert_hashed_)(_FTG_TABLE_T(p) *ft,                              \
     *entry_idx_out = 0u;                                                      \
     return -1; /* table full */                                               \
 }                                                                             \
-                                                                               \
 /* rehash_insert_hashed_: for grow_2x, insert into new bucket array */        \
 static RIX_UNUSED int                                                         \
 _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
@@ -282,19 +265,19 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
     unsigned mask = head->rhh_mask;                                           \
     unsigned bk0, bk1;                                                        \
     u32 fp;                                                                   \
-    fp = rix_hash_fp(h, mask, &bk0, &bk1);                              \
+    fp = rix_hash_fp(h, mask, &bk0, &bk1);                                    \
     entry->meta.cur_hash = h.val32[0];                                        \
     for (unsigned pass = 0u; pass < 2u; pass++) {                             \
         unsigned bki = (pass == 0u) ? bk0 : bk1;                              \
         struct rix_hash_bucket_s *bk = &buckets[bki];                         \
-        u32 nilm = RIX_HASH_FIND_U32X16(bk->hash, 0u);                       \
+        u32 nilm = RIX_HASH_FIND_U32X16(bk->hash, 0u);                        \
         if (nilm != 0u) {                                                     \
             unsigned s = (unsigned)__builtin_ctz(nilm);                       \
             bk->hash[s] = fp;                                                 \
             bk->idx[s] = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                   \
             if (pass == 1u)                                                   \
                 entry->meta.cur_hash = h.val32[1];                            \
-            entry->meta.slot = (u16)s;                                   \
+            entry->meta.slot = (u16)s;                                        \
             head->rhh_nb++;                                                   \
             return 0;                                                         \
         }                                                                     \
@@ -319,25 +302,21 @@ _FTG_INT(p, rehash_insert_hashed_)(_FTG_HT_T(p) *head,                        \
         bk = &buckets[bki];                                                   \
         bk->hash[pos] = fp;                                                   \
         bk->idx[pos] = FTG_LAYOUT_ENTRY_INDEX(ft, entry);                     \
-        entry->meta.slot = (u16)(unsigned)pos;                           \
+        entry->meta.slot = (u16)(unsigned)pos;                                \
         head->rhh_nb++;                                                       \
         return 0;                                                             \
     }                                                                         \
 }                                                                             \
-                                                                               \
 /* --- destroy ----------------------------------------------------------- */ \
-                                                                               \
-static void                                                                          \
+static void                                                                   \
 _FTG_API(p, destroy)(_FTG_TABLE_T(p) *ft)                                     \
 {                                                                             \
     if (ft == NULL)                                                           \
         return;                                                               \
     memset(ft, 0, sizeof(*ft));                                               \
 }                                                                             \
-                                                                               \
 /* --- flush ------------------------------------------------------------- */ \
-                                                                               \
-static void                                                                          \
+static void                                                                   \
 _FTG_API(p, flush)(_FTG_TABLE_T(p) *ft)                                       \
 {                                                                             \
     if (ft == NULL || ft->buckets == NULL)                                    \
@@ -345,22 +324,18 @@ _FTG_API(p, flush)(_FTG_TABLE_T(p) *ft)                                       \
     _FTG_FCORE(p, flush_)(ft);                                                \
     flow_status_reset(&ft->status, 0u);                                       \
 }                                                                             \
-                                                                               \
 /* --- nb_entries -------------------------------------------------------- */ \
-                                                                               \
-static unsigned                                                                      \
+static unsigned                                                               \
 _FTG_API(p, nb_entries)(const _FTG_TABLE_T(p) *ft)                            \
 {                                                                             \
     return ft == NULL ? 0u : ft->ht_head.rhh_nb;                              \
 }                                                                             \
-                                                                               \
-static unsigned                                                                      \
+static unsigned                                                               \
 _FTG_API(p, nb_bk)(const _FTG_TABLE_T(p) *ft)                                 \
 {                                                                             \
     return ft == NULL ? 0u : ft->nb_bk;                                       \
 }                                                                             \
-                                                                               \
-static void                                                                          \
+static void                                                                   \
 _FTG_API(p, stats)(const _FTG_TABLE_T(p) *ft,                                 \
                    _FTG_STATS_T(p) *out)                                      \
 {                                                                             \
@@ -372,8 +347,7 @@ _FTG_API(p, stats)(const _FTG_TABLE_T(p) *ft,                                 \
     }                                                                         \
     *out = ft->stats;                                                         \
 }                                                                             \
-                                                                               \
-static void                                                                          \
+static void                                                                   \
 _FTG_API(p, status)(const _FTG_TABLE_T(p) *ft,                                \
                     struct flow_status *out)                                  \
 {                                                                             \
@@ -385,14 +359,12 @@ _FTG_API(p, status)(const _FTG_TABLE_T(p) *ft,                                \
     }                                                                         \
     *out = ft->status;                                                        \
 }                                                                             \
-                                                                               \
 /* --- find_bulk --------------------------------------------------------- */ \
-                                                                               \
-static void                                                                          \
+static void                                                                   \
 _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
                        const _FTG_KEY_T(p) *keys,                             \
                        unsigned nb_keys,                                      \
-                       u64 now,                                          \
+                       u64 now,                                               \
                        _FTG_RESULT_T(p) *results)                             \
 {                                                                             \
     if (results == NULL)                                                      \
@@ -409,16 +381,14 @@ _FTG_API(p, find_bulk)(_FTG_TABLE_T(p) *ft,                                   \
     _FTG_FCORE(p, find_key_bulk_)((ft), (keys), (nb_keys), (now),             \
                                   &(results)[0].entry_idx);                   \
 }                                                                             \
-                                                                               \
 /* --- add_idx_bulk ------------------------------------------------------ */ \
-                                                                               \
-static unsigned                                                                      \
+static unsigned                                                               \
 _FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
-                           u32 *entry_idxv,                              \
+                           u32 *entry_idxv,                                   \
                            unsigned nb_keys,                                  \
                            enum ft_add_policy policy,                         \
-                           u64 now,                                      \
-                           u32 *unused_idxv)                             \
+                           u64 now,                                           \
+                           u32 *unused_idxv)                                  \
 {                                                                             \
     if (unused_idxv == NULL)                                                  \
         return 0u;                                                            \
@@ -428,19 +398,17 @@ _FTG_API(p, add_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
     return _FTG_FCORE(p, add_idx_bulk_)((ft), (entry_idxv), (nb_keys),        \
                                         (policy), (now), (unused_idxv));      \
 }                                                                             \
-                                                                               \
 /* --- add_idx_bulk_maint ----------------------------------------------- */  \
-                                                                               \
 static unsigned                                                               \
 _FTG_API(p, add_idx_bulk_maint)(_FTG_TABLE_T(p) *ft,                          \
-                                u32 *entry_idxv,                               \
-                                unsigned nb_keys,                              \
-                                enum ft_add_policy policy,                     \
-                                u64 now,                                        \
-                                u64 timeout,                                    \
-                                u32 *unused_idxv,                              \
-                                unsigned max_unused,                            \
-                                unsigned min_bk_used)                           \
+                                u32 *entry_idxv,                              \
+                                unsigned nb_keys,                             \
+                                enum ft_add_policy policy,                    \
+                                u64 now,                                      \
+                                u64 timeout,                                  \
+                                u32 *unused_idxv,                             \
+                                unsigned max_unused,                          \
+                                unsigned min_bk_used)                         \
 {                                                                             \
     if (unused_idxv == NULL)                                                  \
         return 0u;                                                            \
@@ -451,9 +419,7 @@ _FTG_API(p, add_idx_bulk_maint)(_FTG_TABLE_T(p) *ft,                          \
                                               (unused_idxv), (max_unused),    \
                                               (min_bk_used));                 \
 }                                                                             \
-                                                                               \
 /* --- del_key_bulk ------------------------------------------------------ */ \
-                                                                               \
 static unsigned                                                               \
 _FTG_API(p, del_key_bulk)(_FTG_TABLE_T(p) *ft,                                \
                           const _FTG_KEY_T(p) *keys,                          \
@@ -466,36 +432,30 @@ _FTG_API(p, del_key_bulk)(_FTG_TABLE_T(p) *ft,                                \
     return _FTG_FCORE(p, del_key_bulk_)((ft), (keys), (nb_keys),              \
                                         (unused_idxv));                       \
 }                                                                             \
-                                                                               \
-/* --- del_idx_bulk ------------------------------------------------ */ \
-                                                                               \
+/* --- del_idx_bulk ------------------------------------------------ */       \
 static unsigned                                                               \
-_FTG_API(p, del_idx_bulk)(_FTG_TABLE_T(p) *ft,                          \
-                                const u32 *entry_idxv,                   \
+_FTG_API(p, del_idx_bulk)(_FTG_TABLE_T(p) *ft,                                \
+                                const u32 *entry_idxv,                        \
                                 unsigned nb_keys,                             \
-                                u32 *unused_idxv)                        \
+                                u32 *unused_idxv)                             \
 {                                                                             \
     if (ft == NULL || ft->buckets == NULL || entry_idxv == NULL)              \
         return 0u;                                                            \
     return _FTG_FCORE(p, del_idx_bulk_)((ft), (entry_idxv), (nb_keys),        \
                                         (unused_idxv));                       \
 }                                                                             \
-                                                                               \
 /* --- walk -------------------------------------------------------------- */ \
-                                                                               \
-static int                                                                           \
+static int                                                                    \
 _FTG_API(p, walk)(_FTG_TABLE_T(p) *ft,                                        \
-                  int (*cb)(u32 entry_idx, void *arg),                   \
+                  int (*cb)(u32 entry_idx, void *arg),                        \
                   void *arg)                                                  \
 {                                                                             \
     if (ft == NULL || cb == NULL)                                             \
         return -1;                                                            \
     return _FTG_FCORE(p, walk_)((ft), (cb), (arg));                           \
 }                                                                             \
-                                                                               \
-/* --- migrate: move entries to user-provided new buckets ----------------*/ \
-                                                                               \
-static int                                                                     \
+/* --- migrate: move entries to user-provided new buckets ----------------*/  \
+static int                                                                    \
 _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
                      void *new_buckets_raw,                                   \
                      size_t new_bucket_size)                                  \
@@ -517,33 +477,28 @@ _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
         union rix_hash_hash_u h;                                              \
     } ring[_GROW_RING_SZ];                                                    \
     unsigned new_mask, old_mask;                                              \
-    unsigned scanned = 0u, hashed = 0u, inserted = 0u;                       \
-                                                                               \
+    unsigned scanned = 0u, hashed = 0u, inserted = 0u;                        \
     if (ft == NULL || ft->buckets == NULL)                                    \
         return -1;                                                            \
     if (new_buckets_raw == NULL || new_bucket_size == 0u)                     \
         return -1;                                                            \
     new_buckets = ft_table_bucket_carve(new_buckets_raw,                      \
-                                       new_bucket_size, &new_nb_bk);         \
+                                       new_bucket_size, &new_nb_bk);          \
     if (new_nb_bk <= ft->start_mask)                                          \
         return -1;                                                            \
     memset(new_buckets, 0, (size_t)new_nb_bk * sizeof(*new_buckets));         \
-                                                                               \
     _FTG_HT(p, init)(&new_head, new_nb_bk);                                   \
     new_mask = new_head.rhh_mask;                                             \
     old_mask = ft->ht_head.rhh_mask;                                          \
-                                                                               \
     for (unsigned bk = 0u;                                                    \
          bk < _GROW_OLD_BK_AHEAD && bk <= old_mask;                           \
          bk++)                                                                \
         rix_hash_prefetch_bucket_of(&ft->buckets[bk]);                        \
-                                                                               \
     for (unsigned bk = 0u; bk <= old_mask; bk++) {                            \
         const struct rix_hash_bucket_s *old_bk = &ft->buckets[bk];            \
         unsigned pfbk = bk + _GROW_OLD_BK_AHEAD;                              \
         if (pfbk <= old_mask)                                                 \
             rix_hash_prefetch_bucket_of(&ft->buckets[pfbk]);                  \
-                                                                               \
         for (unsigned s = 0u; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {            \
             unsigned idx = old_bk->idx[s];                                    \
             _FTG_ENTRY_T(p) *entry;                                           \
@@ -553,9 +508,8 @@ _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
             RIX_ASSUME_NONNULL(entry);                                        \
             rix_hash_prefetch_entry_of(entry);                                \
             ring[scanned & _GROW_RING_MASK].entry = entry;                    \
-            ring[scanned & _GROW_RING_MASK].old_fp = old_bk->hash[s];        \
+            ring[scanned & _GROW_RING_MASK].old_fp = old_bk->hash[s];         \
             scanned++;                                                        \
-                                                                               \
             if (scanned - hashed >= _GROW_ENTRY_AHEAD + _GROW_BATCH) {        \
                 for (unsigned b = 0u; b < _GROW_BATCH; b++) {                 \
                     unsigned ri = hashed & _GROW_RING_MASK;                   \
@@ -580,7 +534,6 @@ _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
             }                                                                 \
         }                                                                     \
     }                                                                         \
-                                                                               \
     while (hashed < scanned) {                                                \
         unsigned ri = hashed & _GROW_RING_MASK;                               \
         u32 cur = ring[ri].entry->meta.cur_hash;                              \
@@ -600,16 +553,14 @@ _FTG_API(p, migrate)(_FTG_TABLE_T(p) *ft,                                     \
         inserted++;                                                           \
     }                                                                         \
     goto _migrate_done;                                                       \
-                                                                               \
 _migrate_fail:                                                                \
     ft->stats.grow_failures++;                                                \
     return -1;                                                                \
 _migrate_done: (void)0;                                                       \
-                                                                               \
     ft->buckets = new_buckets;                                                \
     memcpy(&ft->ht_head, &new_head, sizeof(ft->ht_head));                     \
     ft->nb_bk = new_nb_bk;                                                    \
-    flow_status_reset(&ft->status, (u32)new_head.rhh_nb);                \
+    flow_status_reset(&ft->status, (u32)new_head.rhh_nb);                     \
     ft->stats.grow_execs++;                                                   \
     return 0;                                                                 \
 }                                                                             \
@@ -626,21 +577,29 @@ _migrate_done: (void)0;                                                       \
 
 #define FT_OPS_TABLE(prefix, suffix)                                          \
 const struct ft_##prefix##_ops _FT_OPS_TNAME(prefix, suffix) = {              \
-    /* cold-path */                                                            \
+    /* cold-path */                                                           \
     .destroy         = _FT_OPS_FNAME(prefix, destroy),                        \
     .flush           = _FT_OPS_FNAME(prefix, flush),                          \
     .nb_entries      = _FT_OPS_FNAME(prefix, nb_entries),                     \
-    .nb_bk           = _FT_OPS_FNAME(prefix, nb_bk),                         \
+    .nb_bk           = _FT_OPS_FNAME(prefix, nb_bk),                          \
     .stats           = _FT_OPS_FNAME(prefix, stats),                          \
     .status          = _FT_OPS_FNAME(prefix, status),                         \
     .walk            = _FT_OPS_FNAME(prefix, walk),                           \
     .migrate         = _FT_OPS_FNAME(prefix, migrate),                        \
-    /* hot-path */                                                             \
+    /* hot-path */                                                            \
     .find_bulk       = _FT_OPS_FNAME(prefix, find_bulk),                      \
     .add_idx_bulk    = _FT_OPS_FNAME(prefix, add_idx_bulk),                   \
-    .add_idx_bulk_maint = _FT_OPS_FNAME(prefix, add_idx_bulk_maint),         \
-    .del_key_bulk    = _FT_OPS_FNAME(prefix, del_key_bulk),                    \
-    .del_idx_bulk    = _FT_OPS_FNAME(prefix, del_idx_bulk),             \
+    .add_idx_bulk_maint = _FT_OPS_FNAME(prefix, add_idx_bulk_maint),          \
+    .del_key_bulk    = _FT_OPS_FNAME(prefix, del_key_bulk),                   \
+    .del_idx_bulk    = _FT_OPS_FNAME(prefix, del_idx_bulk),                   \
 }
 
 #endif /* _FLOW_TABLE_GENERATE_H_ */
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

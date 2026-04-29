@@ -4,7 +4,7 @@
  * Copyright (c) 2026 deadcafe.beef@gmail.com
  * All rights reserved.
  *
- * test_flow4_parity.c - drive classic flow4 and the slot_extra flow4 with
+ * test_flow4_parity.c - drive pure flow4 and the slot_extra flow4 with
  * the same op stream and assert externally observable equivalence.
  */
 
@@ -19,9 +19,9 @@
 #include <rix/rix_hash.h>
 #include <rix/rix_hash_slot_extra.h>
 
-#include "flow4_table.h"
-#include "flow4_extra_table.h"
-#include "flow_key.h"
+#include "flowtable/flow4_table.h"
+#include "flowtable/flow4_extra_table.h"
+#include "flowtable/flow_key.h"
 
 #define FUZZ_POOL 512u
 #define FUZZ_OPS  20000u
@@ -54,7 +54,7 @@ hugealloc(size_t bytes)
 }
 
 static struct flow4_key
-classic_key(unsigned slot)
+pure_key(unsigned slot)
 {
     struct flow4_key k;
 
@@ -114,7 +114,7 @@ main(void)
     assert(rc == 0);
 
     for (unsigned i = 0u; i < FUZZ_POOL; i++) {
-        pool_c[i].key = classic_key(i);
+        pool_c[i].key = pure_key(i);
         pool_e[i].key = extra_key(i);
     }
 
@@ -134,8 +134,8 @@ main(void)
             assert((idx_c == 0u) == (idx_e == 0u));
             break;
 
-        case 3: case 4: {  /* FIND (pass now=0 so classic does not touch) */
-            struct flow4_key       kc = classic_key(i);
+        case 3: case 4: {  /* FIND (pass now=0 so pure does not touch) */
+            struct flow4_key       kc = pure_key(i);
             struct flow4_extra_key ke = extra_key(i);
 
             idx_c = ft_flow4_table_find(&ft_c, &kc, 0u);
@@ -147,7 +147,7 @@ main(void)
         }
 
         case 5: {  /* DEL by key */
-            struct flow4_key       kc = classic_key(i);
+            struct flow4_key       kc = pure_key(i);
             struct flow4_extra_key ke = extra_key(i);
 
             idx_c = ft_flow4_table_del_key_oneshot(&ft_c, &kc);
