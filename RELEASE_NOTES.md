@@ -24,6 +24,8 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - share pure/extra bucket-size calculation logic
 - reuse one slot-extra bucket-carve helper in init and migrate paths
 - update English and Japanese allocation-model documentation
+- add benchmark methodology documentation covering purpose, setup, and trust
+  boundaries for each target
 - correct slot-extra `find_bulk` return-value docs
 - correct the small `ft_bench_extra` add+inline-maint phase-1-only setup so it
   stays within the intended flowcache operating range
@@ -33,6 +35,10 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - make `ft_bench_extra` use 75% active fill for the initial matched block and
   align the pure/extra API choices
 - keep `ft_bench_extra_full` datapath operations at the requested fill level
+- fix `ft_bench` indexed-maintenance input length
+- include zone-sweep and controller-sweep costs in the relevant reported
+  benchmark totals
+- correct README benchmark sampling defaults to match the Makefile
 
 ### Validation status
 
@@ -42,10 +48,16 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - `make -C flowtable/test test-parity`: passed
 - `make -C flowtable/test bench-extra`: passed
 - `make -C flowtable/test bench-sweep`: passed
+- `ft_bench --arch avx2 --query 64 --raw-repeat 1 --keep-n 1 --op find_hit
+  flow4 65536 60`: passed
+- `ft_bench_zoned`: passed
+- `ft_bench_ctrl avx2`: passed
 - `ft_bench_extra_full --arch avx2 --query 64 --reps 1 flow4_extra 65536 60`:
   passed
 - `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
   passed
+- `ft_bench --maint` requires local perf_event access; a smoke run could not
+  open perf events in this environment.
 
 ### Notes
 

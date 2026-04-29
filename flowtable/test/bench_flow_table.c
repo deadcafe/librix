@@ -1886,6 +1886,7 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
     unsigned next_bk = 0u;
     unsigned prev_bk;
     unsigned evicted;
+    unsigned hit_n = 0u;
     u64 total_evicted = 0u;
     int rc;
 
@@ -1895,7 +1896,6 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
     }
     if (mode == FTB_MAINT_HIT_IDX_EXPIRE
         || mode == FTB_MAINT_HIT_IDX_EXPIRE_FILTERED) {
-        unsigned hit_n;
         u64 used_n = 0u;
 
         keys = ftb_xcalloc(ftb_query_n, ops->key_size);
@@ -1946,13 +1946,13 @@ ftb_measure_maint_perf_once(const struct ftb_variant_ops *ops,
         return -1;
     }
     if (mode == FTB_MAINT_HIT_IDX_EXPIRE) {
-        evicted = ops->maintain_idx_bulk(&ft, hit_idxv, (unsigned)*units_out,
+        evicted = ops->maintain_idx_bulk(&ft, hit_idxv, hit_n,
                                          UINT64_C(200000), UINT64_C(100000),
                                          expired_idxv,
                                          FTB_MAINT_MAX_EXPIRED, 2u, 0);
         total_evicted = evicted;
     } else if (mode == FTB_MAINT_HIT_IDX_EXPIRE_FILTERED) {
-        evicted = ops->maintain_idx_bulk(&ft, hit_idxv, (unsigned)*units_out,
+        evicted = ops->maintain_idx_bulk(&ft, hit_idxv, hit_n,
                                          UINT64_C(200000), UINT64_C(100000),
                                          expired_idxv,
                                          FTB_MAINT_MAX_EXPIRED, 2u, 1);

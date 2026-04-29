@@ -692,6 +692,9 @@ benchmark program は `flowtable/test/bench_flow_table.c` であり、
 make -C flowtable/test bench
 ```
 
+測定方針と各 target がどこまで信用できるかは
+[BENCHMARKING.md](BENCHMARKING.md) に記述している。
+
 - `bench` / `bench-light`: `flow4` のみ、`q=1/8/32/256`、fill `60%`、
   `--arch auto`（runtime で一番有利な supported variant）
 - `bench-full`: `flow4/6/u` の query sweep に `maint` と `grow` を加え、
@@ -726,7 +729,8 @@ arch variant を広く評価する full benchmark である。`bench-extra-full`
 - `--op OP` — 特定操作のみ実行
 - `--query N` — バッチサイズ（既定 256）
 
-`make bench` 既定値: `--pin-core 2 --raw-repeat 11 --keep-n 7`
+`make bench` 既定値: `--pin-core 2 --raw-repeat 3 --keep-n 1`。
+`make bench-full` 既定値: `--pin-core 2 --raw-repeat 11 --keep-n 7`。
 
 注記:
 

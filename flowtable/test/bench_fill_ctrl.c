@@ -134,7 +134,8 @@ static u32 fring_pop(fring_t *r)
 #define PROG_INTERVAL 2000u
 
 typedef struct {
-    u64      cy_add, cy_hit;
+    u64      cy_add, cy_hit, cy_sweep;
+    u64      n_add, n_hit;
     unsigned n_batches;
     unsigned fill_min, fill_max;
 } pstat_t;
@@ -142,26 +143,33 @@ typedef struct {
 static void pstat_reset(pstat_t *s, unsigned fill)
 { memset(s,0,sizeof(*s)); s->fill_min=fill; s->fill_max=fill; }
 
-static void pstat_update(pstat_t *s, unsigned fill, u64 ca, u64 ch)
+static void
+pstat_update(pstat_t *s, unsigned fill, u64 ca, u64 ch, u64 cs,
+             unsigned n_add, unsigned n_hit)
 {
     if (fill < s->fill_min) s->fill_min = fill;
     if (fill > s->fill_max) s->fill_max = fill;
-    s->cy_add += ca; s->cy_hit += ch; s->n_batches++;
+    s->cy_add += ca; s->cy_hit += ch; s->cy_sweep += cs;
+    s->n_add += n_add; s->n_hit += n_hit; s->n_batches++;
 }
 
 static void pstat_print(const char *label, const pstat_t *s,
-                         unsigned N, unsigned q_add, unsigned q_hit)
+                         unsigned N)
 {
     unsigned nb = s->n_batches ? s->n_batches : 1u;
+    u64 n_add = s->n_add ? s->n_add : 1u;
+    u64 n_hit = s->n_hit ? s->n_hit : 1u;
+    u64 n_pkt = (s->n_add + s->n_hit) ? (s->n_add + s->n_hit) : 1u;
+
     printf("  [%-14s] fill=%4.1f%%..%4.1f%%  cy/add=%6.1f  cy/hit=%6.1f"
-           "  cy/pkt=%6.1f\n",
+           "  cy/sweep-batch=%6.1f  cy/pkt=%6.1f\n",
            label,
            (double)s->fill_min * 100.0 / (double)N,
            (double)s->fill_max * 100.0 / (double)N,
-           (double)s->cy_add / ((double)nb * (double)q_add),
-           (double)s->cy_hit / ((double)nb * (double)q_hit),
-           (double)(s->cy_add + s->cy_hit)
-               / ((double)nb * ((double)q_add + (double)q_hit)));
+           (double)s->cy_add / (double)n_add,
+           (double)s->cy_hit / (double)n_hit,
+           (double)s->cy_sweep / (double)nb,
+           (double)(s->cy_add + s->cy_hit + s->cy_sweep) / (double)n_pkt);
 }
 
 /* ------------------------------------------------------------------ */
@@ -200,7 +208,7 @@ run_phase(const char *label,
 
     for (b = 0u; b < n_batches; b++) {
         unsigned budget, start_bk, n_take, n_un, n_sw, i;
-        u64 tmo, t0, t1;
+        u64 tmo, t0, t1, cy_s;
         unsigned fill = ft_table_extra_nb_entries(ft);
 
         ft_fill_ctrl_compute(ctrl, fill,
@@ -234,12 +242,16 @@ run_phase(const char *label,
         u64 cy_h = t1 - t0;
 
         /* sweep */
+        cy_s = 0u;
         prev_next_bk = start_bk;
         n_sw = 0u;
         if (budget > 0u) {
             unsigned cap = budget < sweep_cap ? budget : sweep_cap;
+            t0 = real_tsc();
             n_sw = ft_table_extra_maintain(mctx, start_bk, sim_now, tmo,
                                             sweep_buf, cap, 1u, &prev_next_bk);
+            t1 = real_tsc();
+            cy_s = t1 - t0;
             for (i = 0u; i < n_sw; i++)
                 fring_push(fpool, sweep_buf[i]);
         }
@@ -248,7 +260,7 @@ run_phase(const char *label,
         prev_hits  = q_hit;
 
         fill = ft_table_extra_nb_entries(ft);
-        pstat_update(&st, fill, cy_a, cy_h);
+        pstat_update(&st, fill, cy_a, cy_h, cy_s, n_take, q_hit);
 
         if ((b + 1u) % PROG_INTERVAL == 0u) {
             double tmo_pct = (double)tmo * 100.0 / (double)t_normal;
@@ -261,7 +273,7 @@ run_phase(const char *label,
     }
 
     *sim_now_io = sim_now;
-    pstat_print(label, &st, N, q_add, q_hit);
+    pstat_print(label, &st, N);
     printf("\n");
 }
 

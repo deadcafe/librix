@@ -110,7 +110,11 @@ help:
 	  '  bench        Run the light benchmark set (flow4 only, q=1/8/32/256 @ fill=60%)' \
 	  '  bench-light  Same as bench' \
 	  '  bench-full   Run the full benchmark sweep (flow4/6/u query, maintain, grow)' \
+	  '  bench-extra  Run focused flow4 pure-vs-slot-extra comparison @ 75% fill' \
 	  '  bench-extra-full  Run full slot-extra sweep (flow4/6/u extra)' \
+	  '  bench-sweep  Run pure-vs-slot-extra maintain fill/expire matrix' \
+	  '  bench-zoned  Run zone-based flowcache control benchmark' \
+	  '  bench-ctrl   Run adaptive fill-controller benchmark' \
 	  '  sample       Build the readable API usage sample (not a test/bench)' \
 	  '  sim          Build and run the flow cache simulation' \
 	  '  clean        Remove generated binaries and dependency files' \

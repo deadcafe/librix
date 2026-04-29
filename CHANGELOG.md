@@ -26,6 +26,8 @@ speed.
   code.
 - The allocation model documentation now describes both pure and slot-extra
   bucket helpers.
+- Benchmark methodology is now documented in `flowtable/BENCHMARKING.md`,
+  including each target's purpose, measurement setup, and trust boundary.
 
 ### Fixed
 
@@ -48,6 +50,15 @@ speed.
   fill level and measures add from that fill over a bounded add window,
   instead of letting the add measurement move the shared table beyond the
   requested fill before subsequent operations.
+- `ft_bench` indexed-maintenance benchmark now passes the actual hit-index
+  count to `maintain_idx_bulk()` instead of the larger represented bucket-entry
+  count.
+- `ft_bench_zoned` now divides by actual timed add/hit counts and documents
+  that `cy/add` includes zone sweep work.
+- `ft_bench_ctrl` now includes sweep cost in `cy/pkt` and reports sweep cost
+  per batch, so fill-control overhead is not hidden.
+- README benchmark defaults now match the Makefile policy for `bench` and
+  `bench-full`.
 
 ### Validation status
 
@@ -57,10 +68,17 @@ speed.
 - `make -C flowtable/test test-parity`: passed
 - `make -C flowtable/test bench-extra`: passed
 - `make -C flowtable/test bench-sweep`: passed
+- `ft_bench --arch avx2 --query 64 --raw-repeat 1 --keep-n 1 --op find_hit
+  flow4 65536 60`: passed
+- `ft_bench_zoned`: passed
+- `ft_bench_ctrl avx2`: passed
 - `ft_bench_extra_full --arch avx2 --query 64 --reps 1 flow4_extra 65536 60`:
   passed
 - `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
   passed
+- A local `ft_bench --maint` smoke run could not open perf events in this
+  environment; maintain code was compile-validated, and the perf requirement is
+  documented in `flowtable/BENCHMARKING.md`.
 - AVX-512 execution was skipped because the local CPU does not advertise
   AVX512F.
 

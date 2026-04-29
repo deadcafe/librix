@@ -175,6 +175,8 @@ fring_pop(fring_t *r)
 typedef struct {
     u64      cy_add;   /* cumulative cycles for add+maint+sweep batches */
     u64      cy_hit;   /* cumulative cycles for find batches */
+    u64      n_add;
+    u64      n_hit;
     unsigned n_green;
     unsigned n_yellow;
     unsigned n_red;
@@ -246,8 +248,10 @@ run_pure(const char *scenario,
         }
 
         t1 = tsc_end();
-        if (b >= NWARM_Z)
+        if (b >= NWARM_Z) {
             st->cy_add += (t1 - t0);
+            st->n_add += n_take;
+        }
 
         /* return evicted to free pool */
         for (i = 0u; i < n_un; i++)
@@ -265,8 +269,10 @@ run_pure(const char *scenario,
                 (void)ft_flow4_table_find(ft, &pool[idx].key, now);
             }
             t1 = tsc_end();
-            if (b >= NWARM_Z)
+            if (b >= NWARM_Z) {
                 st->cy_hit += (t1 - t0);
+                st->n_hit += q_hit;
+            }
         }
     }
     st->n_batches += REPS_Z;
@@ -274,10 +280,11 @@ run_pure(const char *scenario,
     printf("  pure/%-7s Q_add=%3u  cy/add=%7.1f  cy/hit=%7.1f"
            "  cy/pkt=%7.1f  fill=%4.1f%%  G=%u Y=%u R=%u\n",
            scenario, q_add,
-           (double)st->cy_add / (double)(REPS_Z * n_take),
-           (double)st->cy_hit / (double)(REPS_Z * q_add * 32u),
+           (double)st->cy_add / (double)(st->n_add ? st->n_add : 1u),
+           (double)st->cy_hit / (double)(st->n_hit ? st->n_hit : 1u),
            ((double)st->cy_add + (double)st->cy_hit)
-               / (double)(REPS_Z * (n_take + q_add * 32u)),
+               / (double)((st->n_add + st->n_hit)
+                           ? (st->n_add + st->n_hit) : 1u),
            (double)ft_table_nb_entries(ft) * 100.0 / (double)N,
            st->n_green, st->n_yellow, st->n_red);
 }
@@ -345,8 +352,10 @@ run_extra(const char *scenario,
         }
 
         t1 = tsc_end();
-        if (b >= NWARM_Z)
+        if (b >= NWARM_Z) {
             st->cy_add += (t1 - t0);
+            st->n_add += n_take;
+        }
 
         for (i = 0u; i < n_un; i++)
             if (maint_buf[i] != 0u)
@@ -362,8 +371,10 @@ run_extra(const char *scenario,
                 (void)flow4_extra_table_find_touch(ft, &pool[idx].key, now);
             }
             t1 = tsc_end();
-            if (b >= NWARM_Z)
+            if (b >= NWARM_Z) {
                 st->cy_hit += (t1 - t0);
+                st->n_hit += q_hit;
+            }
         }
     }
     st->n_batches += REPS_Z;
@@ -371,10 +382,11 @@ run_extra(const char *scenario,
     printf("  extra  /%-7s Q_add=%3u  cy/add=%7.1f  cy/hit=%7.1f"
            "  cy/pkt=%7.1f  fill=%4.1f%%  G=%u Y=%u R=%u\n",
            scenario, q_add,
-           (double)st->cy_add / (double)(REPS_Z * n_take),
-           (double)st->cy_hit / (double)(REPS_Z * q_add * 32u),
+           (double)st->cy_add / (double)(st->n_add ? st->n_add : 1u),
+           (double)st->cy_hit / (double)(st->n_hit ? st->n_hit : 1u),
            ((double)st->cy_add + (double)st->cy_hit)
-               / (double)(REPS_Z * (n_take + q_add * 32u)),
+               / (double)((st->n_add + st->n_hit)
+                           ? (st->n_add + st->n_hit) : 1u),
            (double)ft_table_extra_nb_entries(ft) * 100.0 / (double)N,
            st->n_green, st->n_yellow, st->n_red);
 }
@@ -555,6 +567,7 @@ bench_one_size(unsigned N)
     printf("  (Green<75%%  Yellow<85%%  Red<95%%"
            "  sweep_y=%u  sweep_r=%u  reps=%u)\n",
            SWEEP_Y_MAX, SWEEP_R_MAX, REPS_Z);
+    printf("  cy/add includes add_idx_bulk_maint plus any zone sweep\n");
     printf("  %-15s %-7s %10s %10s %10s %8s  zones\n",
            "variant/zone", "Q_add", "cy/add", "cy/hit", "cy/pkt", "fill");
 

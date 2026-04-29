@@ -672,6 +672,9 @@ producing the `ft_bench` binary.
 make -C flowtable/test bench
 ```
 
+Detailed measurement policy and per-target trust boundaries are documented in
+[BENCHMARKING.md](BENCHMARKING.md).
+
 - `bench` / `bench-light`: `flow4` only, `q=1/8/32/256`, fill `60%`,
   `--arch auto` (the best supported runtime variant)
 - `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`, repeated
@@ -706,7 +709,8 @@ Options:
 - `--op OP` — run only a specific operation
 - `--query N` — batch size (default 256)
 
-Default `make bench` policy: `--pin-core 2 --raw-repeat 11 --keep-n 7`
+Default `make bench` policy: `--pin-core 2 --raw-repeat 3 --keep-n 1`.
+Default `make bench-full` policy: `--pin-core 2 --raw-repeat 11 --keep-n 7`.
 
 Notes:
 
