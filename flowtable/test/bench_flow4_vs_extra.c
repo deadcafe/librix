@@ -6,10 +6,10 @@
  *
  * bench_flow4_vs_extra.c - matched pure-vs-extra microbench.
  *
- * Same N, same bucket count, same keys, same rep count for both variants.
- * The first block is a full-table stress pass; the later sections measure
- * representative 75% fill add/maintenance cases.  Per-op cycle cost is
- * averaged over REPS * N operations unless printed otherwise.
+ * Same capacity, same bucket count, same keys, same rep count for both
+ * variants.  The matched blocks run at 75% active fill so they stay in the
+ * intended flowcache operating range.  Per-op cycle cost is averaged over the
+ * printed live operation count unless printed otherwise.
  */
 
 #include <assert.h>
@@ -27,6 +27,7 @@
 #include "flowtable/flow_key.h"
 
 #define N_ENTRIES (1u << 16)
+#define N_FILL75  (N_ENTRIES * 3u / 4u)
 #define REPS      8u
 #define TS_SHIFT  4u
 
@@ -119,16 +120,17 @@ make_miss_extra(struct flow4_extra_key *k, unsigned i)
 
 /* Mark first `stale_n` entries as stale (direct TS write). */
 static void
-age_pure(struct flow4_entry *pool, unsigned stale_n,
-            u64 now, u64 old)
+age_pure(struct flow4_entry *pool, unsigned live_n, unsigned stale_n,
+         u64 now, u64 old)
 {
     unsigned i;
     u32 enc_old = (u32)flow_timestamp_encode(old, TS_SHIFT);
     u32 enc_now = (u32)flow_timestamp_encode(now, TS_SHIFT);
 
+    assert(stale_n <= live_n);
     for (i = 0u; i < stale_n; i++)
         pool[i].meta.timestamp = enc_old;
-    for (; i < N_ENTRIES; i++) {
+    for (; i < live_n; i++) {
         if (pool[i].meta.timestamp != 0u)
             pool[i].meta.timestamp = enc_now;
     }
@@ -136,7 +138,7 @@ age_pure(struct flow4_entry *pool, unsigned stale_n,
 
 static void
 age_extra(struct ft_table_extra *ft,
-          struct flow4_extra_entry *pool, unsigned stale_n,
+          struct flow4_extra_entry *pool, unsigned live_n, unsigned stale_n,
           u64 now, u64 old)
 {
     unsigned i;
@@ -144,13 +146,14 @@ age_extra(struct ft_table_extra *ft,
     u32 enc_now = flow_extra_timestamp_encode(now, TS_SHIFT);
     unsigned bk_mask = ft_table_extra_nb_bk(ft) - 1u;
 
+    assert(stale_n <= live_n);
     for (i = 0u; i < stale_n; i++) {
         unsigned bk_idx = pool[i].meta.cur_hash & bk_mask;
         unsigned slot   = (unsigned)pool[i].meta.slot;
 
         flow_extra_ts_set(&ft->buckets[bk_idx], slot, enc_old);
     }
-    for (; i < N_ENTRIES; i++) {
+    for (; i < live_n; i++) {
         unsigned bk_idx = pool[i].meta.cur_hash & bk_mask;
         unsigned slot   = (unsigned)pool[i].meta.slot;
 
@@ -226,20 +229,20 @@ main(void)
 
         /* --- insert --- */
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++)
+        for (i = 0u; i < N_FILL75; i++)
             (void)ft_flow4_table_add_idx(&ft_c, i + 1u, now);
         t1 = tsc_end();
         c_ins += (t1 - t0);
 
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++)
+        for (i = 0u; i < N_FILL75; i++)
             (void)ft_table_extra_add_idx(&ft_e, i + 1u, now);
         t1 = tsc_end();
         e_ins += (t1 - t0);
 
         /* --- find_hit --- */
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++) {
+        for (i = 0u; i < N_FILL75; i++) {
             struct flow4_key k = { 0 };
 
             k.family   = 4u;
@@ -254,7 +257,7 @@ main(void)
         c_find += (t1 - t0);
 
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++) {
+        for (i = 0u; i < N_FILL75; i++) {
             struct flow4_extra_key k = { 0 };
 
             k.family   = 4u;
@@ -270,7 +273,7 @@ main(void)
 
         /* --- find_miss --- */
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++) {
+        for (i = 0u; i < N_FILL75; i++) {
             struct flow4_key k;
 
             make_miss_pure(&k, i);
@@ -280,7 +283,7 @@ main(void)
         c_miss += (t1 - t0);
 
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++) {
+        for (i = 0u; i < N_FILL75; i++) {
             struct flow4_extra_key k;
 
             make_miss_extra(&k, i);
@@ -291,13 +294,13 @@ main(void)
 
         /* --- touch (every entry) --- */
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++)
+        for (i = 0u; i < N_FILL75; i++)
             flow_timestamp_touch(&pool_c[i].meta, now, TS_SHIFT);
         t1 = tsc_end();
         c_touch += (t1 - t0);
 
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++)
+        for (i = 0u; i < N_FILL75; i++)
             ft_table_extra_touch(&ft_e, i + 1u, now);
         t1 = tsc_end();
         e_touch += (t1 - t0);
@@ -328,8 +331,8 @@ main(void)
             };
             unsigned next = 0u;
 
-            age_pure(pool_c, 0u, now, old);
-            age_extra(&ft_e, pool_e, 0u, now, old);
+            age_pure(pool_c, N_FILL75, 0u, now, old);
+            age_extra(&ft_e, pool_e, N_FILL75, 0u, now, old);
 
             t0 = tsc_start();
             (void)ft_table_maintain(&mc, 0u, now, tmo,
@@ -346,8 +349,8 @@ main(void)
             /* 50% stale - re-fill both tables first because the 0%
              * pass did not remove anything, but the extra-side path
              * must refresh slot extra[] after age_extra. */
-            age_pure(pool_c, N_ENTRIES / 2u, now, old);
-            age_extra(&ft_e, pool_e, N_ENTRIES / 2u, now, old);
+            age_pure(pool_c, N_FILL75, N_FILL75 / 2u, now, old);
+            age_extra(&ft_e, pool_e, N_FILL75, N_FILL75 / 2u, now, old);
             t0 = tsc_start();
             (void)ft_table_maintain(&mc, 0u, now, tmo,
                                     expired, N_ENTRIES, 0u, &next);
@@ -360,7 +363,7 @@ main(void)
             e_m50 += (t1 - t0);
 
             /* The m50 sweep evicted half the entries.  Reinsert and
-             * set 100% of remaining entries stale for m100. */
+             * set all active entries stale for the all-stale case. */
             memset(bk_c, 0, bk_c_mem);
             memset(bk_e, 0, bk_e_mem);
             for (i = 0u; i < N_ENTRIES; i++) {
@@ -376,13 +379,13 @@ main(void)
             me.rhh_mask = ft_e.ht_head.rhh_mask;
             mc.buckets  = ft_c.buckets;
             me.buckets  = ft_e.buckets;
-            for (i = 0u; i < N_ENTRIES; i++) {
+            for (i = 0u; i < N_FILL75; i++) {
                 (void)ft_flow4_table_add_idx(&ft_c, i + 1u, now);
                 (void)ft_table_extra_add_idx(&ft_e, i + 1u, now);
             }
 
-            age_pure(pool_c, N_ENTRIES, now, old);
-            age_extra(&ft_e, pool_e, N_ENTRIES, now, old);
+            age_pure(pool_c, N_FILL75, N_FILL75, now, old);
+            age_extra(&ft_e, pool_e, N_FILL75, N_FILL75, now, old);
             t0 = tsc_start();
             (void)ft_table_maintain(&mc, 0u, now, tmo,
                                     expired, N_ENTRIES, 0u, &next);
@@ -410,27 +413,27 @@ main(void)
             me.rhh_mask = ft_e.ht_head.rhh_mask;
             mc.buckets  = ft_c.buckets;
             me.buckets  = ft_e.buckets;
-            for (i = 0u; i < N_ENTRIES; i++) {
+            for (i = 0u; i < N_FILL75; i++) {
                 (void)ft_flow4_table_add_idx(&ft_c, i + 1u, now);
                 (void)ft_table_extra_add_idx(&ft_e, i + 1u, now);
             }
-            age_pure(pool_c, N_ENTRIES / 2u, now, old);
-            age_extra(&ft_e, pool_e, N_ENTRIES / 2u, now, old);
+            age_pure(pool_c, N_FILL75, N_FILL75 / 2u, now, old);
+            age_extra(&ft_e, pool_e, N_FILL75, N_FILL75 / 2u, now, old);
 
-            for (i = 0u; i < N_ENTRIES; i++)
+            for (i = 0u; i < N_FILL75; i++)
                 expired[i] = i + 1u;
             t0 = tsc_start();
-            (void)ft_table_maintain_idx_bulk(&mc, expired, N_ENTRIES,
+            (void)ft_table_maintain_idx_bulk(&mc, expired, N_FILL75,
                                              now, tmo,
                                              expired, N_ENTRIES,
                                              0u, 0);
             t1 = tsc_end();
             c_midx += (t1 - t0);
 
-            for (i = 0u; i < N_ENTRIES; i++)
+            for (i = 0u; i < N_FILL75; i++)
                 expired[i] = i + 1u;
             t0 = tsc_start();
-            (void)ft_table_extra_maintain_idx_bulk(&me, expired, N_ENTRIES,
+            (void)ft_table_extra_maintain_idx_bulk(&me, expired, N_FILL75,
                                                    now, tmo,
                                                    expired, N_ENTRIES,
                                                    0u, 0);
@@ -450,30 +453,31 @@ main(void)
                                         bk_c, bk_c_mem, &cfg_c);
         (void)flow4_extra_table_init(&ft_e, pool_e, N_ENTRIES,
                                      bk_e, bk_e_mem, &cfg_e);
-        for (i = 0u; i < N_ENTRIES; i++) {
+        for (i = 0u; i < N_FILL75; i++) {
             (void)ft_flow4_table_add_idx(&ft_c, i + 1u, now);
             (void)ft_table_extra_add_idx(&ft_e, i + 1u, now);
         }
 
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++)
+        for (i = 0u; i < N_FILL75; i++)
             (void)ft_flow4_table_del_idx(&ft_c, i + 1u);
         t1 = tsc_end();
         c_rm += (t1 - t0);
 
         t0 = tsc_start();
-        for (i = 0u; i < N_ENTRIES; i++)
+        for (i = 0u; i < N_FILL75; i++)
             (void)ft_table_extra_del_idx(&ft_e, i + 1u);
         t1 = tsc_end();
         e_rm += (t1 - t0);
     }
 
     {
-        double per_op = (double)N_ENTRIES * REPS;
+        double per_op = (double)N_FILL75 * REPS;
         double per_bk = (double)ft_table_extra_nb_bk(&ft_e) * REPS;
 
-        printf("matched flow4 full-table stress (N=%u, reps=%u, ts_shift=%u)\n",
-               N_ENTRIES, REPS, TS_SHIFT);
+        printf("matched flow4 @ 75%% active fill "
+               "(capacity=%u, live=%u, reps=%u, ts_shift=%u)\n",
+               N_ENTRIES, N_FILL75, REPS, TS_SHIFT);
         printf("  pure entry : %zu B    extra entry  : %zu B\n",
                sizeof(struct flow4_entry),
                sizeof(struct flow4_extra_entry));
@@ -482,7 +486,7 @@ main(void)
                sizeof(struct rix_hash_bucket_extra_s));
         printf("  %-18s %10s %10s %10s\n",
                "op", "pure", "extra", "delta");
-        printf("  %-18s %10.2f %10.2f %+10.2f\n", "insert_idx_full",
+        printf("  %-18s %10.2f %10.2f %+10.2f\n", "insert_idx",
                (double)c_ins / per_op, (double)e_ins / per_op,
                ((double)e_ins - (double)c_ins) / per_op);
         printf("  %-18s %10.2f %10.2f %+10.2f\n", "find_hit",
@@ -494,19 +498,19 @@ main(void)
         printf("  %-18s %10.2f %10.2f %+10.2f\n", "touch_idx",
                (double)c_touch / per_op, (double)e_touch / per_op,
                ((double)e_touch - (double)c_touch) / per_op);
-        printf("  %-18s %10.2f %10.2f %+10.2f\n", "remove_idx_full",
+        printf("  %-18s %10.2f %10.2f %+10.2f\n", "remove_idx",
                (double)c_rm / per_op, (double)e_rm / per_op,
                ((double)e_rm - (double)c_rm) / per_op);
         printf("  %-18s %10.2f %10.2f %+10.2f  (cy/bucket)\n",
-               "maint_0pct",
+               "maint_stale_0pct",
                (double)c_m0 / per_bk, (double)e_m0 / per_bk,
                ((double)e_m0 - (double)c_m0) / per_bk);
         printf("  %-18s %10.2f %10.2f %+10.2f  (cy/bucket)\n",
-               "maint_50pct",
+               "maint_stale_50pct",
                (double)c_m50 / per_bk, (double)e_m50 / per_bk,
                ((double)e_m50 - (double)c_m50) / per_bk);
         printf("  %-18s %10.2f %10.2f %+10.2f  (cy/bucket)\n",
-               "maint_100pct",
+               "maint_all_stale",
                (double)c_m100 / per_bk, (double)e_m100 / per_bk,
                ((double)e_m100 - (double)c_m100) / per_bk);
         printf("  %-18s %10.2f %10.2f %+10.2f  (cy/idx)\n",
@@ -515,84 +519,13 @@ main(void)
                ((double)e_midx - (double)c_midx) / per_op);
     }
 
-    /* --- bulk insert Q-sweep: Q in {32, 64, 128, 256} --- */
-    {
-        static const unsigned qs[] = { 32u, 64u, 128u, 256u };
-        unsigned qi;
-
-        printf("\n  bulk insert to full (cy/entry):\n");
-        printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
-
-        for (qi = 0u; qi < sizeof(qs) / sizeof(qs[0]); qi++) {
-            unsigned Q = qs[qi];
-            u64 c_bk = 0, e_bk = 0;
-            char label[32];
-            unsigned i;
-
-            for (r = 0u; r < REPS; r++) {
-                const u64 now = 1000000u;
-                int rc;
-                u64 t0, t1;
-
-                /* build fresh index vector */
-                for (i = 0u; i < N_ENTRIES; i++)
-                    idxv[i] = i + 1u;
-
-                /* pure bulk insert */
-                memset(bk_c, 0, bk_c_mem);
-                for (i = 0u; i < N_ENTRIES; i++)
-                    memset(&pool_c[i].meta, 0, sizeof(pool_c[i].meta));
-                rc = FT_FLOW4_TABLE_INIT_TYPED(&ft_c, pool_c, N_ENTRIES,
-                                               struct flow4_entry, key,
-                                               bk_c, bk_c_mem, &cfg_c);
-                assert(rc == 0);
-
-                t0 = tsc_start();
-                for (i = 0u; i < N_ENTRIES; i += Q)
-                    (void)ft_flow4_table_add_idx_bulk(&ft_c, &idxv[i], Q,
-                                                      FT_ADD_IGNORE, now,
-                                                      unused_idxv);
-                t1 = tsc_end();
-                c_bk += (t1 - t0);
-
-                /* rebuild index vector for extra */
-                for (i = 0u; i < N_ENTRIES; i++)
-                    idxv[i] = i + 1u;
-
-                /* extra bulk insert */
-                memset(bk_e, 0, bk_e_mem);
-                for (i = 0u; i < N_ENTRIES; i++)
-                    memset(&pool_e[i].meta, 0, sizeof(pool_e[i].meta));
-                rc = flow4_extra_table_init(&ft_e, pool_e, N_ENTRIES,
-                                            bk_e, bk_e_mem, &cfg_e);
-                assert(rc == 0);
-                (void)rc;
-
-                t0 = tsc_start();
-                for (i = 0u; i < N_ENTRIES; i += Q)
-                    (void)ft_table_extra_add_idx_bulk(&ft_e, &idxv[i], Q,
-                                                      FT_ADD_IGNORE, now,
-                                                      unused_idxv);
-                t1 = tsc_end();
-                e_bk += (t1 - t0);
-            }
-
-            snprintf(label, sizeof(label), "insert_q%u", Q);
-            printf("  %-18s %10.2f %10.2f %+10.2f\n", label,
-                   (double)c_bk / (double)(N_ENTRIES * REPS),
-                   (double)e_bk / (double)(N_ENTRIES * REPS),
-                   ((double)e_bk - (double)c_bk)
-                   / (double)(N_ENTRIES * REPS));
-        }
-    }
-
-    /* --- insert at 75% fill: Q in {1, 32, 64, 128, 256} --- */
+    /* --- insert fill-to-75%: Q in {1, 32, 64, 128, 256} --- */
     {
         static const unsigned qs[] = { 1u, 32u, 64u, 128u, 256u };
-        const unsigned N_FILL = N_ENTRIES * 3u / 4u;   /* 75% of capacity */
+        const unsigned N_FILL = N_FILL75;
         unsigned qi;
 
-        printf("\n  insert @ 75%% fill (N_fill=%u, cy/entry):\n", N_FILL);
+        printf("\n  insert fill-to-75%% (N_fill=%u, cy/entry):\n", N_FILL);
         printf("  %-18s %10s %10s %10s\n", "op", "pure", "extra", "delta");
 
         for (qi = 0u; qi < sizeof(qs) / sizeof(qs[0]); qi++) {
@@ -721,7 +654,7 @@ main(void)
                 (void)ft_flow4_table_add_idx_bulk(&ft_c, idxv, N_FILL,
                                                   FT_ADD_IGNORE, now,
                                                   unused_idxv);
-                age_pure(pool_c, N_STALE, now, old);
+                age_pure(pool_c, N_FILL, N_STALE, now, old);
                 /* pre-flip key bit on stale entries so re-insert is fresh */
                 for (i = 0u; i < N_STALE; i++)
                     pool_c[i].key.src_ip ^= 0x01000000u;
@@ -772,7 +705,7 @@ main(void)
                 (void)ft_table_extra_add_idx_bulk(&ft_e, idxv, N_FILL,
                                                   FT_ADD_IGNORE, now,
                                                   unused_idxv);
-                age_extra(&ft_e, pool_e, N_STALE, now, old);
+                age_extra(&ft_e, pool_e, N_FILL, N_STALE, now, old);
                 for (i = 0u; i < N_STALE; i++)
                     pool_e[i].key.src_addr ^= 0x01000000u;
 
@@ -834,8 +767,8 @@ main(void)
      *         sentinel and must NOT be used here.
      * Timed:  insert N_NEW free-pool entries via add_idx_bulk_maint in
      *         Q-entry batches. Keep N_NEW modest so the phase-1-only row
-     *         stays comparable to the 2M-scale case instead of measuring
-     *         pathological 100% table fill.
+     *         stays comparable to the 2M-scale case and within the intended
+     *         flowcache operating range.
      *
      * pure Phase 2: loads entry->meta per slot from the pool (cache miss).
      * extra   Phase 2: reads bk->extra[s] already warm from Phase 1 prefetch.

@@ -698,7 +698,7 @@ make -C flowtable/test bench
   `BENCH_FULL_ARCHES` のうち CPU が support する全 variant で評価する
 - `bench-extra`: `bench_flow4_vs_extra.c`。`flow4` pure と
   `flow4_extra` を同一条件で比較する microbench
-  (insert/find/miss/touch/delete/maintain)
+  (75% active fill での insert/find/miss/touch/delete/maintain)
 - `bench-extra-full`: `bench_flow_extra_table.c`。`flow4_extra`,
   `flow6_extra`, `flowu_extra` について datapath / maintain / grow、
   fill level、query size、CPU-supported arch variant を評価する

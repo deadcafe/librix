@@ -26,12 +26,12 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - update English and Japanese allocation-model documentation
 - correct slot-extra `find_bulk` return-value docs
 - correct the small `ft_bench_extra` add+inline-maint phase-1-only setup so it
-  no longer measures an unintended 100% fill case
+  stays within the intended flowcache operating range
 - fix `ft_bench_extra` delta formatting when extra is faster than pure
 - fix maintenance benchmark setup to use a non-zero expired timestamp instead
   of the permanent timestamp sentinel
-- make `ft_bench_extra` full-table stress labels and pure/extra API choices
-  match the measurement
+- make `ft_bench_extra` use 75% active fill for the initial matched block and
+  align the pure/extra API choices
 - keep `ft_bench_extra_full` datapath operations at the requested fill level
 
 ### Validation status

@@ -677,7 +677,8 @@ make -C flowtable/test bench
 - `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`, repeated
   for all CPU-supported variants from `BENCH_FULL_ARCHES`
 - `bench-extra`: `bench_flow4_vs_extra.c`, a matched `flow4` pure vs
-  `flow4_extra` microbench for insert/find/miss/touch/delete/maintain
+  `flow4_extra` microbench for insert/find/miss/touch/delete/maintain at
+  75% active fill
 - `bench-extra-full`: `bench_flow_extra_table.c`, a full slot-extra
   family sweep for `flow4_extra`, `flow6_extra`, and `flowu_extra`
   across datapath, maintain, grow, fill levels, query sizes, and

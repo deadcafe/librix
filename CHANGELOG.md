@@ -33,21 +33,21 @@ speed.
   number of processed keys, matching the implementation contract.
 - Removed stale slot-extra dispatch documentation that still described the
   implementation as `flow4`-only.
-- `ft_bench_extra` now keeps the small add+inline-maint phase-1-only case at a
-  representative post-add fill level instead of unintentionally measuring a
-  pathological 100% table-fill case.
+- `ft_bench_extra` now keeps the small add+inline-maint phase-1-only case
+  within the intended flowcache operating range instead of measuring a
+  too-large add window.
 - `ft_bench_extra` delta reporting now avoids unsigned underflow when the
   extra result is faster than the pure result.
 - Flowtable benchmarks now use a non-zero stale timestamp for maintenance
   cases; timestamp 0 is the permanent sentinel and was not a valid expired
   timestamp.
-- `ft_bench_extra` now labels the initial capacity-fill block as full-table
-  stress and uses matching index-based add/delete APIs for pure and
-  slot-extra comparisons.
+- `ft_bench_extra` now runs the initial matched block at 75% active fill and
+  uses matching index-based add/delete APIs for pure and slot-extra
+  comparisons.
 - `ft_bench_extra_full` now keeps find/delete measurements at the requested
   fill level and measures add from that fill over a bounded add window,
-  instead of letting the add measurement push the shared table to full before
-  subsequent operations.
+  instead of letting the add measurement move the shared table beyond the
+  requested fill before subsequent operations.
 
 ### Validation status
 
