@@ -38,6 +38,16 @@ speed.
   pathological 100% table-fill case.
 - `ft_bench_extra` delta reporting now avoids unsigned underflow when the
   extra result is faster than the pure result.
+- Flowtable benchmarks now use a non-zero stale timestamp for maintenance
+  cases; timestamp 0 is the permanent sentinel and was not a valid expired
+  timestamp.
+- `ft_bench_extra` now labels the initial capacity-fill block as full-table
+  stress and uses matching index-based add/delete APIs for pure and
+  slot-extra comparisons.
+- `ft_bench_extra_full` now keeps find/delete measurements at the requested
+  fill level and measures add from that fill over a bounded add window,
+  instead of letting the add measurement push the shared table to full before
+  subsequent operations.
 
 ### Validation status
 
@@ -46,6 +56,11 @@ speed.
 - `make -C flowtable/test test-extra-arch`: passed
 - `make -C flowtable/test test-parity`: passed
 - `make -C flowtable/test bench-extra`: passed
+- `make -C flowtable/test bench-sweep`: passed
+- `ft_bench_extra_full --arch avx2 --query 64 --reps 1 flow4_extra 65536 60`:
+  passed
+- `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
+  passed
 - AVX-512 execution was skipped because the local CPU does not advertise
   AVX512F.
 

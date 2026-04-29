@@ -193,7 +193,7 @@ run_one(unsigned n_entries, unsigned fill_pct, unsigned expire_pct)
     unsigned stale_n  = (unsigned)((u64)insert_n * expire_pct / 100u);
     unsigned nb_bk    = pick_nb_bk(insert_n, fill_pct);
     const u64 now = 1000000u;
-    const u64 old = 0u;
+    const u64 old = 1u << TS_SHIFT; /* encodes to 1, not permanent */
     const u64 tmo = 1u << 18;
     u64 t0;
     u64 t1;

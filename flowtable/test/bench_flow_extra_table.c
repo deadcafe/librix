@@ -195,6 +195,8 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
                unsigned reps, int run_maint, int run_grow)                    \
 {                                                                             \
     unsigned live = (unsigned)(((u64)entries * fill_pct) / 100u);             \
+    unsigned add_cap = entries / 32u;                                        \
+    unsigned add_n = entries - live;                                         \
     size_t pool_sz = (size_t)entries * sizeof(struct prefix##_extra_entry);   \
     size_t bk_sz = prefix##_extra_table_bucket_size(entries);                 \
     struct prefix##_extra_entry *pool = hugealloc(pool_sz);                   \
@@ -211,6 +213,10 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
     u64 maint_cy = 0u, grow_alloc_cy = 0u, grow_mig_cy = 0u;                  \
     unsigned maint_units = 0u;                                                \
     unsigned grow_units = 0u;                                                 \
+    if (add_cap == 0u)                                                        \
+        add_cap = 1u;                                                         \
+    if (add_n > add_cap)                                                      \
+        add_n = add_cap;                                                      \
     fill_##prefix(pool, hit_keys, miss_keys, entries);                        \
     for (unsigned r = 0u; r < reps; r++) {                                    \
         struct ft_table_extra ft;                                             \
@@ -238,7 +244,7 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
             if (rc != 0)                                                      \
                 abort();                                                      \
             age_##prefix(&ft, pool, live, live / 2u,                          \
-                         1000u + (1u << 20), 0u);                             \
+                         1000u + (1u << 20), 1u << TS_SHIFT);                 \
             t0 = tsc_start();                                                 \
             (void)ft_table_extra_maintain(&ctx, 0u, 1000u + (1u << 20),       \
                                           1u << 18, expired, entries,         \
@@ -265,17 +271,6 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
             bk = new_bk;                                                      \
             cur_bk_sz = new_sz;                                               \
         } else {                                                              \
-            t0 = tsc_start();                                                 \
-            for (unsigned i = live; i < entries; i += query) {                \
-                unsigned q = entries - i;                                     \
-                if (q > query)                                                \
-                    q = query;                                                \
-                (void)ft_table_extra_add_idx_bulk(&ft, &idxv[i], q,           \
-                                                  FT_ADD_IGNORE, 2000u,       \
-                                                  unused);                    \
-            }                                                                 \
-            t1 = tsc_end();                                                   \
-            add_cy += t1 - t0;                                                \
             t0 = tsc_start();                                                 \
             for (unsigned i = 0u; i < live; i += query) {                     \
                 unsigned q = live - i;                                        \
@@ -306,6 +301,37 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
             }                                                                 \
             t1 = tsc_end();                                                   \
             del_cy += t1 - t0;                                                \
+            ft_table_extra_destroy(&ft);                                      \
+            memset(bk, 0, cur_bk_sz);                                         \
+            for (unsigned i = 0u; i < entries; i++)                           \
+                memset(&pool[i].meta, 0, sizeof(pool[i].meta));               \
+            rc = prefix##_extra_table_init(&ft, pool, entries, bk,            \
+                                           cur_bk_sz, &cfg);                  \
+            if (rc != 0)                                                      \
+                abort();                                                      \
+            for (unsigned i = 0u; i < live; i++)                              \
+                idxv[i] = i + 1u;                                             \
+            for (unsigned i = 0u; i < live; i += query) {                     \
+                unsigned q = live - i;                                        \
+                if (q > query)                                                \
+                    q = query;                                                \
+                (void)ft_table_extra_add_idx_bulk(&ft, &idxv[i], q,           \
+                                                  FT_ADD_IGNORE, 1000u,       \
+                                                  unused);                    \
+            }                                                                 \
+            for (unsigned i = 0u; i < add_n; i++)                             \
+                idxv[i] = live + 1u + i;                                      \
+            t0 = tsc_start();                                                 \
+            for (unsigned i = 0u; i < add_n; i += query) {                    \
+                unsigned q = add_n - i;                                       \
+                if (q > query)                                                \
+                    q = query;                                                \
+                (void)ft_table_extra_add_idx_bulk(&ft, &idxv[i], q,           \
+                                                  FT_ADD_IGNORE, 2000u,       \
+                                                  unused);                    \
+            }                                                                 \
+            t1 = tsc_end();                                                   \
+            add_cy += t1 - t0;                                                \
         }                                                                     \
         ft_table_extra_destroy(&ft);                                          \
         munmap(bk, cur_bk_sz);                                                \
@@ -323,9 +349,10 @@ bench_##prefix(unsigned entries, unsigned fill_pct, unsigned query,           \
         printf("  grow_total     %8.2f cy/live-entry\n",                                                                           \
                (double)(grow_alloc_cy + grow_mig_cy) / (double)grow_units);   \
     } else {                                                                  \
-        double add_units = (double)(entries - live) * (double)reps;           \
+        double add_units = (double)add_n * (double)reps;                      \
         double live_units = (double)live * (double)reps;                      \
-        printf("  add_idx        %8.2f cy/key\n", (double)add_cy / add_units);                                              \
+        printf("  add_idx        %8.2f cy/key  (from fill, n=%u)\n",          \
+               (double)add_cy / add_units, add_n);                           \
         printf("  find_hit_touch %8.2f cy/key\n",                                                                           \
                (double)find_cy / live_units);                                 \
         printf("  find_miss      %8.2f cy/key\n",                                                                           \

@@ -28,6 +28,11 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - correct the small `ft_bench_extra` add+inline-maint phase-1-only setup so it
   no longer measures an unintended 100% fill case
 - fix `ft_bench_extra` delta formatting when extra is faster than pure
+- fix maintenance benchmark setup to use a non-zero expired timestamp instead
+  of the permanent timestamp sentinel
+- make `ft_bench_extra` full-table stress labels and pure/extra API choices
+  match the measurement
+- keep `ft_bench_extra_full` datapath operations at the requested fill level
 
 ### Validation status
 
@@ -36,6 +41,11 @@ longer need a temporary `struct ft_table_result[64]` buffer plus copy loop.
 - `make -C flowtable/test test-extra-arch`: passed
 - `make -C flowtable/test test-parity`: passed
 - `make -C flowtable/test bench-extra`: passed
+- `make -C flowtable/test bench-sweep`: passed
+- `ft_bench_extra_full --arch avx2 --query 64 --reps 1 flow4_extra 65536 60`:
+  passed
+- `ft_bench_extra_full --arch avx2 --maint --reps 1 flow4_extra 65536 60`:
+  passed
 
 ### Notes
 
