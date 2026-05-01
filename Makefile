@@ -1,7 +1,7 @@
 include mk/cc.mk
 export CC
 
-TESTDIRS := tests/slist tests/list tests/stailq tests/tailq tests/circleq \
+TESTDIRS := tests/ring tests/slist tests/list tests/stailq tests/tailq tests/circleq \
             tests/rbtree tests/hashtbl tests/hashtbl_extra tests/hashtbl32 tests/hashtbl64
 BENCHDIRS := flowtable
 SUBDIRS  := $(TESTDIRS) flowtable
