@@ -494,6 +494,8 @@ Five umbrella header-only, index-based cuckoo hash variants, plus an opt-in
 
 ### Variant comparison
 
+`fp` is short for fingerprint.
+
 | Variant | Header | Key storage | Node aux fields | Bucket size | Best for |
 |---------|--------|------------|-----------------|-------------|----------|
 | fp      | `rix_hash_fp.h`      | fingerprint in bucket, full key in node | `hash_field`                | 128 B (2 CL) | Variable-length keys, general purpose |
