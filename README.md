@@ -4,11 +4,11 @@ Index-based data structures for shared memory, plus a practical flow-table
 implementation built on top of them.
 
 librix provides relative (index-pointing) implementations of classic BSD data
-structures -- SLIST, LIST, STAILQ, TAILQ, CIRCLEQ, a Red-Black tree, and
-high-performance cuckoo hash tables -- so they can live directly in shared
-memory or mmapped files without raw pointers. The repository also includes
-`flowtable/`, a flow-table implementation for IPv4, IPv6, and unified
-operation, intended as both a real sample application and a performance
+structures -- SLIST, LIST, STAILQ, TAILQ, CIRCLEQ, a Red-Black tree, a
+`u32` index ring, and high-performance cuckoo hash tables -- so they can live
+directly in shared memory or mmapped files without raw pointers. The repository
+also includes `flowtable/`, a flow-table implementation for IPv4, IPv6, and
+unified operation, intended as both a real sample application and a performance
 reference.
 
 ## Why this project?
@@ -36,6 +36,7 @@ giving up performance.
 - [Repository layout](#repository-layout)
 - [Getting started](#getting-started)
 - [Common helpers](#common-helpers)
+- [Index ring -- rix_ring](#index-ring--rix_ring)
 - [Queue structures](#queue-structures)
   - [RIX_SLIST](#rix_slist)
   - [RIX_LIST](#rix_list)
@@ -95,6 +96,7 @@ include/
   librix.h          umbrella header (includes all subsystems)
   rix/
     rix_defs_private.h  common macros, index helpers  (internal; auto-included)
+    rix_ring.h      u32 index FIFO/LIFO ring
     rix_hash_arch.h     arch dispatch, SIMD helpers   (internal; auto-included)
     rix_queue.h     SLIST / LIST / STAILQ / TAILQ / CIRCLEQ
     rix_tree.h      Red-Black tree
@@ -114,13 +116,14 @@ flowtable/            flow table sample application (see flowtable/README.md)
 ## Getting started
 
 ```c
-#include "librix.h"      /* queue + tree + all hash variants */
+#include "librix.h"      /* ring + queue + tree + all hash variants */
 ```
 
 Or include only what you need:
 
 ```c
 #include "rix/rix_queue.h"   /* queue structures only              */
+#include "rix/rix_ring.h"    /* u32 index FIFO/LIFO ring           */
 #include "rix/rix_tree.h"    /* Red-Black tree only                */
 #include "rix/rix_hash.h"    /* cuckoo hash (fp)                   */
 #include "rix/rix_hash_32.h"  /* cuckoo hash (u32 key)              */
@@ -176,6 +179,75 @@ RIX_CLAMP(v, lo, hi)
 RIX_ASSERT(expr)
 RIX_STATIC_ASSERT(expr, msg)
 ```
+
+---
+
+## Index ring -- rix_ring
+
+`rix_ring` is a small, header-only container for caller-owned `u32` index
+storage. It is intended for the same 1-origin index model as the other rix
+containers: `RIX_NIL` (`0`) is not a valid stored element.
+
+The same object supports two access patterns:
+
+- FIFO: `rix_ring_enqueue_*()` / `rix_ring_dequeue_*()`
+- LIFO: `rix_ring_push_*()` / `rix_ring_pop_*()`
+
+Typical uses are free-index pools, pending-index queues, and reusable allocator
+state in shared-memory data structures. The ring stores only indices; the
+caller owns both the backing `u32` array and the records those indices refer to.
+
+```c
+#include "rix/rix_ring.h"
+
+u32 storage[1024];
+struct rix_ring free_idx;
+
+rix_ring_init(&free_idx, storage, RIX_COUNT_OF(storage));
+
+/* Fill as a stack of indices 1..1024. */
+rix_ring_push_seq(&free_idx, 1u, RIX_COUNT_OF(storage));
+
+u32 idxv[32];
+u32 n = rix_ring_pop_burst(&free_idx, idxv, RIX_COUNT_OF(idxv));
+
+/* ...use idxv[0..n) as allocated record indices... */
+
+(void)rix_ring_push_burst(&free_idx, idxv, n);
+```
+
+### API reference
+
+```c
+struct rix_ring {
+    u32 *data;      /* caller-owned storage */
+    u32  capacity;  /* elements in data[] */
+    u32  head;      /* FIFO dequeue cursor */
+    u32  tail;      /* FIFO enqueue cursor */
+    u32  count;     /* live elements */
+};
+
+void rix_ring_init(struct rix_ring *ring, u32 *storage, u32 capacity);
+void rix_ring_reset(struct rix_ring *ring);
+
+u32  rix_ring_count(const struct rix_ring *ring);
+u32  rix_ring_free_count(const struct rix_ring *ring);
+int  rix_ring_empty(const struct rix_ring *ring);
+int  rix_ring_full(const struct rix_ring *ring);
+
+u32  rix_ring_enqueue_burst(struct rix_ring *ring, const u32 *idxv, u32 count);
+u32  rix_ring_dequeue_burst(struct rix_ring *ring, u32 *idxv, u32 count);
+void rix_ring_enqueue_seq(struct rix_ring *ring, u32 first_idx, u32 count);
+
+u32  rix_ring_push_burst(struct rix_ring *ring, const u32 *idxv, u32 count);
+u32  rix_ring_pop_burst(struct rix_ring *ring, u32 *idxv, u32 count);
+void rix_ring_push_seq(struct rix_ring *ring, u32 first_idx, u32 count);
+```
+
+Burst operations return the number of indices actually moved, so callers can
+handle partial enqueue/push when the ring is full or partial dequeue/pop when
+it is empty. The `_seq` helpers reset the container and fill it with a contiguous
+index range.
 
 ---
 
