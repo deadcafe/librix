@@ -811,10 +811,10 @@ Lock-free / RCU operation is out of scope and would require additional design.
 # Full library test pass
 make test
 
-# Build, test, and run the representative short benchmark
+# Default: build and run tests, without benchmarks
 make all
 
-# Top-level representative benchmark rerun
+# Top-level representative benchmark run
 make bench
 
 # Full long-running benchmark rerun

@@ -28,11 +28,26 @@ speed.
   bucket helpers.
 - Benchmark methodology is now documented in `flowtable/BENCHMARKING.md`,
   including each target's purpose, measurement setup, and trust boundary.
-- `bench-full` and `bench-extra-full` now use the fill sweep
-  `40/60/75/80/90%`, matching the documented Green/Yellow/Red operating
-  regions.
+- The default release benchmark profile now uses the fill sweep `75/95%`.
+  `95%` is documented as guardrail pressure data, not normal operating
+  performance.
 - Fixed-environment `ft_bench` and `ft_bench_extra_full` datapath reference
   result tables are documented for 1M entries, AVX2, q=256.
+- `make -C flowtable/test bench-full` now distributes jobs across physical
+  cores by default, while `bench-full-serial` keeps the former one-core sweep
+  available for quieter measurements.
+- `make -C flowtable/test bench-dev` now provides a short development
+  benchmark profile, and `bench-release` is the release-oriented profile.
+  `bench-full` remains as a compatibility target.
+- `bench-dev` skips pure maintain by default because that path requires host
+  perf counter access.
+- `bench-dev` limits pure datapath coverage to `find_hit` and `add_idx` by
+  default to reduce development-run wall time.
+- The standard `bench-release` profile is shorter by default (`auto` arch,
+  queries `32/256`, `--raw-repeat 5 --keep-n 3`), with
+  `bench-release-full` retaining the exhaustive per-arch sweep.
+- Standard `bench-release` skips pure maintain by default so it does not depend
+  on perf counter permissions; `bench-release-full` keeps pure maintain.
 
 ### Fixed
 
@@ -85,10 +100,11 @@ speed.
   passed
 - Fixed-environment `ft_bench` datapath sweep:
   `flow4/flow6/flowu`, fills `40/60/75/80/90`, 1M entries, q=256,
-  AVX2, pinned core 2: passed
+  AVX2, pinned core 2: passed as historical reference data
 - Fixed-environment `ft_bench_extra_full` datapath sweep:
   `flow4_extra/flow6_extra/flowu_extra`, fills `40/60/75/80/90`,
-  1M entries, q=256, AVX2, taskset core 2, reps=7: passed
+  1M entries, q=256, AVX2, taskset core 2, reps=7: passed as historical
+  reference data
 - AVX-512 execution was skipped because the local CPU does not advertise
   AVX512F.
 

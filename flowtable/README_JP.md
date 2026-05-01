@@ -697,15 +697,25 @@ make -C flowtable/test bench
 
 - `bench` / `bench-light`: `flow4` のみ、`q=1/8/32/256`、fill `60%`、
   `--arch auto`（runtime で一番有利な supported variant）
-- `bench-full`: `flow4/6/u` の query sweep に `maint` と `grow` を加え、
-  fill `40/60/75/80/90%` と `BENCH_FULL_ARCHES` のうち CPU が support
-  する全 variant で評価する
+- `bench-dev`: 開発途中用の短い profile (`auto`, `flow4` と
+  `flow4_extra`, pure `find_hit/add_idx`, `q=256`, fill `75%`,
+  256K entries)。pure maintain は perf counter access が必要なため
+  既定では skip する
+- `bench-release`: 標準 release profile。pure と slot-extra family を
+  `auto` arch, fill `75/95%`, query `32/256` で評価する。job は
+  physical core に分散する。pure maintain は host perf counter 権限への
+  依存を避けるため既定では skip する
+- `bench-release-full`: `gen/sse/avx2/avx512`, query `1/32/256`,
+  より多い repeat count と pure maintain を含む exhaustive release sweep
+- `bench-full`: release 既定値を使う互換 target
+- `bench-full-serial`: release profile を単一 pinned core で実行し、
+  より静かな数値を取る
 - `bench-extra`: `bench_flow4_vs_extra.c`。`flow4` pure と
   `flow4_extra` を同一条件で比較する microbench
   (75% active fill での insert/find/miss/touch/delete/maintain)
 - `bench-extra-full`: `bench_flow_extra_table.c`。`flow4_extra`,
   `flow6_extra`, `flowu_extra` について datapath / maintain / grow、
-  fill `40/60/75/80/90%`、query size、CPU-supported arch variant を評価する
+  既定 fill `75/95%`、query size、CPU-supported arch variant を評価する
   full-family slot-extra sweep
 - `bench-sweep`, `bench-zoned`, `bench-ctrl`: maintenance と
   fill-controller に焦点を置いた bench
@@ -731,7 +741,16 @@ arch variant を広く評価する full benchmark である。`bench-extra-full`
 - `--query N` — バッチサイズ（既定 256）
 
 `make bench` 既定値: `--pin-core 2 --raw-repeat 3 --keep-n 1`。
-`make bench-full` 既定値: `--pin-core 2 --raw-repeat 11 --keep-n 7`。
+`make bench-dev` 既定値: `--raw-repeat 3 --keep-n 1`, 6 jobs。
+`make bench-release` / `make bench-full` 既定値:
+`--arch auto`, query `32/256`, `--raw-repeat 5 --keep-n 3`,
+`BENCH_FULL_CORES=auto`。auto mode は `lscpu` から physical core ごとに
+1 logical CPU を選ぶ。明示する場合は `BENCH_FULL_CORES=2,4,6,8` のように
+指定する。per-arch の release evidence が必要な場合は
+`make bench-release-full`、標準 release profile を単一 core で測る場合は
+`make bench-full-serial` を使う (`BENCH_FULL_SERIAL_PIN` 既定値は 2)。
+
+full sweep の `95%` は guardrail pressure data であり、通常運用性能ではない。
 
 注記:
 

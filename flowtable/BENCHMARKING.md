@@ -27,7 +27,8 @@ be mixed with flowcache performance results.
 
 - Use optimized binaries (`-O3 -DNDEBUG`) for benchmark targets.
 - Prefer pinned-core runs for headline numbers.  The Makefile uses
-  `--pin-core 2` for `ft_bench` targets by default.
+  `--pin-core 2` for `bench` by default.  `bench-full` uses the physical-core
+  scheduler described below.
 - Hugepage-backed allocations are enabled by default where the benchmark
   supports them.  Use `--no-hugepage` in `ft_bench` only when testing the
   allocator/memory sensitivity itself.
@@ -46,7 +47,11 @@ Source: `flowtable/test/bench_flow_table.c`
 Targets:
 
 - `make -C flowtable/test bench`
-- `make -C flowtable/test bench-full`
+- `make -C flowtable/test bench-dev`
+- `make -C flowtable/test bench-release`
+- `make -C flowtable/test bench-release-full`
+- `make -C flowtable/test bench-full` (compatibility target with release defaults)
+- `make -C flowtable/test bench-full-serial`
 
 Purpose:
 
@@ -59,8 +64,21 @@ Default Makefile policy:
 
 - `bench`: `flow4`, `q=1/8/32/256`, 1M capacity at 60% fill,
   `--pin-core 2 --raw-repeat 3 --keep-n 1`.
-- `bench-full`: `flow4/flow6/flowu`, fills `40/60/75/80/90`, all supported
-  arch variants, `--pin-core 2 --raw-repeat 11 --keep-n 7`.
+- `bench-dev`: `auto`, `flow4` and `flow4_extra`, pure ops
+  `find_hit/add_idx`, `q=256`, fill `75`, 256K entries,
+  `--raw-repeat 3 --keep-n 1`.  This is the short in-progress regression
+  profile; pure `ft_bench --maint` is skipped by default because it requires
+  perf counter access on the host.
+- `bench-release`: `auto`, `flow4/flow6/flowu` plus matching slot-extra
+  families, fills `75/95`, queries `32/256`, `--raw-repeat 5 --keep-n 3`,
+  parallelized across physical cores.  Pure `ft_bench --maint` is skipped by
+  default to avoid host perf-counter permissions in the standard release run.
+- `bench-release-full`: exhaustive release sweep over
+  `gen/sse/avx2/avx512`, queries `1/32/256`, and
+  `--raw-repeat 7 --keep-n 5`, including pure maintain.
+- `bench-full`: compatibility target with release defaults.
+- `bench-full-serial`: the release profile on `BENCH_FULL_SERIAL_PIN`, default
+  CPU 2.
 
 Datapath method:
 
@@ -109,6 +127,16 @@ Reasonableness:
 - This is the main evidence for cold datapath throughput and pure-table
   maintenance behavior because it controls cache state, fill, sample count,
   arch variant, and timing source.
+- `bench-dev` is intended for development loops and trend checks, not release
+  claims.
+- The default `bench-release` / `bench-full` target is optimized for wall-clock
+  completion time and uses the runtime-selected `auto` arch.  Use
+  `bench-release-full` when per-arch release evidence is needed.
+- The parallel runner pins each `ft_bench` process to a different physical
+  core selected from `BENCH_FULL_CORES` (`auto` by default).  Because
+  concurrent processes share cache, memory bandwidth, and CPU power budget,
+  use `bench-full-serial` or a one-core `BENCH_FULL_CORES` setting when
+  collecting quiet headline numbers.
 
 ## `ft_bench_extra`
 
@@ -165,7 +193,7 @@ Method:
   `ft_table_extra_maintain()` pass in cycles per bucket.
 - Grow mode prefills to requested active fill, allocates a 2x bucket region,
   migrates, and reports allocation/migration/total cycles per live entry.
-- The Makefile sweep uses fills `40/60/75/80/90`.  The standalone binary
+- The default Makefile release sweep uses fills `75/95`.  The standalone binary
   rejects fills above 95.
 
 Reasonableness:
@@ -174,12 +202,18 @@ Reasonableness:
   variants and fill levels.
 - For headline cold-cache datapath numbers, prefer `ft_bench`; this benchmark
   intentionally favors broad coverage and simple repeated timing.
+- Under `bench-full`, slot-extra jobs are pinned with `taskset` when it is
+  available because `ft_bench_extra_full` does not have its own `--pin-core`
+  option.
 
 ## Fixed Reference Results
 
 These are local reference datapath results for the 2026-04-29 brush-up pass.
-They are not cross-machine claims; use them as regression anchors for the same
-host and setup.
+They are not cross-machine claims; use them as historical regression anchors
+for the same host and setup.  The current `bench-release` / `bench-full`
+sweep uses `75/95`; this table predates that policy and is retained only for
+already-measured reference points.  Current `95%` results are guardrail
+pressure data, not normal operating performance.
 
 Environment:
 

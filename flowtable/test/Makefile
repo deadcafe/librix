@@ -28,17 +28,68 @@ WARN         = $(WARN_COMMON) $(WARN_EXTRA)
 OPTLEVEL    ?= 3
 EXTRA_CFLAGS ?=
 BENCH_FT_OPTS ?= --pin-core 2 --raw-repeat 3 --keep-n 1
-BENCH_FT_FULL_OPTS ?= --pin-core 2 --raw-repeat 11 --keep-n 7
 BENCH_QUERIES := 1 8 32 256
-BENCH_FULL_ARCHES ?= gen sse avx2 avx512
+BENCH_FULL_CORES ?= auto
+BENCH_FULL_CAT_LOGS ?= 1
+BENCH_FULL_NAME ?= bench-full
+BENCH_FULL_OPS ?=
 BENCH_LIGHT_FAMILY := flow4
-BENCH_FULL_FAMILIES := flow4 flow6 flowu
 BENCH_LIGHT_FILL := 60
-BENCH_FULL_FILLS := 40 60 75 80 90
 BENCH_GROW_FILL := 60
 BENCH_MAINT_FILL := 50
-BENCH_EXTRA_FULL_ENTRIES ?= 1048576
-BENCH_EXTRA_FULL_REPS ?= 7
+BENCH_EXTRA_FULL_ENTRIES ?= $(BENCH_FULL_ENTRIES)
+BENCH_FULL_SERIAL_PIN ?= 2
+BENCH_FULL_LOGDIR ?= $(BUILDDIR)/bench-full-logs
+BENCH_FULL_RUN_EXTRA ?= 1
+BENCH_FULL_RUN_MAINT ?= 1
+BENCH_FULL_RUN_PURE_MAINT ?= $(BENCH_FULL_RUN_MAINT)
+BENCH_FULL_RUN_EXTRA_MAINT ?= $(BENCH_FULL_RUN_MAINT)
+BENCH_FULL_RUN_GROW ?= 1
+
+BENCH_DEV_ARCHES ?= auto
+BENCH_DEV_FAMILIES ?= flow4
+BENCH_DEV_EXTRA_FAMILIES ?= $(addsuffix _extra,$(BENCH_DEV_FAMILIES))
+BENCH_DEV_OPS ?= find_hit add_idx
+BENCH_DEV_QUERIES ?= 256
+BENCH_DEV_FILLS ?= 75
+BENCH_DEV_ENTRIES ?= 262144
+BENCH_DEV_FT_OPTS ?= --raw-repeat 3 --keep-n 1
+BENCH_DEV_EXTRA_REPS ?= 3
+BENCH_DEV_CAT_LOGS ?= 1
+BENCH_DEV_RUN_PURE_MAINT ?= 0
+BENCH_DEV_RUN_EXTRA_MAINT ?= 1
+
+BENCH_RELEASE_ARCHES ?= auto
+BENCH_RELEASE_FAMILIES ?= flow4 flow6 flowu
+BENCH_RELEASE_EXTRA_FAMILIES ?= $(addsuffix _extra,$(BENCH_RELEASE_FAMILIES))
+BENCH_RELEASE_OPS ?=
+BENCH_RELEASE_QUERIES ?= 32 256
+BENCH_RELEASE_FILLS ?= 75 95
+BENCH_RELEASE_ENTRIES ?= 1048576
+BENCH_RELEASE_FT_OPTS ?= --raw-repeat 5 --keep-n 3
+BENCH_RELEASE_EXTRA_REPS ?= 3
+BENCH_RELEASE_RUN_PURE_MAINT ?= 0
+BENCH_RELEASE_RUN_EXTRA_MAINT ?= 1
+
+BENCH_RELEASE_FULL_ARCHES ?= gen sse avx2 avx512
+BENCH_RELEASE_FULL_FAMILIES ?= flow4 flow6 flowu
+BENCH_RELEASE_FULL_EXTRA_FAMILIES ?= $(addsuffix _extra,$(BENCH_RELEASE_FULL_FAMILIES))
+BENCH_RELEASE_FULL_OPS ?=
+BENCH_RELEASE_FULL_QUERIES ?= 1 32 256
+BENCH_RELEASE_FULL_FILLS ?= 75 95
+BENCH_RELEASE_FULL_ENTRIES ?= 1048576
+BENCH_RELEASE_FULL_FT_OPTS ?= --raw-repeat 7 --keep-n 5
+BENCH_RELEASE_FULL_EXTRA_REPS ?= 5
+BENCH_RELEASE_FULL_RUN_PURE_MAINT ?= 1
+BENCH_RELEASE_FULL_RUN_EXTRA_MAINT ?= 1
+
+BENCH_FT_FULL_OPTS ?= $(BENCH_RELEASE_FT_OPTS)
+BENCH_FULL_ARCHES ?= $(BENCH_RELEASE_ARCHES)
+BENCH_FULL_ENTRIES ?= $(BENCH_RELEASE_ENTRIES)
+BENCH_FULL_FAMILIES ?= $(BENCH_RELEASE_FAMILIES)
+BENCH_FULL_EXTRA_FAMILIES ?= $(addsuffix _extra,$(BENCH_FULL_FAMILIES))
+BENCH_FULL_FILLS ?= $(BENCH_RELEASE_FILLS)
+BENCH_EXTRA_FULL_REPS ?= $(BENCH_RELEASE_EXTRA_REPS)
 
 CFLAGS_COMMON = -std=gnu11 -O$(OPTLEVEL) $(WARN) \
                -I$(TOPDIR)/include \
@@ -95,8 +146,9 @@ BENCH_CTRL_SRC  = bench_fill_ctrl.c
 SAMPLE_SRC      = usage_flowtable.c
 LIBFT        = $(FTDIR)/build/lib/libftable.a
 DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(TEST_CTRL).d $(BENCH_EXTRA).d $(BENCH_EXTRA_FULL).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d $(BENCH_CTRL_GEN).d $(BENCH_CTRL_SSE).d $(BENCH_CTRL_AVX2).d $(BENCH_CTRL_AVX512).d $(SAMPLE).d
+BENCH_FULL_RUNNER = run_bench_full.sh
 
-.PHONY: all help test test-pure test-extra test-extra-arch test-parity test-ctrl bench bench-light bench-full bench-extra bench-extra-full bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 bench-ctrl-avx512 bench-ctrl-build-all sample sim clean libft FORCE
+.PHONY: all help test test-pure test-extra test-extra-arch test-parity test-ctrl bench bench-light bench-dev bench-release bench-release-full bench-full bench-full-serial bench-extra bench-extra-full bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 bench-ctrl-avx512 bench-ctrl-build-all sample sim clean libft FORCE
 
 all: test
 
@@ -109,7 +161,11 @@ help:
 	  '  test-extra-arch  Run ft_test_extra for each CPU-supported arch' \
 	  '  bench        Run the light benchmark set (flow4 only, q=1/8/32/256 @ fill=60%)' \
 	  '  bench-light  Same as bench' \
-	  '  bench-full   Run the full benchmark sweep (flow4/6/u query, maintain, grow)' \
+	  '  bench-dev    Run a short development benchmark profile' \
+	  '  bench-release  Run the standard release benchmark profile in parallel' \
+	  '  bench-release-full  Run the exhaustive release benchmark sweep' \
+	  '  bench-full   Compatibility target using release defaults' \
+	  '  bench-full-serial  Run the release profile on one pinned core' \
 	  '  bench-extra  Run focused flow4 pure-vs-slot-extra comparison @ 75% fill' \
 	  '  bench-extra-full  Run full slot-extra sweep (flow4/6/u extra)' \
 	  '  bench-sweep  Run pure-vs-slot-extra maintain fill/expire matrix' \
@@ -123,6 +179,8 @@ help:
 	  '  BENCH_FT_OPTS       Options for bench / bench-light' \
 	  '  BENCH_FT_FULL_OPTS  Options for bench-full' \
 	  '  BENCH_FULL_ARCHES   Arch variants for bench-full' \
+	  '  BENCH_FULL_CORES    Physical CPUs for parallel bench-full (auto or list)' \
+	  '  BENCH_FULL_EXTRA_FAMILIES  Slot-extra families for bench-full' \
 	  '' \
 	  'Fill-controller bench arch variants (optimized binaries):' \
 	  '  bench-ctrl-gen      Build/run ft_bench_ctrl_gen with GEN arch' \
@@ -243,7 +301,7 @@ bench-extra-full: $(BENCH_EXTRA_FULL)
 			echo "skip: CPU does not support $$arch"; \
 			continue; \
 		fi; \
-		for family in flow4_extra flow6_extra flowu_extra; do \
+		for family in $(BENCH_FULL_EXTRA_FAMILIES); do \
 			for fill in $(BENCH_FULL_FILLS); do \
 				for q in $(BENCH_QUERIES); do \
 					echo "== full extra bench ($$arch, $$family, q=$$q, $(BENCH_EXTRA_FULL_ENTRIES) @ fill=$$fill%) =="; \
@@ -289,34 +347,115 @@ bench-ctrl-avx512: $(BENCH_CTRL_AVX512)
 sim: $(SIM)
 	$(SIM)
 
+define RUN_BENCH_FULL
+	@BENCH="$(BENCH)" \
+	BENCH_EXTRA_FULL="$(BENCH_EXTRA_FULL)" \
+	BENCH_FT_FULL_OPTS="$(BENCH_FT_FULL_OPTS)" \
+	BENCH_FULL_NAME="$(BENCH_FULL_NAME)" \
+	BENCH_FULL_ARCHES="$(BENCH_FULL_ARCHES)" \
+	BENCH_FULL_CORES="$(BENCH_FULL_CORES)" \
+	BENCH_FULL_CAT_LOGS="$(BENCH_FULL_CAT_LOGS)" \
+	BENCH_FULL_ENTRIES="$(BENCH_FULL_ENTRIES)" \
+	BENCH_FULL_FAMILIES="$(BENCH_FULL_FAMILIES)" \
+	BENCH_FULL_EXTRA_FAMILIES="$(BENCH_FULL_EXTRA_FAMILIES)" \
+	BENCH_FULL_OPS="$(BENCH_FULL_OPS)" \
+	BENCH_FULL_FILLS="$(BENCH_FULL_FILLS)" \
+	BENCH_FULL_LOGDIR="$(BENCH_FULL_LOGDIR)" \
+	BENCH_FULL_RUN_EXTRA="$(BENCH_FULL_RUN_EXTRA)" \
+	BENCH_FULL_RUN_MAINT="$(BENCH_FULL_RUN_MAINT)" \
+	BENCH_FULL_RUN_PURE_MAINT="$(BENCH_FULL_RUN_PURE_MAINT)" \
+	BENCH_FULL_RUN_EXTRA_MAINT="$(BENCH_FULL_RUN_EXTRA_MAINT)" \
+	BENCH_FULL_RUN_GROW="$(BENCH_FULL_RUN_GROW)" \
+	BENCH_GROW_FILL="$(BENCH_GROW_FILL)" \
+	BENCH_MAINT_FILL="$(BENCH_MAINT_FILL)" \
+	BENCH_QUERIES="$(BENCH_QUERIES)" \
+	BENCH_EXTRA_FULL_ENTRIES="$(BENCH_EXTRA_FULL_ENTRIES)" \
+	BENCH_EXTRA_FULL_REPS="$(BENCH_EXTRA_FULL_REPS)" \
+	bash "$(BENCH_FULL_RUNNER)"
+endef
+
+bench-dev: BENCH_FT_FULL_OPTS = $(BENCH_DEV_FT_OPTS)
+bench-dev: BENCH_FULL_NAME = bench-dev
+bench-dev: BENCH_FULL_ARCHES = $(BENCH_DEV_ARCHES)
+bench-dev: BENCH_FULL_CAT_LOGS = $(BENCH_DEV_CAT_LOGS)
+bench-dev: BENCH_FULL_ENTRIES = $(BENCH_DEV_ENTRIES)
+bench-dev: BENCH_FULL_FAMILIES = $(BENCH_DEV_FAMILIES)
+bench-dev: BENCH_FULL_EXTRA_FAMILIES = $(BENCH_DEV_EXTRA_FAMILIES)
+bench-dev: BENCH_FULL_OPS = $(BENCH_DEV_OPS)
+bench-dev: BENCH_FULL_FILLS = $(BENCH_DEV_FILLS)
+bench-dev: BENCH_FULL_RUN_PURE_MAINT = $(BENCH_DEV_RUN_PURE_MAINT)
+bench-dev: BENCH_FULL_RUN_EXTRA_MAINT = $(BENCH_DEV_RUN_EXTRA_MAINT)
+bench-dev: BENCH_QUERIES = $(BENCH_DEV_QUERIES)
+bench-dev: BENCH_EXTRA_FULL_ENTRIES = $(BENCH_DEV_ENTRIES)
+bench-dev: BENCH_EXTRA_FULL_REPS = $(BENCH_DEV_EXTRA_REPS)
+bench-dev: $(BENCH) $(BENCH_EXTRA_FULL)
+	$(RUN_BENCH_FULL)
+
+bench-release: BENCH_FT_FULL_OPTS = $(BENCH_RELEASE_FT_OPTS)
+bench-release: BENCH_FULL_NAME = bench-release
+bench-release: BENCH_FULL_ARCHES = $(BENCH_RELEASE_ARCHES)
+bench-release: BENCH_FULL_ENTRIES = $(BENCH_RELEASE_ENTRIES)
+bench-release: BENCH_FULL_FAMILIES = $(BENCH_RELEASE_FAMILIES)
+bench-release: BENCH_FULL_EXTRA_FAMILIES = $(BENCH_RELEASE_EXTRA_FAMILIES)
+bench-release: BENCH_FULL_OPS = $(BENCH_RELEASE_OPS)
+bench-release: BENCH_FULL_FILLS = $(BENCH_RELEASE_FILLS)
+bench-release: BENCH_FULL_RUN_PURE_MAINT = $(BENCH_RELEASE_RUN_PURE_MAINT)
+bench-release: BENCH_FULL_RUN_EXTRA_MAINT = $(BENCH_RELEASE_RUN_EXTRA_MAINT)
+bench-release: BENCH_QUERIES = $(BENCH_RELEASE_QUERIES)
+bench-release: BENCH_EXTRA_FULL_ENTRIES = $(BENCH_RELEASE_ENTRIES)
+bench-release: BENCH_EXTRA_FULL_REPS = $(BENCH_RELEASE_EXTRA_REPS)
+bench-release: $(BENCH) $(BENCH_EXTRA_FULL)
+	$(RUN_BENCH_FULL)
+
+bench-release-full: BENCH_FT_FULL_OPTS = $(BENCH_RELEASE_FULL_FT_OPTS)
+bench-release-full: BENCH_FULL_NAME = bench-release-full
+bench-release-full: BENCH_FULL_ARCHES = $(BENCH_RELEASE_FULL_ARCHES)
+bench-release-full: BENCH_FULL_ENTRIES = $(BENCH_RELEASE_FULL_ENTRIES)
+bench-release-full: BENCH_FULL_FAMILIES = $(BENCH_RELEASE_FULL_FAMILIES)
+bench-release-full: BENCH_FULL_EXTRA_FAMILIES = $(BENCH_RELEASE_FULL_EXTRA_FAMILIES)
+bench-release-full: BENCH_FULL_OPS = $(BENCH_RELEASE_FULL_OPS)
+bench-release-full: BENCH_FULL_FILLS = $(BENCH_RELEASE_FULL_FILLS)
+bench-release-full: BENCH_FULL_RUN_PURE_MAINT = $(BENCH_RELEASE_FULL_RUN_PURE_MAINT)
+bench-release-full: BENCH_FULL_RUN_EXTRA_MAINT = $(BENCH_RELEASE_FULL_RUN_EXTRA_MAINT)
+bench-release-full: BENCH_QUERIES = $(BENCH_RELEASE_FULL_QUERIES)
+bench-release-full: BENCH_EXTRA_FULL_ENTRIES = $(BENCH_RELEASE_FULL_ENTRIES)
+bench-release-full: BENCH_EXTRA_FULL_REPS = $(BENCH_RELEASE_FULL_EXTRA_REPS)
+bench-release-full: $(BENCH) $(BENCH_EXTRA_FULL)
+	$(RUN_BENCH_FULL)
+
+bench-full: BENCH_FT_FULL_OPTS = $(BENCH_RELEASE_FT_OPTS)
+bench-full: BENCH_FULL_NAME = bench-full
+bench-full: BENCH_FULL_ARCHES = $(BENCH_RELEASE_ARCHES)
+bench-full: BENCH_FULL_ENTRIES = $(BENCH_RELEASE_ENTRIES)
+bench-full: BENCH_FULL_FAMILIES = $(BENCH_RELEASE_FAMILIES)
+bench-full: BENCH_FULL_EXTRA_FAMILIES = $(BENCH_RELEASE_EXTRA_FAMILIES)
+bench-full: BENCH_FULL_OPS = $(BENCH_RELEASE_OPS)
+bench-full: BENCH_FULL_FILLS = $(BENCH_RELEASE_FILLS)
+bench-full: BENCH_FULL_RUN_PURE_MAINT = $(BENCH_RELEASE_RUN_PURE_MAINT)
+bench-full: BENCH_FULL_RUN_EXTRA_MAINT = $(BENCH_RELEASE_RUN_EXTRA_MAINT)
+bench-full: BENCH_QUERIES = $(BENCH_RELEASE_QUERIES)
+bench-full: BENCH_EXTRA_FULL_ENTRIES = $(BENCH_RELEASE_ENTRIES)
+bench-full: BENCH_EXTRA_FULL_REPS = $(BENCH_RELEASE_EXTRA_REPS)
 bench-full: $(BENCH) $(BENCH_EXTRA_FULL)
-	@echo "== full ftable bench (all supported arch variants, query sweep + maintain + grow) =="
-	@for arch in $(BENCH_FULL_ARCHES); do \
-		case "$$arch" in \
-		gen) supported=1 ;; \
-		sse) grep -qw sse4_2 /proc/cpuinfo && supported=1 || supported=0 ;; \
-		avx2) grep -qw avx2 /proc/cpuinfo && supported=1 || supported=0 ;; \
-		avx512) grep -qw avx512f /proc/cpuinfo && supported=1 || supported=0 ;; \
-		*) echo "unknown arch: $$arch"; exit 1 ;; \
-		esac; \
-		if [ "$$supported" != 1 ]; then \
-			echo "skip: CPU does not support $$arch"; \
-			continue; \
-		fi; \
-		for family in $(BENCH_FULL_FAMILIES); do \
-			for fill in $(BENCH_FULL_FILLS); do \
-				for q in $(BENCH_QUERIES); do \
-					echo "== full ftable bench ($$arch, $$family, q=$$q, 1M @ fill=$$fill%) =="; \
-					$(BENCH) $(BENCH_FT_FULL_OPTS) --arch $$arch --query $$q $$family 1048576 $$fill; \
-				done; \
-			done; \
-			echo "== full ftable maintain bench ($$arch, $$family, 1M @ fill=$(BENCH_MAINT_FILL)%) =="; \
-			$(BENCH) $(BENCH_FT_FULL_OPTS) --arch $$arch --maint $$family 1048576 $(BENCH_MAINT_FILL); \
-			echo "== full ftable grow bench ($$arch, $$family, 1M @ fill=$(BENCH_GROW_FILL)%) =="; \
-			$(BENCH) $(BENCH_FT_FULL_OPTS) --arch $$arch --grow $$family 1048576 $(BENCH_GROW_FILL); \
-		done; \
-	done
-	@$(MAKE) bench-extra-full
+	$(RUN_BENCH_FULL)
+
+bench-full-serial: $(BENCH) $(BENCH_EXTRA_FULL)
+bench-full-serial: BENCH_FT_FULL_OPTS = $(BENCH_RELEASE_FT_OPTS)
+bench-full-serial: BENCH_FULL_NAME = bench-full-serial
+bench-full-serial: BENCH_FULL_ARCHES = $(BENCH_RELEASE_ARCHES)
+bench-full-serial: BENCH_FULL_CORES = $(BENCH_FULL_SERIAL_PIN)
+bench-full-serial: BENCH_FULL_ENTRIES = $(BENCH_RELEASE_ENTRIES)
+bench-full-serial: BENCH_FULL_FAMILIES = $(BENCH_RELEASE_FAMILIES)
+bench-full-serial: BENCH_FULL_EXTRA_FAMILIES = $(BENCH_RELEASE_EXTRA_FAMILIES)
+bench-full-serial: BENCH_FULL_OPS = $(BENCH_RELEASE_OPS)
+bench-full-serial: BENCH_FULL_FILLS = $(BENCH_RELEASE_FILLS)
+bench-full-serial: BENCH_FULL_RUN_PURE_MAINT = $(BENCH_RELEASE_RUN_PURE_MAINT)
+bench-full-serial: BENCH_FULL_RUN_EXTRA_MAINT = $(BENCH_RELEASE_RUN_EXTRA_MAINT)
+bench-full-serial: BENCH_QUERIES = $(BENCH_RELEASE_QUERIES)
+bench-full-serial: BENCH_EXTRA_FULL_ENTRIES = $(BENCH_RELEASE_ENTRIES)
+bench-full-serial: BENCH_EXTRA_FULL_REPS = $(BENCH_RELEASE_EXTRA_REPS)
+bench-full-serial:
+	$(RUN_BENCH_FULL)
 
 clean:
 	rm -rf $(BINDIR) *~ core core.*

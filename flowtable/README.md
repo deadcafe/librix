@@ -677,15 +677,24 @@ Detailed measurement policy and per-target trust boundaries are documented in
 
 - `bench` / `bench-light`: `flow4` only, `q=1/8/32/256`, fill `60%`,
   `--arch auto` (the best supported runtime variant)
-- `bench-full`: `flow4/6/u` query sweep plus `maint` and `grow`, repeated
-  for fills `40/60/75/80/90%` and all CPU-supported variants from
-  `BENCH_FULL_ARCHES`
+- `bench-dev`: short development profile (`auto`, `flow4` and `flow4_extra`,
+  pure `find_hit/add_idx`, `q=256`, fill `75%`, 256K entries); pure maintain
+  is skipped by default because it needs perf counter access
+- `bench-release`: standard release profile for pure and slot-extra families,
+  `auto` arch, fills `75/95%`, queries `32/256`; jobs are distributed across
+  physical cores, and pure maintain is skipped by default to avoid host perf
+  counter permissions
+- `bench-release-full`: exhaustive release sweep over
+  `gen/sse/avx2/avx512`, queries `1/32/256`, higher repeat counts, and pure
+  maintain
+- `bench-full`: compatibility target with release defaults
+- `bench-full-serial`: release profile on one pinned core for quieter numbers
 - `bench-extra`: `bench_flow4_vs_extra.c`, a matched `flow4` pure vs
   `flow4_extra` microbench for insert/find/miss/touch/delete/maintain at
   75% active fill
 - `bench-extra-full`: `bench_flow_extra_table.c`, a full slot-extra
   family sweep for `flow4_extra`, `flow6_extra`, and `flowu_extra`
-  across datapath, maintain, grow, fills `40/60/75/80/90%`, query sizes,
+  across datapath, maintain, grow, default fills `75/95%`, query sizes,
   and CPU-supported arch variants
 - `bench-sweep`, `bench-zoned`, and `bench-ctrl`: maintenance and
   fill-controller focused benches
@@ -711,7 +720,17 @@ Options:
 - `--query N` — batch size (default 256)
 
 Default `make bench` policy: `--pin-core 2 --raw-repeat 3 --keep-n 1`.
-Default `make bench-full` policy: `--pin-core 2 --raw-repeat 11 --keep-n 7`.
+Default `make bench-dev` policy: `--raw-repeat 3 --keep-n 1`, 6 jobs.
+Default `make bench-release` / `make bench-full` policy:
+`--arch auto`, queries `32/256`, `--raw-repeat 5 --keep-n 3`,
+`BENCH_FULL_CORES=auto`.  Auto mode uses one logical CPU per physical core
+from `lscpu`; override with a list such as `BENCH_FULL_CORES=2,4,6,8`.
+Use `make bench-release-full` for exhaustive per-arch release evidence, or
+`make bench-full-serial` for the standard release profile on
+`BENCH_FULL_SERIAL_PIN` (default 2).
+
+In the full sweep, `95%` is guardrail pressure data, not normal operating
+performance.
 
 Notes:
 

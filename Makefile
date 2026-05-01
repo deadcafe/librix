@@ -14,7 +14,7 @@ PREFIX       ?= /usr/local
 RIX_PUB_HDRS := $(filter-out %_private.h, $(wildcard include/rix/*.h))
 
 .PHONY: all build test bench bench-full run-tests run-bench run-bench-full clean install htags htags-serve help ftable flowtable flowtable-test flowtable-bench bench-flowtable-extra bench-flowtable-sweep
-all: build run-tests run-bench
+all: build run-tests
 
 help:
 	@printf '%s\n' \
