@@ -460,7 +460,9 @@ RIX_RB_FOREACH_REVERSE(var, name, head, base)   /* 降順 */
 
 ## カッコーハッシュテーブル
 
-インデックスベースのカッコーハッシュ 5 バリアント。共通特性:
+傘ヘッダで使えるインデックスベースのカッコーハッシュ 5 バリアントに加え、
+バケット側 per-slot metadata 用の opt-in `slot_extra` バリアントがあります。
+共通特性:
 
 - **バケットあたり 16 スロット** (SIMD 並列スキャン)
 - **実行時 SIMD ディスパッチ** -- `rix_hash_arch_init(enable)` でソースファイルごとに Generic / SSE4.2 / AVX2 / AVX-512 を選択
@@ -474,12 +476,15 @@ RIX_RB_FOREACH_REVERSE(var, name, head, base)   /* 降順 */
 |-----------|--------|------------|-------------------|--------------|-----------|
 | fp      | `rix_hash_fp.h`      | フィンガープリント→バケット、フルキー→ノード | `hash_field`                | 128 B (2 CL) | 可変長キー、汎用 |
 | slot    | `rix_hash_slot.h`    | フィンガープリント→バケット、フルキー→ノード | `hash_field` + `slot_field` | 128 B (2 CL) | 可変長キー、最速 remove |
+| slot_extra | `rix_hash_slot_extra.h` | フィンガープリント→バケット、フルキー→ノード | `hash_field` + `slot_field`; `extra[]` はバケット側 | 192 B (3 CL) | per-slot metadata 付き可変長キー |
 | keyonly | `rix_hash_keyonly.h` | フィンガープリント→バケット、フルキー→ノード | (なし)                      | 128 B (2 CL) | 可変長キー、最小ノード |
 | hash32  | `rix_hash_32.h`       | `u32` キーをバケットに直接格納          | (なし)                      | 128 B (2 CL) | 32 ビット整数キー |
 | hash64  | `rix_hash_64.h`       | `u64` キーをバケットに直接格納          | (なし)                      | 192 B (3 CL) | 64 ビット整数キー |
 
 fp/slot/keyonly の 3 バリアントは同じバケットレイアウトと staged-find パイプラインを共有します。
-`rix_hash.h` は 5 バリアント全てをインクルードする傘ヘッダです。
+`rix_hash.h` は extra 以外の 5 バリアントをインクルードする傘ヘッダです。
+`slot_extra` は大きいバケットレイアウトを使うため、
+`rix_hash_slot_extra.h` から明示的に opt-in します。
 
 #### Find 性能 (DRAM コールド、パイプライン、平均 cycles/op)
 
@@ -504,6 +509,20 @@ MSHR 理論下限: 45 cycles/op (20 MSHRs, 300 cy レイテンシ)。
 
 slot の remove が最速 (12 cy/op)。`slot_field` による O(1) スロット特定が寄与。
 keyonly の remove が最遅 (37 cy/op)。キーの再ハッシュが必要なため。
+
+#### Slot-extra 同条件比較 (平均 cycles/op)
+
+| 操作 | slot | slot_extra | delta |
+|------|-----:|-----------:|------:|
+| insert    | 68.89 | 77.81 | +8.92 |
+| find_hit  | 44.42 | 46.90 | +2.48 |
+| find_miss | 47.52 | 51.76 | +4.23 |
+| remove    |  7.75 | 11.68 | +3.94 |
+
+条件: `tests/hashtbl_extra/hash_vs_classic_bench`、65,536 entries、
+16,384 buckets、8 reps、同一 node/key layout。構造上の差分は bucket のみで、
+`slot` は 128 B bucket、`slot_extra` は `extra[16]` 用の 3 本目の cache line
+を持つ 192 B bucket です。
 
 #### 最大充填率
 

@@ -483,7 +483,8 @@ Comparator signature: `int cmp(const type *a, const type *b)` -- strict weak ord
 
 ## Cuckoo hash tables
 
-Five header-only, index-based cuckoo hash variants.  All share:
+Five umbrella header-only, index-based cuckoo hash variants, plus an opt-in
+`slot_extra` variant for bucket-side per-slot metadata.  All share:
 
 - **16 slots per bucket** (SIMD-parallel slot scan)
 - **Runtime SIMD dispatch** -- Generic / SSE4.2 / AVX2 / AVX-512 selected per source file via `rix_hash_arch_init(enable)`
@@ -497,12 +498,15 @@ Five header-only, index-based cuckoo hash variants.  All share:
 |---------|--------|------------|-----------------|-------------|----------|
 | fp      | `rix_hash_fp.h`      | fingerprint in bucket, full key in node | `hash_field`                | 128 B (2 CL) | Variable-length keys, general purpose |
 | slot    | `rix_hash_slot.h`    | fingerprint in bucket, full key in node | `hash_field` + `slot_field` | 128 B (2 CL) | Variable-length keys, fastest remove |
+| slot_extra | `rix_hash_slot_extra.h` | fingerprint in bucket, full key in node | `hash_field` + `slot_field`; `extra[]` lives in bucket | 192 B (3 CL) | Variable-length keys with per-slot metadata |
 | keyonly | `rix_hash_keyonly.h` | fingerprint in bucket, full key in node | (none)                      | 128 B (2 CL) | Variable-length keys, smallest node |
 | hash32  | `rix_hash_32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
 | hash64  | `rix_hash_64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
 
 All fp/slot/keyonly variants share the same bucket layout and staged-find pipeline.
-`rix_hash.h` is the umbrella header that includes all five variants.
+`rix_hash.h` is the umbrella header that includes the five non-extra variants.
+`slot_extra` is opt-in via `rix_hash_slot_extra.h` because it uses a larger
+bucket layout.
 
 #### Find performance (DRAM-cold, pipelined, avg cycles/op)
 
@@ -527,6 +531,20 @@ MSHR theoretical minimum: 45 cycles/op (20 MSHRs, 300 cy latency).
 
 slot remove is fastest (12 cy/op) due to O(1) slot lookup via `slot_field`.
 keyonly remove is slowest (37 cy/op) because it requires re-hashing the key.
+
+#### Slot-extra matched comparison (avg cycles/op)
+
+| Operation | slot | slot_extra | delta |
+|-----------|-----:|-----------:|------:|
+| insert    | 68.89 | 77.81 | +8.92 |
+| find_hit  | 44.42 | 46.90 | +2.48 |
+| find_miss | 47.52 | 51.76 | +4.23 |
+| remove    |  7.75 | 11.68 | +3.94 |
+
+Conditions: `tests/hashtbl_extra/hash_vs_classic_bench`, 65,536 entries,
+16,384 buckets, 8 reps, identical node/key layout.  The only structural
+difference is the bucket: `slot` uses 128 B buckets, while `slot_extra` uses
+192 B buckets with a third cache line for `extra[16]`.
 
 #### Maximum fill rate
 
