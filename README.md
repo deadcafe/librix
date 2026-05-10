@@ -483,8 +483,9 @@ Comparator signature: `int cmp(const type *a, const type *b)` -- strict weak ord
 
 ## Cuckoo hash tables
 
-Five umbrella header-only, index-based cuckoo hash variants, plus an opt-in
-`slot_extra` variant for bucket-side per-slot metadata.  All share:
+Five umbrella header-only, index-based cuckoo hash variants, an MRSW variant,
+plus an opt-in `slot_extra` variant for bucket-side per-slot metadata.
+The ordinary non-MRSW variants share:
 
 - **16 slots per bucket** (SIMD-parallel slot scan)
 - **Runtime SIMD dispatch** -- Generic / SSE4.2 / AVX2 / AVX-512 selected per source file via `rix_hash_arch_init(enable)`
@@ -504,11 +505,88 @@ Five umbrella header-only, index-based cuckoo hash variants, plus an opt-in
 | keyonly | `rix_hash_keyonly.h` | fingerprint in bucket, full key in node | (none)                      | 128 B (2 CL) | Variable-length keys, smallest node |
 | hash32  | `rix_hash_32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
 | hash64  | `rix_hash_64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
+| mrsw    | `rix_hash_mrsw.h`     | fingerprint in bucket, full key in node | `hash_field`; per-bucket `ctrl` | 128 B (2 CL), 15 slots | Lockless readers with one writer |
 
 All fp/slot/keyonly variants share the same bucket layout and staged-find pipeline.
-`rix_hash.h` is the umbrella header that includes the five non-extra variants.
+`rix_hash.h` is the umbrella header that includes the non-extra variants,
+including MRSW.
 `slot_extra` is opt-in via `rix_hash_slot_extra.h` because it uses a larger
 bucket layout.
+
+#### MRSW memory ordering
+
+`RIX_HASH_MRSW` is an independent fp-style variant for multi-reader /
+single-writer use.  It keeps a 128 B bucket by using 15 usable slots:
+`hash[15]` occupies the first cache line, a packed `ctrl` word uses the spare
+hash-line `u32`, `idx[15]` occupies the second cache line, and the spare
+idx-line `u32` is reserved.  `ctrl` uses bits 0..16 (17 bits) for the
+seqcount and bits 17..31 (15 bits) for the valid bitmap; valid bit `s`
+corresponds to usable slot `s` for `s < 15`.  Use `rix_hash_mrsw_nb_bk_hint()`
+when sizing tables; with the same bucket count as the 16-slot variants,
+capacity is reduced by 1/16.  Operational bucket-fill guidance is also
+5 percentage points lower than pure tables: pure Green <75%, Yellow 75..85%,
+Red >85%; MRSW Green <70%, Yellow 70..80%, Red >80%.  The MRSW sizing helper
+therefore targets at most 70% of the 15 usable bucket slots before
+power-of-two rounding.
+
+The 17-bit seqcount is a generation counter.  Readers perform
+read-after-verify on only the two candidate buckets: acquire-load `ctrl`, build
+a hash-hit bitmap with the same runtime SIMD `find_u32x16` dispatch used by the
+ordinary hash table, AND it with the valid bitmap from that same control word,
+read idx/node candidates from the resulting valid-hit slots.  If a key is
+found in a valid-hit slot, the hit path returns immediately and does not
+perform a final `ctrl` verify.  If no key is found, the miss path acquire-loads
+the searched `ctrl` words again and retries if either control word changed.
+This means a writer touching one bucket does not block readers whose two
+candidate buckets are different, and the common hit path pays only one ctrl
+load per searched bucket.  A lookup must not span one full 17-bit seq wrap of
+either candidate bucket; with one writer this means it must not overlap 131072
+completed ctrl updates to the same candidate bucket.
+
+Writer ordering is part of the API contract.  Insert/publish writes
+`idx[slot]` and `hash[slot]` first, then performs one release update of
+`ctrl`: increment `ctrl.seq` and set the `ctrl.valid` bit in the same atomic
+u32 update.  Remove / unpublish performs one release update of `ctrl`:
+increment `ctrl.seq` and clear the `ctrl.valid` bit.  It does not need to clear
+`hash[slot]` or `idx[slot]`; stale slot payload is ignored while the valid bit
+is clear.  A miss is reported only after the final acquire verification sees
+unchanged control words for both candidate buckets.
+
+The lookup semantics are intentionally asymmetric.  A hit that overlaps a
+writer may return an entry from a slot that was visible in the `ctrl` snapshot
+used for the scan.  During kickout it may also return either copy of the
+publish-before-unpublish transient duplicate; both copies refer to the same
+node.  A miss, however, is only accepted after both candidate bucket control
+words are verified unchanged.  This avoids false negatives without adding a
+second ctrl load to the hit path.
+
+Kickout/move ordering is publish-before-unpublish.  The writer first publishes
+the victim in its alternate bucket by writing idx/hash and performing the
+release ctrl update that increments seq and sets the new valid bit; only then
+does it release-update the old bucket ctrl to increment seq and clear the old
+valid bit.  During this handoff the same entry may be visible in both
+candidate buckets, and `find` may return either copy: both refer to the same
+node.  That transient duplicate is intentional and required for correctness;
+clearing the old slot first would open a false-negative window.
+
+`ctrl` is the only ordered atomic word in the bucket.  `hash[]` and `idx[]`
+are ordinary non-atomic payload arrays so the hot path can use SIMD loads.
+This is a deliberate "intentional benign race" in the BSD/Linux idiom:
+plain reads of `hash[]/idx[]` may overlap a writer's plain stores.  Such
+observations are either masked off by the bucket `valid` bitmap, accepted as a
+concurrent hit under the hit semantics above, or discarded by the miss-side
+seq verify, so no false negative escapes.  The reader/writer functions that
+touch these arrays carry `__attribute__((no_sanitize("thread")))`
+(`RIX_NO_SANITIZE_THREAD`) so that ThreadSanitizer-instrumented builds do not
+flag these expected races.
+If you need to model the table under TSan, build the application against
+the MRSW headers without redefining `RIX_NO_SANITIZE_THREAD`; readers will
+remain race-clean as far as observable behavior is concerned.
+
+The MRSW header also exposes a slot-tracking variant
+(`RIX_HASH_MRSW_GENERATE_SLOT*`) which mirrors the pure `rix_hash_slot.h`
+contract: insert/kickout maintains a `slot_field` in each node so that
+remove can address the bucket slot in O(1) without scanning all 15 entries.
 
 #### Find performance (DRAM-cold, pipelined, avg cycles/op)
 

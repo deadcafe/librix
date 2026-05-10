@@ -49,11 +49,18 @@ ARCH_CFLAGS_gen :=
 ARCH_CFLAGS_sse := -msse4.2
 ARCH_CFLAGS_avx2 := -mavx2 -msse4.2
 ARCH_CFLAGS_avx512 := -mavx512f -mavx2 -msse4.2
+ARCH_ENABLE_gen := 0u
+ARCH_ENABLE_sse := RIX_HASH_ARCH_SSE
+ARCH_ENABLE_avx2 := RIX_HASH_ARCH_AVX2
+ARCH_ENABLE_avx512 := RIX_HASH_ARCH_AVX512
 
 OBJS         = $(foreach unit,$(FLOW_UNITS), \
                    $(foreach arch,$(ARCH_VARIANTS), \
                        $(OBJDIR)/$(unit)_$(arch).o)) \
                $(OBJDIR)/ft_dispatch.o \
+               $(foreach arch,$(ARCH_VARIANTS), \
+                   $(OBJDIR)/flow_mrsw_$(arch).o) \
+               $(OBJDIR)/ft_dispatch_mrsw.o \
                $(foreach arch,$(ARCH_VARIANTS), \
                    $(OBJDIR)/ft_maintain_$(arch).o) \
                $(foreach unit,$(EXTRA_ARCH_UNITS), \
@@ -98,7 +105,21 @@ $(OBJDIR)/ft_dispatch.o: $(DISPATCH_SRC) | $(OBJDIR)
 $(OBJDIR)/ft_dispatch_extra.o: $(EXTRA_DISPATCH_SRC) | $(OBJDIR)
 	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
 
+$(OBJDIR)/ft_dispatch_mrsw.o: $(SRCDIR)/ft_dispatch_mrsw.c | $(OBJDIR)
+	$(CC) $(CFLAGS_BASE) $(DEPFLAGS) -MF $(@:.o=.d) -MT $@ -c -o $@ $<
+
+define COMPILE_MRSW_ARCH_UNIT
+$(OBJDIR)/flow_mrsw_$(1).o: $(SRCDIR)/flow_mrsw.c | $(OBJDIR)
+	$$(CC) $$(CFLAGS_BASE) $$(DEPFLAGS) -MF $$(@:.o=.d) -MT $$@ \
+	    $$(ARCH_CFLAGS_$(1)) -DFT_ARCH_SUFFIX=_$(1) \
+	    -DFT_MRSW_ARCH_ENABLE=$$(ARCH_ENABLE_$(1)) -c -o $$@ $$<
+endef
+
+$(foreach arch,$(ARCH_VARIANTS), \
+  $(eval $(call COMPILE_MRSW_ARCH_UNIT,$(arch))))
+
 $(LIB_STATIC): $(OBJS) | $(LIBDIR)
+	$(RM) $@
 	$(AR) rcs $@ $^
 
 clean:

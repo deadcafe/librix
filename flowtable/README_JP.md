@@ -69,12 +69,49 @@ timeout expire 自体は持つ。
 - `ft_flow4_table`、`ft_flow6_table`、`ft_flowu_table`
 - `ft_table_extra` と `flow4_extra` / `flow6_extra` / `flowu_extra` の
   slot-extra table API
+- multi-reader / single-writer lookup 用の `ft_mrsw_table` と
+  `flow4_mrsw_entry` / `flow6_mrsw_entry` / `flowu_mrsw_entry`
 - scalar / bulk の `find`、`add_idx`、`del_idx`、`del_key`
 - caller-defined record layout を扱う intrusive `init()`（stride + offset）
 - サフィックスなし公開 API + runtime arch dispatch
 - `migrate()` による grow / shrink / rehash
 - 明示 maintenance (`maintain`, `maintain_idx_bulk`)
 - bucket-table-only resize（record は移動しない）
+
+### 2.0 MRSW flow table
+
+MRSW flow table は `struct ft_table` とは意図的に分けている。これは
+c-plane writer と u-plane reader を想定した一般 flow table であり、flow cache
+ではない。MRSW entry layout には per-entry timestamp、touch、timeout、reclaim
+path を持たない。通常 table に MRSW を混ぜると通常 table の reader-side
+timestamp store を引き継ぐか、既存 hot path に atomic cost を足すことになる。
+MRSW 版は以下を使う。
+
+- `struct ft_mrsw_table`
+- `struct flow4_mrsw_entry`, `flow6_mrsw_entry`, `flowu_mrsw_entry`
+- 15 usable slot の `struct rix_hash_mrsw_bucket_s`
+- hash-table placement state だけを持つ専用 metadata
+
+capacity planning では pure table より低い bucket-fill 目標を使う。pure は
+Green <75%、Yellow 75..85%、Red >85% だが、MRSW は 5 ポイント低く見て
+Green <70%、Yellow 70..80%、Red >80% とする。allocation には
+`ft_mrsw_table_bucket_size()` を使い、この 70% MRSW slot-fill 目標に従わせる。
+
+concurrency contract:
+
+- 任意数の reader が `ft_flow*_mrsw_table_find*()` を呼べる
+- reader lookup は entry metadata、timestamp、lookup counter を更新しない
+- add/delete/flush/migrate は single writer のみ
+- publish 中の entry key は immutable
+- remove 済み entry storage は、外部 reader grace period が終わるまで
+  別 key に reuse しない
+- `migrate()` は reader quiesced 状態、または上位 RCU table pointer swap が必要
+
+bucket ordering は `rix_hash_mrsw` と同じである。writer は payload を書いてから
+bucket ctrl を release update し、reader は valid slot だけを走査して、最後に
+候補 bucket 2 個の ctrl が変化していないことを確認する。kickout は alternate
+bucket へ publish してから old slot を unpublish するため、一時的な duplicate
+は許容される。この順序により false negative window を避ける。
 
 ### 2.1 timeout maintenance
 
@@ -400,8 +437,8 @@ helper 関数:
 - `flowtable/include/ft_fill_ctrl.h` — optional fill-rate controller
 - `flowtable/include/flowtable/*.h` — advanced family/common headers
 
-通常の利用では `flow_table.h` だけを include する。これは pure API と
-slot-extra API の両方を include する。slot-extra 実装は通常の
+通常の利用では `flow_table.h` だけを include する。これは pure API、
+MRSW API、slot-extra API を include する。slot-extra 実装は通常の
 `flowtable/src/` build に含まれ、`libftable.a` へ link される。
 分離された `extra/` source tree や include path は持たない。
 `flowtable/*.h` は、`flowtable/flow4_table.h` や
@@ -479,9 +516,12 @@ n = FT_TABLE_MAINTAIN(&ctx_e, start_bk, now, timeout,
 - `ft_table_extra_touch()` / `ft_table_extra_touch_checked()` のような
   extra-only timestamp helper は extra-specific のままとする。
 - bucket sizing は variant-specific である。pure は
-  `ft_table_bucket_size()`、slot-extra は `ft_table_extra_bucket_size()` /
+  `ft_table_bucket_size()`、MRSW は `ft_mrsw_table_bucket_size()`、
+  slot-extra は `ft_table_extra_bucket_size()` /
   `flow4_extra_table_bucket_size()` / `flow6_extra_table_bucket_size()` /
   `flowu_extra_table_bucket_size()` を使う。
+  `ft_mrsw_table_bucket_size()` は MRSW 用の低い運用境界に従い、
+  15 usable slot/bucket の 70% 以下を目標にする。
 
 private 実装 header は `flowtable/src/`、bench 専用 helper は
 `flowtable/test/` に置く。
@@ -499,6 +539,16 @@ private 実装 header は `flowtable/src/`、bench 専用 helper は
 - `ft_flow4_table_maintain()` / `ft_flow4_table_maintain_idx_bulk()`
 - `ft_flow4_table_walk()`
 - `ft_arch_init()` — 起動時 1 回の CPU 検出と SIMD dispatch 選択
+
+MRSW API は concurrency contract と両立する範囲で pure table と対称にしている。
+
+- `FT_FLOW4_MRSW_TABLE_INIT_TYPED()` / `ft_flow4_mrsw_table_init()`
+- `ft_flow4_mrsw_table_find()` / `ft_flow4_mrsw_table_find_bulk()`
+- `ft_mrsw_table_add_idx()` / `ft_mrsw_table_add_idx_bulk()`
+- `ft_mrsw_table_del_idx()` / `ft_mrsw_table_del_idx_bulk()`
+- `ft_flow4_mrsw_table_del_key_bulk()`
+- `ft_mrsw_table_migrate()`（reader quiesced 前提）
+- `ft_mrsw_table_walk()`
 
 architecture 選択は `fcache` と同じ考え方で行う。
 
@@ -624,7 +674,7 @@ shrink も可能: caller が小さい bucket 領域を確保して `migrate()` �
 
 ## 10. 現在の test coverage
 
-現行 test program は `flowtable/test/test_flow_table.c` である。
+pure table の test program は `flowtable/test/test_flow_table.c` である。
 
 3 variant（flow4, flow6, flowu）すべてについて試験している項目:
 
@@ -655,6 +705,14 @@ slot-extra の test program は `flowtable/test/test_flow4_extra.c` であり、
 - bucket sweep maintenance
 - migrate 後に current bucket mask で touch できること
 - maintenance facade を含む `FT_TABLE_*` generic macro
+
+MRSW の test program は `flowtable/test/test_flow_mrsw.c` であり、
+`test-mrsw` から実行される。以下を評価する。
+
+- flow4 / flow6 / flowu の独立 MRSW entry/table API
+- duplicate handling と delete by index/key path
+- timestamp touch、timeout state、lookup counter write を持たない reader lookup
+- lookup と add/remove を並行させる multi-reader/single-writer stress
 
 実行:
 

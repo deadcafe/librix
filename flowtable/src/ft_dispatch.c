@@ -9,6 +9,7 @@
 
 #include "flow_dispatch.h"
 #include "flow_arch_common.h"
+#include "flow_mrsw_dispatch.h"
 
 typedef unsigned (*ft_maintain_fn_t)(const struct ft_maint_ctx *,
                                      unsigned, u64, u64,
@@ -48,6 +49,7 @@ ft_arch_init(unsigned arch_enable)
     FT_OPS_SELECT(flow6, arch_enable, &ft_flow6_active);
     FT_OPS_SELECT(flowu, arch_enable, &ft_flowu_active);
     ft_maint_select_(arch_enable);
+    ft_mrsw_arch_init(arch_enable);
 }
 
 /*===========================================================================

@@ -4,6 +4,56 @@ All notable changes to this project will be documented in this file.
 
 The format is inspired by Keep a Changelog.
 
+## [0.5.2] - 2026-05-10
+
+MRSW release adding lockless-reader hash and flow table variants for
+single-writer control-plane updates and user-plane lookups.
+
+### Added
+
+- Added `rix_hash_mrsw.h`, an independent cuckoo hash variant for
+  multi-reader / single-writer use with per-bucket seq/valid control words,
+  15 usable slots per 128 B bucket, and staged lookup APIs matching the normal
+  hash table shape.
+- Added SLOT-tracking MRSW hash generator macros so users can maintain a
+  node-side slot field and remove entries in O(1).
+- Added MRSW flow tables for `flow4`, `flow6`, and `flowu`, separate from the
+  existing flow-cache-oriented tables and intended for a control-plane writer
+  with user-plane readers.
+- Added MRSW flow dispatch objects for Generic, SSE4.2, AVX2, and AVX-512
+  builds.
+- Added MRSW hash and flow table tests, including slot consistency,
+  kickout/duplicate behavior, and reader/writer stress coverage.
+- Added a local `bench_pure_vs_mrsw` benchmark for pure-vs-MRSW hash primitive
+  comparisons.
+
+### Changed
+
+- `rix_hash.h` and `flow_table.h` now include the MRSW public headers.
+- `ft_arch_init()` now also initializes the MRSW flow-table dispatch.
+- MRSW bucket fill guidance is documented as 5 percentage points below the
+  pure 16-slot tables: Green <70%, Yellow 70..80%, Red >80%.
+- MRSW flow statistics intentionally omit reader-path lookup/hit/miss counters
+  so lookups remain write-free.
+
+### Fixed
+
+- Documented the intentionally asymmetric MRSW lookup semantics: hits return
+  immediately from the visible ctrl snapshot, while misses are accepted only
+  after both candidate bucket control words verify unchanged.
+- Fixed the non-x86 MRSW dispatch selection macro so it expands as a complete
+  statement.
+
+### Validation status
+
+- `make -C tests/hashtbl_mrsw test`: passed
+- `make -C flowtable/test test-mrsw`: passed
+- `make -B -C tests/hashtbl_mrsw test CC=clang`: passed
+- `make -B -C flowtable/test test-mrsw CC=clang
+  BUILDDIR=/tmp/librix-flow-clang-mrsw-review`: passed
+- `./bench_pure_vs_mrsw 1048576 200 1`: passed
+- `/tmp/bench_mrsw_cold_compare 1048576 70 7 {1,8,32,256} 0 2`: passed
+
 ## [0.5.1] - 2026-04-29
 
 Patch release focused on flowtable brush-up without trading away datapath

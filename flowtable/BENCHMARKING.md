@@ -15,6 +15,13 @@ The flowcache target is a controlled cache, not a packed hash-table envelope.
 - Red: 85% to below 95% active fill.
 - 95% and above is a guardrail/pressure region, not a normal target.
 
+MRSW bucket-slot planning is 5 percentage points lower than pure because MRSW
+uses 15 usable slots plus one control word per bucket and pays extra verify
+cost under pressure.  For MRSW bucket fill, treat Green as below 70%, Yellow as
+70% to below 80%, and Red as 80% and above.  The generic active-fill benchmark
+labels still mean active entries divided by configured entry capacity unless a
+benchmark explicitly reports bucket-slot saturation.
+
 Hash capacity envelope testing is a different question: how far the underlying
 hash can be pushed before insert failure or long relocation tails dominate.
 That cannot be proven by a single cycles/key number because it depends on key

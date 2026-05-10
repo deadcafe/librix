@@ -110,6 +110,7 @@ SIM_NAME      = ft_sim_cache
 TEST_EXTRA_NAME = ft_test_extra
 TEST_PARITY_NAME = ft_test_parity
 TEST_CTRL_NAME = ft_test_ctrl
+TEST_MRSW_NAME = ft_test_mrsw
 BENCH_EXTRA_NAME = ft_bench_extra
 BENCH_EXTRA_FULL_NAME = ft_bench_extra_full
 BENCH_SWEEP_NAME = ft_bench_sweep
@@ -122,6 +123,7 @@ SIM           = $(BINDIR)/$(SIM_NAME)
 TEST_EXTRA    = $(BINDIR)/$(TEST_EXTRA_NAME)
 TEST_PARITY   = $(BINDIR)/$(TEST_PARITY_NAME)
 TEST_CTRL     = $(BINDIR)/$(TEST_CTRL_NAME)
+TEST_MRSW     = $(BINDIR)/$(TEST_MRSW_NAME)
 BENCH_EXTRA   = $(BINDIR)/$(BENCH_EXTRA_NAME)
 BENCH_EXTRA_FULL = $(BINDIR)/$(BENCH_EXTRA_FULL_NAME)
 BENCH_SWEEP   = $(BINDIR)/$(BENCH_SWEEP_NAME)
@@ -138,17 +140,18 @@ SIM_SRC      = sim_flow_cache.c
 TEST_EXTRA_SRC = test_flow4_extra.c
 TEST_PARITY_SRC = test_flow4_parity.c
 TEST_CTRL_SRC = test_fill_ctrl.c
+TEST_MRSW_SRC = test_flow_mrsw.c
 BENCH_EXTRA_SRC = bench_flow4_vs_extra.c
 BENCH_EXTRA_FULL_SRC = bench_flow_extra_table.c
 BENCH_SWEEP_SRC = bench_flow4_maint_sweep.c
 BENCH_ZONED_SRC = bench_flow4_zoned.c
 BENCH_CTRL_SRC  = bench_fill_ctrl.c
 SAMPLE_SRC      = usage_flowtable.c
-LIBFT        = $(FTDIR)/build/lib/libftable.a
-DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(TEST_CTRL).d $(BENCH_EXTRA).d $(BENCH_EXTRA_FULL).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d $(BENCH_CTRL_GEN).d $(BENCH_CTRL_SSE).d $(BENCH_CTRL_AVX2).d $(BENCH_CTRL_AVX512).d $(SAMPLE).d
+LIBFT        = $(BUILDDIR)/lib/libftable.a
+DEPS         = $(TARGET).d $(BENCH).d $(SIM).d $(TEST_EXTRA).d $(TEST_PARITY).d $(TEST_CTRL).d $(TEST_MRSW).d $(BENCH_EXTRA).d $(BENCH_EXTRA_FULL).d $(BENCH_SWEEP).d $(BENCH_ZONED).d $(BENCH_CTRL).d $(BENCH_CTRL_GEN).d $(BENCH_CTRL_SSE).d $(BENCH_CTRL_AVX2).d $(BENCH_CTRL_AVX512).d $(SAMPLE).d
 BENCH_FULL_RUNNER = run_bench_full.sh
 
-.PHONY: all help test test-pure test-extra test-extra-arch test-parity test-ctrl bench bench-light bench-dev bench-release bench-release-full bench-full bench-full-serial bench-extra bench-extra-full bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 bench-ctrl-avx512 bench-ctrl-build-all sample sim clean libft FORCE
+.PHONY: all help test test-pure test-extra test-extra-arch test-parity test-ctrl test-mrsw bench bench-light bench-dev bench-release bench-release-full bench-full bench-full-serial bench-extra bench-extra-full bench-sweep bench-zoned bench-ctrl bench-ctrl-gen bench-ctrl-sse bench-ctrl-avx2 bench-ctrl-avx512 bench-ctrl-build-all sample sim clean libft FORCE
 
 all: test
 
@@ -159,6 +162,7 @@ help:
 	  '  test         Build and run functional tests' \
 	  '  test-pure    Build and run the pure flowtable functional tests' \
 	  '  test-extra-arch  Run ft_test_extra for each CPU-supported arch' \
+	  '  test-mrsw    Build and run the MRSW flowtable functional tests' \
 	  '  bench        Run the light benchmark set (flow4 only, q=1/8/32/256 @ fill=60%)' \
 	  '  bench-light  Same as bench' \
 	  '  bench-dev    Run a short development benchmark profile' \
@@ -210,6 +214,9 @@ $(TEST_PARITY): $(TEST_PARITY_SRC) $(LIBFT) | $(BINDIR)
 $(TEST_CTRL): $(TEST_CTRL_SRC) | $(BINDIR)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_CTRL_SRC)
 
+$(TEST_MRSW): $(TEST_MRSW_SRC) $(LIBFT) | $(BINDIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_MRSW_SRC) $(LIBFT)
+
 $(BENCH_EXTRA): $(BENCH_EXTRA_SRC) $(LIBFT) | $(BINDIR)
 	$(CC) $(CFLAGS) -DNDEBUG $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_EXTRA_SRC) $(LIBFT)
 
@@ -245,7 +252,7 @@ FORCE:
 
 libft: $(LIBFT)
 
-test: test-pure test-extra test-extra-arch test-parity test-ctrl
+test: test-pure test-extra test-extra-arch test-parity test-ctrl test-mrsw
 
 test-pure: $(TARGET)
 	$(TARGET)
@@ -276,6 +283,9 @@ test-parity: $(TEST_PARITY)
 
 test-ctrl: $(TEST_CTRL)
 	$(TEST_CTRL)
+
+test-mrsw: $(TEST_MRSW)
+	$(TEST_MRSW)
 
 bench-light: $(BENCH)
 	@for q in $(BENCH_QUERIES); do \

@@ -1,0 +1,1231 @@
+/*-
+ * SPDX-License-Identifier: BSD 3-Clause License
+ *
+ * Copyright (c) 2026 deadcafe.beef@gmail.com
+ * All rights reserved.
+ */
+
+/*
+ * rix_hash_mrsw.h - multi-reader / single-writer cuckoo hash table.
+ *
+ * This is an independent hash-table variant.  It does not reuse
+ * rix_hash_bucket_s because each bucket has a packed seq/valid control word
+ * that lets readers reject observations that overlap a writer touching that
+ * bucket.
+ *
+ * Concurrency contract:
+ *   - any number of reader threads may call find / staged find concurrently.
+ *   - exactly one writer thread may call insert / remove / remove_at.
+ *   - node keys are immutable while the node is published.
+ *   - removed node storage must not be freed or reused for a different key
+ *     until callers have provided an external reader grace period.
+ *   - resize/grow is outside this primitive; perform it only after readers
+ *     have quiesced, or publish a new table through a higher-level RCU scheme.
+ *
+ * Reader progress:
+ *   readers do not take a lock, but they retry while a writer is active or
+ *   when a writer overlapped the lookup.  A continuously active writer can
+ *   therefore starve readers.
+ *
+ * Memory ordering:
+ *   - Each bucket control word is one atomic u32:
+ *       bits  0..16: seqcount generation (17 bits, wraps at 131072).
+ *       bits 17..31: valid bitmap for usable slots 0..14 (15 bits).
+ *   - Reader:
+ *       ctrl0 = acquire load of bucket ctrl.
+ *       build a hash-hit bitmap, AND it with ctrl.valid, then read idx/key
+ *       candidates from the resulting valid-hit slots.
+ *       If a key is found in a valid slot, return it immediately.  The hit
+ *       path does not perform a final ctrl verify; this is a deliberate
+ *       throughput tradeoff.  When the lookup overlaps insert/remove/kickout,
+ *       it may return a slot that was visible in the ctrl snapshot used for
+ *       the scan, or either copy of a transient duplicate created by
+ *       publish-before-unpublish kickout ordering.
+ *       If no key is found, acquire-load the searched bucket ctrl words again
+ *       and retry if either changed.  This avoids false negatives when a
+ *       writer published or moved the key while the reader was searching.
+ *     A lookup must not span one full 17-bit seq wrap of either candidate
+ *     bucket.  With the single-writer contract that means a reader must not
+ *     overlap 131072 completed ctrl updates to the same candidate bucket.
+ *   - Writer:
+ *       insert/publish: write idx and hash first, then release-update ctrl by
+ *         incrementing seq and setting the valid bit in one atomic u32 update.
+ *       remove/unpublish: release-update ctrl by incrementing seq and clearing
+ *         the valid bit in one atomic u32 update.  hash/idx may keep stale
+ *         values; valid is the source of truth for slot visibility.
+ *       kickout/move: publish the entry in the alternate bucket first, then
+ *         unpublish the old bucket slot.  During this handoff the same entry
+ *         can be visible in both buckets.  That temporary duplicate is
+ *         intentional; the reverse order can create a false negative window.
+ *     The release update on ctrl pairs with reader acquire loads.  A hit is
+ *     allowed to complete from the ctrl snapshot that exposed the valid slot;
+ *     a miss is accepted only after both searched ctrl words are verified
+ *     unchanged.  This gives strong no-false-negative behavior for misses
+ *     without putting the hit path through a second ctrl load.
+ *   - ctrl is the only ordered atomic object in the bucket.  hash[]/idx[] are
+ *     ordinary payload words so the hot hash scan can use the same SIMD
+ *     find_u32x16 dispatch as the normal hash table.  Miss-side ctrl verify
+ *     discards overlapped payload observations that could otherwise become a
+ *     false negative.
+ *
+ * Bucket layout:
+ *   MRSW keeps the classic 128 B / 2 cache-line bucket envelope by using
+ *   slot 15 of the hash line for the packed seq/valid control word.  The
+ *   spare u32 after idx[15] is reserved.
+ *   Therefore each bucket has 15 usable entries.
+ *
+ * Hash scan vs. ctrl word at slot 15:
+ *   The reader-side SIMD scan (find_u32x16(hash_line, fp)) intentionally
+ *   covers all 16 words of the hash cache line, including the ctrl word at
+ *   physical slot 15.  Two consequences are handled by design:
+ *   (a) The seq half of ctrl can coincidentally equal fp.  Any bit-15 hit in
+ *       the resulting bitmap is masked off because the ctrl_valid mask spans
+ *       only bits 0..14 (slots 0..14).  Slot 15 therefore can never produce
+ *       an observable match.
+ *   (b) Concurrent CAS updates to ctrl are atomic at the 4-byte word
+ *       granularity used by the SIMD load.  A vector load can only observe a
+ *       value that ctrl held at some moment, never a torn intermediate, so
+ *       the masked-out bit-15 result is always self-consistent with that
+ *       atomic snapshot.
+ *   This unifies the SIMD path with the non-MRSW fingerprint variant at zero
+ *   extra cost (the SIMD compare is intrinsically 16-wide).
+ */
+
+#ifndef _RIX_HASH_MRSW_H_
+#  define _RIX_HASH_MRSW_H_
+
+#  include "rix_hash_common.h"
+
+#  include <stdatomic.h>
+
+#  define RIX_HASH_MRSW_BUCKET_ENTRY_SZ 15u
+
+struct rix_hash_mrsw_bucket_s {
+    union {
+        struct {
+            u32         hash[RIX_HASH_MRSW_BUCKET_ENTRY_SZ];
+            _Atomic u32 ctrl;
+        };
+        u32 hash_line[16];
+    };
+    u32              idx [RIX_HASH_MRSW_BUCKET_ENTRY_SZ];
+    u32              reserved;
+} __attribute__((aligned(RIX_CACHE_LINE_SIZE)));
+
+RIX_STATIC_ASSERT(sizeof(_Atomic u32) == sizeof(u32),
+                  "atomic u32 must have u32 storage size");
+RIX_STATIC_ASSERT(sizeof(struct rix_hash_mrsw_bucket_s) == 128u,
+                  "rix_hash_mrsw_bucket_s must be 128 bytes");
+RIX_STATIC_ASSERT(_Alignof(struct rix_hash_mrsw_bucket_s)
+                  == RIX_CACHE_LINE_SIZE,
+                  "rix_hash_mrsw_bucket_s must be cache-line aligned");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_mrsw_bucket_s, idx)
+                  == RIX_CACHE_LINE_SIZE,
+                  "rix_hash_mrsw_bucket_s.idx must start at cache line 1");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_mrsw_bucket_s, ctrl)
+                  == 60u,
+                  "rix_hash_mrsw_bucket_s.ctrl must use hash slot 15");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_mrsw_bucket_s, reserved)
+                  == (RIX_CACHE_LINE_SIZE + 60u),
+                  "rix_hash_mrsw_bucket_s.reserved must use idx slot 15");
+
+#  define RIX_HASH_MRSW_VALID_MASK                                           \
+    ((UINT32_C(1) << RIX_HASH_MRSW_BUCKET_ENTRY_SZ) - UINT32_C(1))
+#  define RIX_HASH_MRSW_CTRL_VALID_SHIFT 17u
+#  define RIX_HASH_MRSW_CTRL_SEQ_MASK                                        \
+    ((UINT32_C(1) << RIX_HASH_MRSW_CTRL_VALID_SHIFT) - UINT32_C(1))
+#  define RIX_HASH_MRSW_CTRL_VALID_MASK                                      \
+    (RIX_HASH_MRSW_VALID_MASK << RIX_HASH_MRSW_CTRL_VALID_SHIFT)
+
+/* Recommended nb_bk for the Green/Yellow boundary of MRSW bucket fill.
+ * MRSW buckets have 15 usable slots and should be planned about 5 percentage
+ * points below pure 16-slot tables: Green <70%, Yellow 70..80%, Red >80%.
+ * This helper sizes max_entries at <=70% MRSW slot fill before the final
+ * power-of-two bucket rounding:
+ * nb_bk = ceil(max_entries * 100 / (15 * 70)).
+ */
+static RIX_FORCE_INLINE unsigned
+rix_hash_mrsw_nb_bk_hint(unsigned max_entries)
+{
+    unsigned n = (max_entries == 0u)
+               ? 1u
+               : (unsigned)(((uint64_t)max_entries * 100u + 1049u) / 1050u);
+    if (n < 2u)
+        n = 2u;
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    return n + 1u;
+}
+
+#  define RIX_HASH_MRSW_HEAD(name)                                           \
+    struct name {                                                             \
+        unsigned         rhh_mask;                                            \
+        _Atomic unsigned rhh_nb;                                              \
+    }
+
+struct rix_hash_mrsw_find_ctx_s {
+    union rix_hash_hash_u          hash;
+    struct rix_hash_mrsw_bucket_s *bk[2];
+    struct rix_hash_mrsw_bucket_s *buckets;
+    const void                    *key;
+    u32                            ctrl[2];
+    unsigned                       hash_mask;
+    unsigned                       bk_mask;
+    u32                            fp;
+    u32                            fp_hits[2];
+};
+
+static RIX_FORCE_INLINE u32
+rix_hash_mrsw_ctrl_seq(u32 ctrl)
+{
+    return ctrl & RIX_HASH_MRSW_CTRL_SEQ_MASK;
+}
+
+static RIX_FORCE_INLINE u32
+rix_hash_mrsw_ctrl_valid(u32 ctrl)
+{
+    return (ctrl >> RIX_HASH_MRSW_CTRL_VALID_SHIFT) &
+           RIX_HASH_MRSW_VALID_MASK;
+}
+
+static RIX_FORCE_INLINE u32
+rix_hash_mrsw_ctrl_slot_bit(unsigned slot)
+{
+    return UINT32_C(1) << (RIX_HASH_MRSW_CTRL_VALID_SHIFT + slot);
+}
+
+static RIX_FORCE_INLINE u32
+rix_hash_mrsw_ctrl_next_seq(u32 ctrl)
+{
+    return (ctrl & ~RIX_HASH_MRSW_CTRL_SEQ_MASK) |
+           ((ctrl + UINT32_C(1)) & RIX_HASH_MRSW_CTRL_SEQ_MASK);
+}
+
+static RIX_FORCE_INLINE u32
+rix_hash_mrsw_bucket_valid_load(struct rix_hash_mrsw_bucket_s *bk,
+                                memory_order order)
+{
+    u32 ctrl = atomic_load_explicit(&bk->ctrl, order);
+    return rix_hash_mrsw_ctrl_valid(ctrl);
+}
+
+static RIX_FORCE_INLINE void
+rix_hash_mrsw_bucket_valid_set(struct rix_hash_mrsw_bucket_s *bk,
+                               unsigned slot)
+{
+    u32 bit = rix_hash_mrsw_ctrl_slot_bit(slot);
+    u32 old = atomic_load_explicit(&bk->ctrl, memory_order_relaxed);
+    for (;;) {
+        u32 next = rix_hash_mrsw_ctrl_next_seq(old) | bit;
+        if (atomic_compare_exchange_weak_explicit(&bk->ctrl, &old, next,
+                                                  memory_order_release,
+                                                  memory_order_relaxed))
+            return;
+    }
+}
+
+static RIX_FORCE_INLINE void
+rix_hash_mrsw_bucket_valid_clear(struct rix_hash_mrsw_bucket_s *bk,
+                                 unsigned slot)
+{
+    u32 bit = rix_hash_mrsw_ctrl_slot_bit(slot);
+    u32 old = atomic_load_explicit(&bk->ctrl, memory_order_relaxed);
+    for (;;) {
+        u32 next = rix_hash_mrsw_ctrl_next_seq(old) & ~bit;
+        if (atomic_compare_exchange_weak_explicit(&bk->ctrl, &old, next,
+                                                  memory_order_release,
+                                                  memory_order_relaxed))
+            return;
+    }
+}
+
+static RIX_FORCE_INLINE u32
+rix_hash_mrsw_bucket_read_begin(struct rix_hash_mrsw_bucket_s *bk)
+{
+    return atomic_load_explicit(&bk->ctrl, memory_order_acquire);
+}
+
+static RIX_FORCE_INLINE int
+rix_hash_mrsw_bucket_read_retry(struct rix_hash_mrsw_bucket_s *bk,
+                                u32 ctrl)
+{
+    u32 now = atomic_load_explicit(&bk->ctrl, memory_order_acquire);
+    return now != ctrl;
+}
+
+static RIX_FORCE_INLINE void
+rix_hash_mrsw_buckets_init(struct rix_hash_mrsw_bucket_s *buckets,
+                           unsigned nb_bk)
+{
+    for (unsigned b = 0u; b < nb_bk; b++) {
+        struct rix_hash_mrsw_bucket_s *bk = buckets + b;
+        atomic_init(&bk->ctrl, 0u);
+        bk->reserved = 0u;
+        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
+            bk->hash[s] = 0u;
+            bk->idx [s] = (u32)RIX_NIL;
+        }
+    }
+}
+
+#  ifndef RIX_HASH_MRSW_HOOK
+#    define RIX_HASH_MRSW_HOOK(name, event, head, buckets, bk, slot)          \
+    do {                                                                      \
+        (void)(head);                                                         \
+        (void)(buckets);                                                      \
+        (void)(bk);                                                           \
+        (void)(slot);                                                         \
+    } while (0)
+#  endif
+
+#  define RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, attr) \
+    attr void name##_init(struct name *head,                                  \
+                          struct rix_hash_mrsw_bucket_s *buckets,            \
+                          unsigned nb_bk);                                    \
+    attr struct type *name##_insert(struct name *head,                        \
+                                    struct rix_hash_mrsw_bucket_s *buckets,   \
+                                    struct type *base,                        \
+                                    struct type *elm);                        \
+    attr unsigned name##_remove_at(struct name *head,                         \
+                                   struct rix_hash_mrsw_bucket_s *buckets,    \
+                                   unsigned bk,                               \
+                                   unsigned slot);                            \
+    attr struct type *name##_remove(struct name *head,                        \
+                                    struct rix_hash_mrsw_bucket_s *buckets,   \
+                                    struct type *base,                        \
+                                    struct type *elm);                        \
+    /* walk: writer-only iteration.  If the per-bucket ctrl word changes      \
+     * between the begin/end snapshots the walk aborts and returns -1.        \
+     * Callers must serialize with the writer (or call from the writer        \
+     * thread itself) to obtain a consistent traversal. */                    \
+    attr int name##_walk(struct name *head,                                   \
+                         struct rix_hash_mrsw_bucket_s *buckets,              \
+                         struct type *base,                                   \
+                         int (*cb)(struct type *, void *),                    \
+                         void *arg);
+
+#  define RIX_HASH_MRSW_PROTOTYPE_EX(name, type, key_field, hash_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, )
+
+#  define RIX_HASH_MRSW_PROTOTYPE_STATIC_EX(name, type, key_field, hash_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, RIX_UNUSED static)
+
+#  define RIX_HASH_MRSW_PROTOTYPE(name, type, key_field, hash_field, cmp_fn)  \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, )
+
+#  define RIX_HASH_MRSW_PROTOTYPE_STATIC(name, type, key_field, hash_field, cmp_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, RIX_UNUSED static)
+
+/* SLOT variant prototypes share the same external symbols; slot_field is     \
+ * caller-managed and only changes the internal write/remove paths. */
+#  define RIX_HASH_MRSW_PROTOTYPE_SLOT_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, )
+
+#  define RIX_HASH_MRSW_PROTOTYPE_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, )
+
+#  define RIX_HASH_MRSW_PROTOTYPE_STATIC_SLOT_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, RIX_UNUSED static)
+
+#  define RIX_HASH_MRSW_PROTOTYPE_STATIC_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field,       \
+                                     cmp_fn, RIX_UNUSED static)
+
+#  define RIX_HASH_MRSW_GENERATE_EX(name, type, key_field, hash_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_GENERATE_INTERNAL(name, type, key_field, hash_field,        \
+                                    cmp_fn, hash_fn, )
+
+#  define RIX_HASH_MRSW_GENERATE_STATIC_EX(name, type, key_field, hash_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_GENERATE_INTERNAL(name, type, key_field, hash_field,        \
+                                    cmp_fn, hash_fn, RIX_UNUSED static)
+
+#  define RIX_HASH_MRSW_GENERATE(name, type, key_field, hash_field, cmp_fn)   \
+    RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                    \
+    RIX_HASH_MRSW_GENERATE_INTERNAL(name, type, key_field, hash_field,        \
+                                    cmp_fn,                                   \
+                                    RIX_HASH_DEFAULT_HASH_FN_NAME(name), )
+
+#  define RIX_HASH_MRSW_GENERATE_STATIC(name, type, key_field, hash_field, cmp_fn) \
+    RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                    \
+    RIX_HASH_MRSW_GENERATE_INTERNAL(name, type, key_field, hash_field,        \
+                                    cmp_fn,                                   \
+                                    RIX_HASH_DEFAULT_HASH_FN_NAME(name),      \
+                                    RIX_UNUSED static)
+
+/* SLOT variant: requires slot_field of an integer type that can represent   \
+ * 0..RIX_HASH_MRSW_BUCKET_ENTRY_SZ-1.  Insert/kickout updates the field; the \
+ * remove path uses elm->slot_field for direct O(1) bucket-slot lookup.       \
+ * The slot_field is only mutated by the writer; readers do not touch it. */
+#  define RIX_HASH_MRSW_GENERATE_SLOT_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_GENERATE_SLOT_INTERNAL(name, type, key_field, hash_field,   \
+                                         slot_field, cmp_fn, hash_fn, )
+
+#  define RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_GENERATE_SLOT_INTERNAL(name, type, key_field, hash_field,   \
+                                         slot_field, cmp_fn, hash_fn,         \
+                                         RIX_UNUSED static)
+
+#  define RIX_HASH_MRSW_GENERATE_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn) \
+    RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                    \
+    RIX_HASH_MRSW_GENERATE_SLOT_INTERNAL(name, type, key_field, hash_field,   \
+                                         slot_field, cmp_fn,                  \
+                                         RIX_HASH_DEFAULT_HASH_FN_NAME(name), )
+
+#  define RIX_HASH_MRSW_GENERATE_STATIC_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn) \
+    RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                    \
+    RIX_HASH_MRSW_GENERATE_SLOT_INTERNAL(name, type, key_field, hash_field,   \
+                                         slot_field, cmp_fn,                  \
+                                         RIX_HASH_DEFAULT_HASH_FN_NAME(name), \
+                                         RIX_UNUSED static)
+
+#  ifndef RIX_HASH_MRSW_DEFINE_INDEXERS
+#    define RIX_HASH_MRSW_DEFINE_INDEXERS(name, type)                         \
+static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
+name##_hidx(struct type *base, const struct type *p) {                        \
+    return RIX_IDX_FROM_PTR(base, (struct type *)(uintptr_t)p);               \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
+name##_hptr(struct type *base, unsigned i) {                                  \
+    return (struct type *)rix_ptr_from_idx_valid_(base, sizeof(*base), i);    \
+}
+#  endif
+
+/* ---------------------------------------------------------------------- *\
+ * Internal generators are split into reusable building blocks so that the   *
+ * FP and SLOT variants can share readers, find pipeline, walk, and the      *
+ * remove_at_inner / remove_at primitives, while the writer-side ops         *
+ * (flipflop, kickout, insert_hashed_idx, insert, remove) differ in slot     *
+ * field maintenance.                                                        *
+ *                                                                           *
+ *   COMMON_PRE  : init, indexers, scan helpers, staged find, find,          *
+ *                 remove_at_inner, remove_at                                *
+ *   FP_OPS      : flipflop, kickout, insert_hashed_idx, insert_hashed,      *
+ *                 insert, remove (linear bucket scan)                       *
+ *   SLOT_OPS    : flipflop+slot_field, kickout, insert_hashed_idx+slot,     *
+ *                 insert_hashed, insert, remove (direct slot lookup)        *
+ *   COMMON_POST : walk                                                      *
+ *                                                                           *
+ *   GENERATE_INTERNAL      = COMMON_PRE + FP_OPS  + COMMON_POST             *
+ *   GENERATE_SLOT_INTERNAL = COMMON_PRE + SLOT_OPS + COMMON_POST             *
+\* ---------------------------------------------------------------------- */
+#  define RIX_HASH_MRSW_GENERATE_COMMON_PRE_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
+attr void                                                                     \
+name##_init(struct name *head,                                                \
+            struct rix_hash_mrsw_bucket_s *buckets,                           \
+            unsigned nb_bk)                                                   \
+{                                                                             \
+    head->rhh_mask = nb_bk - 1u;                                              \
+    atomic_init(&head->rhh_nb, 0u);                                           \
+    rix_hash_mrsw_buckets_init(buckets, nb_bk);                               \
+}                                                                             \
+RIX_HASH_MRSW_DEFINE_INDEXERS(name, type)                                     \
+/* Intentional benign race: hash_line[] is non-atomic payload validated by    \
+ * the bucket ctrl seq+valid protocol.  See rix_hash_mrsw.h header. */        \
+static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD u32                 \
+name##_scan_bucket_hashes(struct rix_hash_mrsw_bucket_s *bk,                  \
+                          u32 fp,                                             \
+                          u32 valid)                                          \
+{                                                                             \
+    u32 hits = RIX_HASH_FIND_U32X16(bk->hash_line, fp);                       \
+    return hits & valid;                                                      \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE int                                        \
+name##_find_empty(struct rix_hash_mrsw_bucket_s *buckets,                     \
+                  unsigned bk_idx)                                            \
+{                                                                             \
+    struct rix_hash_mrsw_bucket_s *bk = buckets + bk_idx;                     \
+    u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_relaxed);    \
+    u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                          \
+    return empty ? (int)__builtin_ctz(empty) : -1;                            \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_hash_key_masked(struct rix_hash_mrsw_find_ctx_s *ctx,                  \
+                       struct name *head __attribute__((unused)),             \
+                       struct rix_hash_mrsw_bucket_s *buckets,                \
+                       const RIX_HASH_KEY_TYPE(type, key_field) *key,         \
+                       unsigned hash_mask,                                    \
+                       unsigned bk_mask)                                      \
+{                                                                             \
+    union rix_hash_hash_u h = hash_fn(key, hash_mask);                        \
+    unsigned bk0, bk1;                                                        \
+    u32 fp = rix_hash_fp(h, bk_mask, &bk0, &bk1);                             \
+    ctx->hash      = h;                                                       \
+    ctx->fp        = fp;                                                      \
+    ctx->key       = (const void *)key;                                       \
+    ctx->buckets   = buckets;                                                 \
+    ctx->hash_mask = hash_mask;                                               \
+    ctx->bk_mask   = bk_mask;                                                 \
+    ctx->bk[0]     = buckets + bk0;                                           \
+    ctx->bk[1]     = buckets + bk1;                                           \
+    __builtin_prefetch(ctx->bk[0], 0, 1);                                     \
+    __builtin_prefetch(ctx->bk[1], 0, 1);                                     \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_hash_key(struct rix_hash_mrsw_find_ctx_s *ctx,                         \
+                struct name *head,                                            \
+                struct rix_hash_mrsw_bucket_s *buckets,                       \
+                const RIX_HASH_KEY_TYPE(type, key_field) *key)                \
+{                                                                             \
+    unsigned mask = head->rhh_mask;                                           \
+    name##_hash_key_masked(ctx, head, buckets, key, mask, mask);              \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_scan_bk(struct rix_hash_mrsw_find_ctx_s *ctx,                          \
+               struct name *head __attribute__((unused)),                     \
+               struct rix_hash_mrsw_bucket_s *buckets __attribute__((unused))) \
+{                                                                             \
+    ctx->ctrl[0] = rix_hash_mrsw_bucket_read_begin(ctx->bk[0]);               \
+    ctx->fp_hits[0] = name##_scan_bucket_hashes(ctx->bk[0], ctx->fp,          \
+                                                rix_hash_mrsw_ctrl_valid(     \
+                                                    ctx->ctrl[0]));           \
+    ctx->ctrl[1] = 0u;                                                        \
+    ctx->fp_hits[1] = 0u;                                                     \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD void                \
+name##_prefetch_node(struct rix_hash_mrsw_find_ctx_s *ctx,                    \
+                     struct type *base)                                       \
+{                                                                             \
+    for (int i = 0; i < 2; i++) {                                             \
+        u32 hits = ctx->fp_hits[i];                                           \
+        while (hits) {                                                        \
+            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
+            hits &= hits - 1u;                                                \
+            u32 idx = ctx->bk[i]->idx[bit];                                   \
+            if (idx != (u32)RIX_NIL) {                                        \
+                struct type *node = name##_hptr(base, idx);                   \
+                if (node != NULL)                                             \
+                    rix_hash_prefetch_entry_of(node);                         \
+            }                                                                 \
+        }                                                                     \
+    }                                                                         \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD struct type *       \
+name##_cmp_key_bk0_once(struct rix_hash_mrsw_find_ctx_s *ctx,                 \
+                        struct type *base)                                    \
+{                                                                             \
+    u32 hits = ctx->fp_hits[0];                                               \
+    while (hits) {                                                            \
+        unsigned bit = (unsigned)__builtin_ctz(hits);                         \
+        hits &= hits - 1u;                                                    \
+        u32 idx = ctx->bk[0]->idx[bit];                                       \
+        if (idx == (u32)RIX_NIL)                                              \
+            continue;                                                         \
+        struct type *node = name##_hptr(base, idx);                           \
+        if (cmp_fn((const RIX_HASH_KEY_TYPE(type, key_field) *)ctx->key,      \
+                   &node->key_field) == 0)                                    \
+            return node;                                                      \
+    }                                                                         \
+    return NULL;                                                              \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_prefetch_bk1(struct rix_hash_mrsw_find_ctx_s *ctx)                     \
+{                                                                             \
+    __builtin_prefetch(ctx->bk[1], 0, 1);                                     \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_scan_bk1(struct rix_hash_mrsw_find_ctx_s *ctx)                         \
+{                                                                             \
+    ctx->ctrl[1] = rix_hash_mrsw_bucket_read_begin(ctx->bk[1]);               \
+    ctx->fp_hits[1] = name##_scan_bucket_hashes(ctx->bk[1], ctx->fp,          \
+                                                rix_hash_mrsw_ctrl_valid(     \
+                                                    ctx->ctrl[1]));           \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD struct type *       \
+name##_cmp_key_bk1_once(struct rix_hash_mrsw_find_ctx_s *ctx,                 \
+                        struct type *base)                                    \
+{                                                                             \
+    u32 hits = ctx->fp_hits[1];                                               \
+    while (hits) {                                                            \
+        unsigned bit = (unsigned)__builtin_ctz(hits);                         \
+        hits &= hits - 1u;                                                    \
+        u32 idx = ctx->bk[1]->idx[bit];                                       \
+        if (idx == (u32)RIX_NIL)                                              \
+            continue;                                                         \
+        struct type *node = name##_hptr(base, idx);                           \
+        if (cmp_fn((const RIX_HASH_KEY_TYPE(type, key_field) *)ctx->key,      \
+                   &node->key_field) == 0)                                    \
+            return node;                                                      \
+    }                                                                         \
+    return NULL;                                                              \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
+name##_cmp_key_once(struct rix_hash_mrsw_find_ctx_s *ctx,                     \
+                    struct type *base)                                        \
+{                                                                             \
+    struct type *ret = name##_cmp_key_bk0_once(ctx, base);                    \
+    if (ret != NULL)                                                          \
+        return ret;                                                           \
+    name##_scan_bk1(ctx);                                                     \
+    return name##_cmp_key_bk1_once(ctx, base);                                \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE int                                        \
+name##_miss_retry(struct rix_hash_mrsw_find_ctx_s *ctx)                       \
+{                                                                             \
+    int retry0 = rix_hash_mrsw_bucket_read_retry(ctx->bk[0], ctx->ctrl[0]);   \
+    int retry1 = rix_hash_mrsw_bucket_read_retry(ctx->bk[1], ctx->ctrl[1]);   \
+    return retry0 || retry1;                                                  \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
+name##_cmp_key(struct rix_hash_mrsw_find_ctx_s *ctx,                          \
+               struct type *base)                                             \
+{                                                                             \
+    for (;;) {                                                                \
+        struct type *ret = name##_cmp_key_once(ctx, base);                    \
+        if (ret != NULL)                                                      \
+            return ret;                                                       \
+        RIX_HASH_MRSW_HOOK(#name, "reader_before_verify", NULL,              \
+                           ctx->buckets,                                      \
+                           (unsigned)(ctx->bk[0] - ctx->buckets), 0u);        \
+        int retry0 = rix_hash_mrsw_bucket_read_retry(ctx->bk[0], ctx->ctrl[0]); \
+        RIX_HASH_MRSW_HOOK(#name, "reader_between_verify", NULL,             \
+                           ctx->buckets,                                      \
+                           (unsigned)(ctx->bk[0] - ctx->buckets), 0u);        \
+        int retry1 = rix_hash_mrsw_bucket_read_retry(ctx->bk[1], ctx->ctrl[1]); \
+        if (!retry0 && !retry1)                                               \
+            return ret;                                                       \
+        RIX_HASH_MRSW_HOOK(#name, "reader_retry", NULL, ctx->buckets,        \
+                           retry0 ? (unsigned)(ctx->bk[0] - ctx->buckets)    \
+                                  : (unsigned)(ctx->bk[1] - ctx->buckets),    \
+                           0u);                                               \
+        name##_scan_bk(ctx, NULL, NULL);                                      \
+    }                                                                         \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_hash_key_n_masked(struct rix_hash_mrsw_find_ctx_s *ctx,                \
+                         unsigned n,                                          \
+                         struct name *head,                                   \
+                         struct rix_hash_mrsw_bucket_s *buckets,              \
+                         const RIX_HASH_KEY_TYPE(type, key_field) * const *keys, \
+                         unsigned hash_mask,                                  \
+                         unsigned bk_mask)                                    \
+{                                                                             \
+    for (unsigned i = 0u; i < n; i++)                                         \
+        name##_hash_key_masked(&ctx[i], head, buckets, keys[i],               \
+                               hash_mask, bk_mask);                           \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_hash_key_n(struct rix_hash_mrsw_find_ctx_s *ctx,                       \
+                  unsigned n,                                                 \
+                  struct name *head,                                          \
+                  struct rix_hash_mrsw_bucket_s *buckets,                     \
+                  const RIX_HASH_KEY_TYPE(type, key_field) * const *keys)     \
+{                                                                             \
+    unsigned mask = head->rhh_mask;                                           \
+    name##_hash_key_n_masked(ctx, n, head, buckets, keys, mask, mask);        \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_scan_bk_n(struct rix_hash_mrsw_find_ctx_s *ctx,                        \
+                 unsigned n,                                                  \
+                 struct name *head,                                           \
+                 struct rix_hash_mrsw_bucket_s *buckets)                      \
+{                                                                             \
+    for (unsigned i = 0u; i < n; i++)                                         \
+        name##_scan_bk(&ctx[i], head, buckets);                               \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_prefetch_node_n(struct rix_hash_mrsw_find_ctx_s *ctx,                  \
+                       unsigned n,                                            \
+                       struct type *base)                                     \
+{                                                                             \
+    for (unsigned i = 0u; i < n; i++)                                         \
+        name##_prefetch_node(&ctx[i], base);                                  \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE void                                       \
+name##_cmp_key_n(struct rix_hash_mrsw_find_ctx_s *ctx,                        \
+                 unsigned n,                                                  \
+                 struct type *base,                                           \
+                 struct type **results)                                       \
+{                                                                             \
+    for (unsigned i = 0u; i < n; i++)                                         \
+        results[i] = name##_cmp_key(&ctx[i], base);                           \
+}                                                                             \
+attr struct type *                                                            \
+name##_find(struct name *head,                                                \
+            struct rix_hash_mrsw_bucket_s *buckets,                           \
+            struct type *base,                                                \
+            const RIX_HASH_KEY_TYPE(type, key_field) *key)                    \
+{                                                                             \
+    struct rix_hash_mrsw_find_ctx_s ctx;                                      \
+    name##_hash_key(&ctx, head, buckets, key);                                \
+    name##_scan_bk(&ctx, head, buckets);                                      \
+    return name##_cmp_key(&ctx, base);                                        \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
+name##_remove_at_inner(struct name *head,                                     \
+                       struct rix_hash_mrsw_bucket_s *buckets,                \
+                       unsigned bk,                                           \
+                       unsigned slot)                                         \
+{                                                                             \
+    struct rix_hash_mrsw_bucket_s *b = buckets + bk;                          \
+    if (slot >= RIX_HASH_MRSW_BUCKET_ENTRY_SZ)                                \
+        return (unsigned)RIX_NIL;                                             \
+    u32 valid = rix_hash_mrsw_bucket_valid_load(b, memory_order_relaxed);     \
+    if ((valid & (UINT32_C(1) << slot)) == 0u)                                \
+        return (unsigned)RIX_NIL;                                             \
+    u32 idx = b->idx[slot];                                                   \
+    if (idx == (u32)RIX_NIL)                                                  \
+        return (unsigned)RIX_NIL;                                             \
+    rix_hash_mrsw_bucket_valid_clear(b, slot);                                \
+    RIX_HASH_MRSW_HOOK(#name, "remove_hash", head, buckets, bk, slot);        \
+    atomic_fetch_sub_explicit(&head->rhh_nb, 1u, memory_order_relaxed);       \
+    return idx;                                                               \
+}                                                                             \
+attr unsigned                                                                 \
+name##_remove_at(struct name *head,                                           \
+                 struct rix_hash_mrsw_bucket_s *buckets,                      \
+                 unsigned bk,                                                 \
+                 unsigned slot)                                               \
+{                                                                             \
+    return name##_remove_at_inner(head, buckets, bk, slot);                   \
+}                                                                             \
+attr int                                                                      \
+name##_walk(struct name *head,                                                \
+            struct rix_hash_mrsw_bucket_s *buckets,                           \
+            struct type *base,                                                \
+            int (*cb)(struct type *, void *),                                 \
+            void *arg)                                                        \
+{                                                                             \
+    for (unsigned b = 0u; b <= head->rhh_mask; b++) {                         \
+        struct rix_hash_mrsw_bucket_s *bk = buckets + b;                      \
+        u32 ctrl = rix_hash_mrsw_bucket_read_begin(bk);                       \
+        u32 valid = rix_hash_mrsw_ctrl_valid(ctrl);                           \
+        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {       \
+            if ((valid & (UINT32_C(1) << s)) == 0u)                           \
+                continue;                                                     \
+            u32 idx = bk->idx[s];                                             \
+            if (idx == (u32)RIX_NIL)                                          \
+                continue;                                                     \
+            struct type *node = name##_hptr(base, idx);                       \
+            int rc = cb(node, arg);                                           \
+            if (rc)                                                           \
+                return rc;                                                    \
+        }                                                                     \
+        if (rix_hash_mrsw_bucket_read_retry(bk, ctrl))                        \
+            return -1;                                                        \
+    }                                                                         \
+    return 0;                                                                 \
+}
+
+/* ---- FP writer ops ---------------------------------------------------- */
+#  define RIX_HASH_MRSW_GENERATE_FP_OPS_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
+static RIX_UNUSED RIX_NO_SANITIZE_THREAD int                                  \
+name##_flipflop(struct rix_hash_mrsw_bucket_s *buckets,                       \
+                struct type *base,                                            \
+                unsigned mask,                                                \
+                unsigned bk_idx,                                              \
+                unsigned slot)                                                \
+{                                                                             \
+    struct rix_hash_mrsw_bucket_s *bk = buckets + bk_idx;                     \
+    u32 fp = bk->hash[slot];                                                  \
+    u32 idx = bk->idx[slot];                                                  \
+    if (fp == 0u || idx == (u32)RIX_NIL)                                      \
+        return -1;                                                            \
+    struct type *nd = name##_hptr(base, idx);                                 \
+    u32 h = nd->hash_field;                                                   \
+    unsigned ab = (fp ^ h) & mask;                                            \
+    int alt_slot = name##_find_empty(buckets, ab);                            \
+    if (alt_slot < 0)                                                         \
+        return -1;                                                            \
+    struct rix_hash_mrsw_bucket_s *alt = buckets + ab;                        \
+    nd->hash_field = fp ^ h;                                                  \
+    /* Publish-before-unpublish: alt is set, then bk is cleared.  Readers     \
+     * may see the entry in both buckets transiently; reverse order would    \
+     * create a false-negative window. */                                     \
+    alt->idx[alt_slot] = idx;                                                 \
+    RIX_HASH_MRSW_HOOK(#name, "move_idx", NULL, buckets, ab,                  \
+                       (unsigned)alt_slot);                                   \
+    alt->hash[alt_slot] = fp;                                                 \
+    rix_hash_mrsw_bucket_valid_set(alt, (unsigned)alt_slot);                  \
+    RIX_HASH_MRSW_HOOK(#name, "move_hash", NULL, buckets, ab,                 \
+                       (unsigned)alt_slot);                                   \
+    RIX_HASH_MRSW_HOOK(#name, "move_before_old_clear", NULL, buckets,         \
+                       bk_idx, slot);                                         \
+    rix_hash_mrsw_bucket_valid_clear(bk, slot);                               \
+    return (int)slot;                                                         \
+}                                                                             \
+static RIX_UNUSED RIX_NO_SANITIZE_THREAD int                                  \
+name##_kickout(struct rix_hash_mrsw_bucket_s *buckets,                        \
+               struct type *base,                                             \
+               unsigned mask,                                                 \
+               unsigned bk_idx,                                               \
+               int depth)                                                     \
+{                                                                             \
+    if (depth <= 0)                                                           \
+        return -1;                                                            \
+    struct rix_hash_mrsw_bucket_s *bk = buckets + bk_idx;                     \
+    u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_relaxed);    \
+    for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {           \
+        if ((valid & (UINT32_C(1) << s)) == 0u)                               \
+            continue;                                                         \
+        if (name##_flipflop(buckets, base, mask, bk_idx, s) >= 0)             \
+            return (int)s;                                                    \
+    }                                                                         \
+    for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {           \
+        if ((valid & (UINT32_C(1) << s)) == 0u)                               \
+            continue;                                                         \
+        u32 fp = bk->hash[s];                                                 \
+        u32 si = bk->idx[s];                                                  \
+        if (si == (u32)RIX_NIL)                                               \
+            continue;                                                         \
+        struct type *sn = name##_hptr(base, si);                              \
+        u32 sh = sn->hash_field;                                              \
+        unsigned ab = (fp ^ sh) & mask;                                       \
+        if (name##_kickout(buckets, base, mask, ab, depth - 1) >= 0) {        \
+            u32 now_fp = bk->hash[s];                                         \
+            u32 now_idx = bk->idx[s];                                         \
+            u32 now_valid = rix_hash_mrsw_bucket_valid_load(bk,               \
+                                                            memory_order_relaxed); \
+            if (now_fp != fp || now_idx != si ||                              \
+                (now_valid & (UINT32_C(1) << s)) == 0u) {                     \
+                int fs = name##_find_empty(buckets, bk_idx);                  \
+                if (fs >= 0)                                                  \
+                    return fs;                                                \
+                valid = now_valid;                                            \
+                continue;                                                     \
+            }                                                                 \
+            name##_flipflop(buckets, base, mask, bk_idx, s);                  \
+            return (int)s;                                                    \
+        }                                                                     \
+    }                                                                         \
+    return -1;                                                                \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD u32                 \
+name##_insert_hashed_idx(struct name *head,                                   \
+                         struct rix_hash_mrsw_bucket_s *buckets,              \
+                         struct type *base,                                   \
+                         struct type *elm,                                    \
+                         union rix_hash_hash_u h)                             \
+{                                                                             \
+    unsigned mask = head->rhh_mask;                                           \
+    unsigned bk0, bk1;                                                        \
+    u32 elm_idx = name##_hidx(base, elm);                                     \
+    u32 fp = rix_hash_fp(h, mask, &bk0, &bk1);                                \
+    struct rix_hash_mrsw_bucket_s *bks[2] = { buckets + bk0, buckets + bk1 }; \
+    u32 fp_hits_v[2];                                                         \
+    int empty_slot_v[2];                                                      \
+    elm->hash_field = h.val32[0];                                             \
+    for (int i = 0; i < 2; i++) {                                             \
+        u32 valid = rix_hash_mrsw_bucket_valid_load(bks[i],                   \
+                                                    memory_order_acquire);    \
+        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
+        fp_hits_v[i] = name##_scan_bucket_hashes(bks[i], fp, valid);          \
+        empty_slot_v[i] = empty ? (int)__builtin_ctz(empty) : -1;             \
+    }                                                                         \
+    for (int i = 0; i < 2; i++) {                                             \
+        u32 hits = fp_hits_v[i];                                              \
+        while (hits) {                                                        \
+            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
+            hits &= hits - 1u;                                                \
+            u32 node_idx = bks[i]->idx[bit];                                  \
+            if (node_idx == (u32)RIX_NIL)                                     \
+                continue;                                                     \
+            struct type *node = name##_hptr(base, node_idx);                  \
+            if (cmp_fn(&elm->key_field, &node->key_field) == 0)               \
+                return node_idx;                                              \
+        }                                                                     \
+    }                                                                         \
+    for (int i = 0; i < 2; i++) {                                             \
+        int slot = empty_slot_v[i];                                           \
+        if (slot >= 0) {                                                      \
+            unsigned bki = (i == 0) ? bk0 : bk1;                              \
+            struct rix_hash_mrsw_bucket_s *bk = bks[i];                       \
+            if (i == 1)                                                       \
+                elm->hash_field = h.val32[1];                                 \
+            bk->idx[slot] = elm_idx;                                          \
+            RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets, bki,       \
+                               (unsigned)slot);                               \
+            bk->hash[slot] = fp;                                              \
+            rix_hash_mrsw_bucket_valid_set(bk, (unsigned)slot);               \
+            atomic_fetch_add_explicit(&head->rhh_nb, 1u,                      \
+                                      memory_order_relaxed);                  \
+            return 0u;                                                        \
+        }                                                                     \
+    }                                                                         \
+    {                                                                         \
+        int pos;                                                              \
+        unsigned bki;                                                         \
+        pos = name##_kickout(buckets, base, mask, bk0,                        \
+                             RIX_HASH_FOLLOW_DEPTH);                          \
+        if (pos >= 0) {                                                       \
+            bki = bk0;                                                        \
+        } else {                                                              \
+            pos = name##_kickout(buckets, base, mask, bk1,                    \
+                                 RIX_HASH_FOLLOW_DEPTH);                      \
+            if (pos < 0)                                                      \
+                return elm_idx;                                               \
+            bki = bk1;                                                        \
+            elm->hash_field = h.val32[1];                                     \
+        }                                                                     \
+        struct rix_hash_mrsw_bucket_s *bk = buckets + bki;                    \
+        bk->idx[pos] = elm_idx;                                               \
+        RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets, bki,           \
+                           (unsigned)pos);                                    \
+        bk->hash[pos] = fp;                                                   \
+        rix_hash_mrsw_bucket_valid_set(bk, (unsigned)pos);                    \
+        atomic_fetch_add_explicit(&head->rhh_nb, 1u, memory_order_relaxed);   \
+        return 0u;                                                            \
+    }                                                                         \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
+name##_insert_hashed(struct name *head,                                       \
+                     struct rix_hash_mrsw_bucket_s *buckets,                  \
+                     struct type *base,                                       \
+                     struct type *elm,                                        \
+                     union rix_hash_hash_u h)                                 \
+{                                                                             \
+    u32 ret_idx = name##_insert_hashed_idx(head, buckets, base, elm, h);      \
+    return (ret_idx == 0u) ? NULL : name##_hptr(base, ret_idx);               \
+}                                                                             \
+attr struct type *                                                            \
+name##_insert(struct name *head,                                              \
+              struct rix_hash_mrsw_bucket_s *buckets,                         \
+              struct type *base,                                              \
+              struct type *elm)                                               \
+{                                                                             \
+    union rix_hash_hash_u h =                                                 \
+        hash_fn((const RIX_HASH_KEY_TYPE(type, key_field) *)&elm->key_field,  \
+                head->rhh_mask);                                              \
+    return name##_insert_hashed(head, buckets, base, elm, h);                 \
+}                                                                             \
+attr struct type *                                                            \
+name##_remove(struct name *head,                                              \
+              struct rix_hash_mrsw_bucket_s *buckets,                         \
+              struct type *base,                                              \
+              struct type *elm)                                               \
+{                                                                             \
+    unsigned node_idx = name##_hidx(base, elm);                               \
+    unsigned bk = (unsigned)(elm->hash_field & head->rhh_mask);               \
+    struct rix_hash_mrsw_bucket_s *b = buckets + bk;                          \
+    struct type *ret = NULL;                                                  \
+    u32 valid = rix_hash_mrsw_bucket_valid_load(b, memory_order_relaxed);     \
+    for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {           \
+        if ((valid & (UINT32_C(1) << s)) == 0u)                               \
+            continue;                                                         \
+        u32 idx = b->idx[s];                                                  \
+        if (idx == (u32)node_idx &&                                           \
+            name##_remove_at_inner(head, buckets, bk, s) !=                   \
+                (unsigned)RIX_NIL) {                                          \
+            ret = elm;                                                        \
+            break;                                                            \
+        }                                                                     \
+    }                                                                         \
+    return ret;                                                               \
+}
+
+/* ---- SLOT writer ops -------------------------------------------------- */
+#  define RIX_HASH_MRSW_GENERATE_SLOT_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
+static RIX_UNUSED RIX_NO_SANITIZE_THREAD int                                  \
+name##_flipflop(struct rix_hash_mrsw_bucket_s *buckets,                       \
+                struct type *base,                                            \
+                unsigned mask,                                                \
+                unsigned bk_idx,                                              \
+                unsigned slot)                                                \
+{                                                                             \
+    struct rix_hash_mrsw_bucket_s *bk = buckets + bk_idx;                     \
+    u32 fp = bk->hash[slot];                                                  \
+    u32 idx = bk->idx[slot];                                                  \
+    if (fp == 0u || idx == (u32)RIX_NIL)                                      \
+        return -1;                                                            \
+    struct type *nd = name##_hptr(base, idx);                                 \
+    u32 h = nd->hash_field;                                                   \
+    unsigned ab = (fp ^ h) & mask;                                            \
+    int alt_slot = name##_find_empty(buckets, ab);                            \
+    if (alt_slot < 0)                                                         \
+        return -1;                                                            \
+    struct rix_hash_mrsw_bucket_s *alt = buckets + ab;                        \
+    nd->hash_field = fp ^ h;                                                  \
+    nd->slot_field =                                                          \
+        (RIX_HASH_SLOT_TYPE(type, slot_field))(unsigned)alt_slot;             \
+    /* Publish-before-unpublish: see FP variant. */                           \
+    alt->idx[alt_slot] = idx;                                                 \
+    RIX_HASH_MRSW_HOOK(#name, "move_idx", NULL, buckets, ab,                  \
+                       (unsigned)alt_slot);                                   \
+    alt->hash[alt_slot] = fp;                                                 \
+    rix_hash_mrsw_bucket_valid_set(alt, (unsigned)alt_slot);                  \
+    RIX_HASH_MRSW_HOOK(#name, "move_hash", NULL, buckets, ab,                 \
+                       (unsigned)alt_slot);                                   \
+    RIX_HASH_MRSW_HOOK(#name, "move_before_old_clear", NULL, buckets,         \
+                       bk_idx, slot);                                         \
+    rix_hash_mrsw_bucket_valid_clear(bk, slot);                               \
+    return (int)slot;                                                         \
+}                                                                             \
+static RIX_UNUSED RIX_NO_SANITIZE_THREAD int                                  \
+name##_kickout(struct rix_hash_mrsw_bucket_s *buckets,                        \
+               struct type *base,                                             \
+               unsigned mask,                                                 \
+               unsigned bk_idx,                                               \
+               int depth)                                                     \
+{                                                                             \
+    if (depth <= 0)                                                           \
+        return -1;                                                            \
+    struct rix_hash_mrsw_bucket_s *bk = buckets + bk_idx;                     \
+    u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_relaxed);    \
+    for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {           \
+        if ((valid & (UINT32_C(1) << s)) == 0u)                               \
+            continue;                                                         \
+        if (name##_flipflop(buckets, base, mask, bk_idx, s) >= 0)             \
+            return (int)s;                                                    \
+    }                                                                         \
+    for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {           \
+        if ((valid & (UINT32_C(1) << s)) == 0u)                               \
+            continue;                                                         \
+        u32 fp = bk->hash[s];                                                 \
+        u32 si = bk->idx[s];                                                  \
+        if (si == (u32)RIX_NIL)                                               \
+            continue;                                                         \
+        struct type *sn = name##_hptr(base, si);                              \
+        u32 sh = sn->hash_field;                                              \
+        unsigned ab = (fp ^ sh) & mask;                                       \
+        if (name##_kickout(buckets, base, mask, ab, depth - 1) >= 0) {        \
+            u32 now_fp = bk->hash[s];                                         \
+            u32 now_idx = bk->idx[s];                                         \
+            u32 now_valid = rix_hash_mrsw_bucket_valid_load(bk,               \
+                                                            memory_order_relaxed); \
+            if (now_fp != fp || now_idx != si ||                              \
+                (now_valid & (UINT32_C(1) << s)) == 0u) {                     \
+                int fs = name##_find_empty(buckets, bk_idx);                  \
+                if (fs >= 0)                                                  \
+                    return fs;                                                \
+                valid = now_valid;                                            \
+                continue;                                                     \
+            }                                                                 \
+            name##_flipflop(buckets, base, mask, bk_idx, s);                  \
+            return (int)s;                                                    \
+        }                                                                     \
+    }                                                                         \
+    return -1;                                                                \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD u32                 \
+name##_insert_hashed_idx(struct name *head,                                   \
+                         struct rix_hash_mrsw_bucket_s *buckets,              \
+                         struct type *base,                                   \
+                         struct type *elm,                                    \
+                         union rix_hash_hash_u h)                             \
+{                                                                             \
+    unsigned mask = head->rhh_mask;                                           \
+    unsigned bk0, bk1;                                                        \
+    u32 elm_idx = name##_hidx(base, elm);                                     \
+    u32 fp = rix_hash_fp(h, mask, &bk0, &bk1);                                \
+    struct rix_hash_mrsw_bucket_s *bks[2] = { buckets + bk0, buckets + bk1 }; \
+    u32 fp_hits_v[2];                                                         \
+    int empty_slot_v[2];                                                      \
+    elm->hash_field = h.val32[0];                                             \
+    for (int i = 0; i < 2; i++) {                                             \
+        u32 valid = rix_hash_mrsw_bucket_valid_load(bks[i],                   \
+                                                    memory_order_acquire);    \
+        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
+        fp_hits_v[i] = name##_scan_bucket_hashes(bks[i], fp, valid);          \
+        empty_slot_v[i] = empty ? (int)__builtin_ctz(empty) : -1;             \
+    }                                                                         \
+    for (int i = 0; i < 2; i++) {                                             \
+        u32 hits = fp_hits_v[i];                                              \
+        while (hits) {                                                        \
+            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
+            hits &= hits - 1u;                                                \
+            u32 node_idx = bks[i]->idx[bit];                                  \
+            if (node_idx == (u32)RIX_NIL)                                     \
+                continue;                                                     \
+            struct type *node = name##_hptr(base, node_idx);                  \
+            if (cmp_fn(&elm->key_field, &node->key_field) == 0)               \
+                return node_idx;                                              \
+        }                                                                     \
+    }                                                                         \
+    for (int i = 0; i < 2; i++) {                                             \
+        int slot = empty_slot_v[i];                                           \
+        if (slot >= 0) {                                                      \
+            unsigned bki = (i == 0) ? bk0 : bk1;                              \
+            struct rix_hash_mrsw_bucket_s *bk = bks[i];                       \
+            if (i == 1)                                                       \
+                elm->hash_field = h.val32[1];                                 \
+            elm->slot_field =                                                 \
+                (RIX_HASH_SLOT_TYPE(type, slot_field))(unsigned)slot;         \
+            bk->idx[slot] = elm_idx;                                          \
+            RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets, bki,       \
+                               (unsigned)slot);                               \
+            bk->hash[slot] = fp;                                              \
+            rix_hash_mrsw_bucket_valid_set(bk, (unsigned)slot);               \
+            atomic_fetch_add_explicit(&head->rhh_nb, 1u,                      \
+                                      memory_order_relaxed);                  \
+            return 0u;                                                        \
+        }                                                                     \
+    }                                                                         \
+    {                                                                         \
+        int pos;                                                              \
+        unsigned bki;                                                         \
+        pos = name##_kickout(buckets, base, mask, bk0,                        \
+                             RIX_HASH_FOLLOW_DEPTH);                          \
+        if (pos >= 0) {                                                       \
+            bki = bk0;                                                        \
+        } else {                                                              \
+            pos = name##_kickout(buckets, base, mask, bk1,                    \
+                                 RIX_HASH_FOLLOW_DEPTH);                      \
+            if (pos < 0)                                                      \
+                return elm_idx;                                               \
+            bki = bk1;                                                        \
+            elm->hash_field = h.val32[1];                                     \
+        }                                                                     \
+        struct rix_hash_mrsw_bucket_s *bk = buckets + bki;                    \
+        elm->slot_field =                                                     \
+            (RIX_HASH_SLOT_TYPE(type, slot_field))(unsigned)pos;              \
+        bk->idx[pos] = elm_idx;                                               \
+        RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets, bki,           \
+                           (unsigned)pos);                                    \
+        bk->hash[pos] = fp;                                                   \
+        rix_hash_mrsw_bucket_valid_set(bk, (unsigned)pos);                    \
+        atomic_fetch_add_explicit(&head->rhh_nb, 1u, memory_order_relaxed);   \
+        return 0u;                                                            \
+    }                                                                         \
+}                                                                             \
+static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
+name##_insert_hashed(struct name *head,                                       \
+                     struct rix_hash_mrsw_bucket_s *buckets,                  \
+                     struct type *base,                                       \
+                     struct type *elm,                                        \
+                     union rix_hash_hash_u h)                                 \
+{                                                                             \
+    u32 ret_idx = name##_insert_hashed_idx(head, buckets, base, elm, h);      \
+    return (ret_idx == 0u) ? NULL : name##_hptr(base, ret_idx);               \
+}                                                                             \
+attr struct type *                                                            \
+name##_insert(struct name *head,                                              \
+              struct rix_hash_mrsw_bucket_s *buckets,                         \
+              struct type *base,                                              \
+              struct type *elm)                                               \
+{                                                                             \
+    union rix_hash_hash_u h =                                                 \
+        hash_fn((const RIX_HASH_KEY_TYPE(type, key_field) *)&elm->key_field,  \
+                head->rhh_mask);                                              \
+    return name##_insert_hashed(head, buckets, base, elm, h);                 \
+}                                                                             \
+attr struct type *                                                            \
+name##_remove(struct name *head,                                              \
+              struct rix_hash_mrsw_bucket_s *buckets,                         \
+              struct type *base,                                              \
+              struct type *elm)                                               \
+{                                                                             \
+    unsigned node_idx = name##_hidx(base, elm);                               \
+    unsigned bk = (unsigned)(elm->hash_field & head->rhh_mask);               \
+    unsigned slot = (unsigned)elm->slot_field;                                \
+    struct rix_hash_mrsw_bucket_s *b = buckets + bk;                          \
+    if (slot >= RIX_HASH_MRSW_BUCKET_ENTRY_SZ)                                \
+        return NULL;                                                          \
+    if (b->idx[slot] != (u32)node_idx)                                        \
+        return NULL;                                                          \
+    if (name##_remove_at_inner(head, buckets, bk, slot) ==                    \
+        (unsigned)RIX_NIL)                                                    \
+        return NULL;                                                          \
+    return elm;                                                               \
+}
+
+/* ---- public composed generators -------------------------------------- */
+#  define RIX_HASH_MRSW_GENERATE_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
+    RIX_HASH_MRSW_GENERATE_COMMON_PRE_INTERNAL(name, type, key_field,         \
+                                               hash_field, cmp_fn, hash_fn,   \
+                                               attr)                          \
+    RIX_HASH_MRSW_GENERATE_FP_OPS_INTERNAL(name, type, key_field, hash_field, \
+                                           cmp_fn, hash_fn, attr)
+
+#  define RIX_HASH_MRSW_GENERATE_SLOT_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
+    RIX_HASH_MRSW_GENERATE_COMMON_PRE_INTERNAL(name, type, key_field,         \
+                                               hash_field, cmp_fn, hash_fn,   \
+                                               attr)                          \
+    RIX_HASH_MRSW_GENERATE_SLOT_OPS_INTERNAL(name, type, key_field,           \
+                                             hash_field, slot_field, cmp_fn,  \
+                                             hash_fn, attr)
+
+/* ---- convenience macro API --------------------------------------------- */
+#  define RIX_HASH_MRSW_INIT(name, head, buckets, nb_bk)                     \
+    name##_init(head, buckets, nb_bk)
+
+#  define RIX_HASH_MRSW_FIND(name, head, buckets, base, key)                 \
+    name##_find(head, buckets, base, key)
+
+#  define RIX_HASH_MRSW_INSERT(name, head, buckets, base, elm)               \
+    name##_insert(head, buckets, base, elm)
+
+#  define RIX_HASH_MRSW_REMOVE(name, head, buckets, base, elm)               \
+    name##_remove(head, buckets, base, elm)
+
+#  define RIX_HASH_MRSW_REMOVE_AT(name, head, buckets, bk, slot)             \
+    name##_remove_at(head, buckets, bk, slot)
+
+#  define RIX_HASH_MRSW_WALK(name, head, buckets, base, cb, arg)             \
+    name##_walk(head, buckets, base, cb, arg)
+
+#  define RIX_HASH_MRSW_HASH_KEY(name, ctx, head, buckets, key)              \
+    name##_hash_key(ctx, head, buckets, key)
+
+#  define RIX_HASH_MRSW_HASH_KEY_MASKED(name, ctx, head, buckets, key,       \
+                                        hash_mask, bk_mask)                  \
+    name##_hash_key_masked(ctx, head, buckets, key, hash_mask, bk_mask)
+
+#  define RIX_HASH_MRSW_SCAN_BK(name, ctx, head, buckets)                    \
+    name##_scan_bk(ctx, head, buckets)
+
+#  define RIX_HASH_MRSW_PREFETCH_NODE(name, ctx, base)                       \
+    name##_prefetch_node(ctx, base)
+
+#  define RIX_HASH_MRSW_CMP_KEY(name, ctx, base)                             \
+    name##_cmp_key(ctx, base)
+
+#  define RIX_HASH_MRSW_HASH_KEY2(name, ctx, head, buckets, keys)            \
+    name##_hash_key_n(ctx, 2, head, buckets, keys)
+
+#  define RIX_HASH_MRSW_SCAN_BK2(name, ctx, head, buckets)                   \
+    name##_scan_bk_n(ctx, 2, head, buckets)
+
+#  define RIX_HASH_MRSW_PREFETCH_NODE2(name, ctx, base)                      \
+    name##_prefetch_node_n(ctx, 2, base)
+
+#  define RIX_HASH_MRSW_CMP_KEY2(name, ctx, base, results)                   \
+    name##_cmp_key_n(ctx, 2, base, results)
+
+#  define RIX_HASH_MRSW_HASH_KEY4(name, ctx, head, buckets, keys)            \
+    name##_hash_key_n(ctx, 4, head, buckets, keys)
+
+#  define RIX_HASH_MRSW_SCAN_BK4(name, ctx, head, buckets)                   \
+    name##_scan_bk_n(ctx, 4, head, buckets)
+
+#  define RIX_HASH_MRSW_PREFETCH_NODE4(name, ctx, base)                      \
+    name##_prefetch_node_n(ctx, 4, base)
+
+#  define RIX_HASH_MRSW_CMP_KEY4(name, ctx, base, results)                   \
+    name##_cmp_key_n(ctx, 4, base, results)
+
+#  define RIX_HASH_MRSW_HASH_KEY_N(name, ctx, n, head, buckets, keys)        \
+    name##_hash_key_n(ctx, n, head, buckets, keys)
+
+#  define RIX_HASH_MRSW_HASH_KEY_N_MASKED(name, ctx, n, head, buckets, keys, \
+                                          hash_mask, bk_mask)                \
+    name##_hash_key_n_masked(ctx, n, head, buckets, keys, hash_mask, bk_mask)
+
+#  define RIX_HASH_MRSW_SCAN_BK_N(name, ctx, n, head, buckets)               \
+    name##_scan_bk_n(ctx, n, head, buckets)
+
+#  define RIX_HASH_MRSW_PREFETCH_NODE_N(name, ctx, n, base)                  \
+    name##_prefetch_node_n(ctx, n, base)
+
+#  define RIX_HASH_MRSW_CMP_KEY_N(name, ctx, n, base, results)               \
+    name##_cmp_key_n(ctx, n, base, results)
+
+#endif /* _RIX_HASH_MRSW_H_ */
+
+/*
+ * Local Variables:
+ * c-file-style: "bsd"
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * tab-width: 4
+ * End:
+ */

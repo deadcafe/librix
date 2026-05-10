@@ -1,5 +1,58 @@
 # Release Notes
 
+## librix v0.5.2
+
+MRSW release for lockless-reader hash tables and general flow tables with a
+single control-plane writer.
+
+### Summary
+
+`v0.5.2` adds an independent multi-reader / single-writer cuckoo hash table and
+uses it to provide MRSW `flow4`, `flow6`, and `flowu` table variants.  The new
+flow tables are not flow caches: they do not maintain per-entry timestamps or
+reader-path counters, so user-plane lookup stays read-only while a single
+control-plane writer can add, delete, flush, or migrate entries under the
+documented quiescence contract.
+
+The MRSW hash keeps the 128 B bucket envelope by using 15 data slots and one
+packed atomic `ctrl` word.  `ctrl` uses a 17-bit sequence counter and a 15-bit
+valid bitmap.  Hits return immediately from the visible ctrl snapshot; misses
+verify both candidate buckets before reporting absence.
+
+### Highlights
+
+- add `rix_hash_mrsw.h` with per-bucket seq/valid control words and staged
+  lookup APIs matching the normal hash table shape
+- add MRSW SLOT generator macros for node-side slot tracking and O(1) remove
+- add MRSW `flow4`, `flow6`, and `flowu` table APIs
+- keep MRSW flow tables separate from the existing flow-cache-oriented table
+  layout and reader timestamp path
+- build MRSW flow-table dispatch objects for Generic, SSE4.2, AVX2, and
+  AVX-512 variants
+- initialize MRSW flow dispatch from `ft_arch_init()`
+- document MRSW memory ordering, publish-before-unpublish kickout ordering,
+  transient duplicate lookup behavior, and hit/miss semantics
+- document MRSW bucket fill guidance as Green <70%, Yellow 70..80%, Red >80%
+- add MRSW hash tests, MRSW flow tests, reader/writer stress tests, and a
+  pure-vs-MRSW hash benchmark
+
+### Validation status
+
+- `make -C tests/hashtbl_mrsw test`: passed
+- `make -C flowtable/test test-mrsw`: passed
+- `make -B -C tests/hashtbl_mrsw test CC=clang`: passed
+- `make -B -C flowtable/test test-mrsw CC=clang
+  BUILDDIR=/tmp/librix-flow-clang-mrsw-review`: passed
+- `./bench_pure_vs_mrsw 1048576 200 1`: passed
+- `/tmp/bench_mrsw_cold_compare 1048576 70 7 {1,8,32,256} 0 2`: passed
+
+### Notes
+
+- AVX-512 objects build as part of the flowtable library.  AVX-512 execution
+  was not required for local validation.
+- MRSW flow tables are intended for control-plane writer / user-plane reader
+  use.  Existing pure flow tables remain the preferred cache-oriented path.
+
 ## librix v0.5.1
 
 Patch release focused on `flowtable` implementation brush-up while preserving

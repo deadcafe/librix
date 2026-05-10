@@ -51,12 +51,16 @@
  *                           smaller node, remove requires re-hash.
  *     RIX_HASH32         -- cuckoo hash, u32 key stored in bucket
  *     RIX_HASH64         -- cuckoo hash, u64 key stored in bucket
+ *     RIX_HASH_MRSW      -- fp cuckoo hash with lockless readers and a
+ *                           single writer, using per-bucket control words
  *
- *     All hash variants provide:
+ *     Ordinary hash variants provide:
  *       - Runtime SIMD dispatch (Generic / AVX2 / AVX-512)
  *       - Pipelined staged find (hash_key, scan_bk,
  *         prefetch_node, cmp_key) for DRAM latency hiding
  *       - init, find, insert, remove, walk
+ *     The MRSW variant keeps the same high-level API shape but uses a
+ *     per-bucket atomic control word and SIMD hash-slot loads.
  *
  * -----------------------------------------------------------------------
  * Quick Start

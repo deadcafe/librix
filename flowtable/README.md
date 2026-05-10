@@ -64,12 +64,52 @@ The current implementation provides:
 - `ft_flow4_table`, `ft_flow6_table`, `ft_flowu_table`
 - `ft_table_extra` and `flow4_extra` / `flow6_extra` / `flowu_extra`
   slot-extra table APIs
+- `ft_mrsw_table` with `flow4_mrsw_entry`, `flow6_mrsw_entry`, and
+  `flowu_mrsw_entry` for multi-reader / single-writer lookup
 - scalar and bulk `find`, `add_idx`, `del_idx`, `del_key`
 - intrusive `init()` with caller-defined record layout (stride + offset)
 - runtime arch dispatch with unsuffixed public APIs
 - `migrate()` for grow / shrink / rehash
 - explicit timeout maintenance (`maintain`, `maintain_idx_bulk`)
 - bucket-table-only resize (records are never relocated)
+
+### 2.0 MRSW Flow Table
+
+The MRSW flow table is deliberately separate from `struct ft_table`.
+It is a general flow table for a control-plane writer and user-plane readers,
+not a flow cache.  There is no per-entry timestamp, touch, timeout, or reclaim
+path in the MRSW entry layout.  Mixing MRSW into the normal table would either
+inherit the normal table's reader-side timestamp stores or add atomics to the
+existing hot path.  MRSW uses:
+
+- `struct ft_mrsw_table`
+- `struct flow4_mrsw_entry`, `flow6_mrsw_entry`, `flowu_mrsw_entry`
+- `struct rix_hash_mrsw_bucket_s` buckets with 15 usable slots
+- separate metadata containing only hash-table placement state
+
+Capacity planning uses a lower bucket-fill target than the pure table.  Pure
+tables use Green <75%, Yellow 75..85%, Red >85%; MRSW should be treated 5
+percentage points lower: Green <70%, Yellow 70..80%, Red >80%.  Use
+`ft_mrsw_table_bucket_size()` so allocation follows that 70% MRSW slot-fill
+target.
+
+Concurrency contract:
+
+- any number of readers may call `ft_flow*_mrsw_table_find*()`
+- reader lookup does not update entry metadata, timestamps, or lookup counters
+- exactly one writer may call add/delete/flush/migrate
+- entry keys are immutable while published
+- removed entry storage must not be reused for another key until an
+  external reader grace period has elapsed
+- `migrate()` requires readers to be quiesced, or a higher-level RCU table
+  pointer swap
+
+The MRSW bucket ordering is inherited from `rix_hash_mrsw`: publish writes
+payload first and then release-updates the bucket control word; readers scan
+valid slots and accept the result only after both candidate bucket control
+words verify unchanged.  Kickout publishes the alternate bucket before
+unpublishing the old slot, so a temporary duplicate is allowed and avoids a
+false-negative window.
 
 ### 2.1 Timeout Maintenance
 
@@ -374,8 +414,8 @@ Public headers:
 - `flowtable/include/ft_fill_ctrl.h` — optional fill-rate controller
 - `flowtable/include/flowtable/*.h` — advanced family/common headers
 
-Normal users should include `flow_table.h`.  It includes both the pure
-APIs and the slot-extra APIs.  The slot-extra implementation is part of the
+Normal users should include `flow_table.h`.  It includes the pure APIs,
+the MRSW APIs, and the slot-extra APIs.  The slot-extra implementation is part of the
 normal `flowtable/src/` build and is linked into `libftable.a`; there is no
 separate `extra/` source tree or include path.  The `flowtable/*.h` headers
 are kept for code that intentionally wants a narrow family-specific API, for
@@ -451,10 +491,13 @@ Exceptions:
 - Extra-only timestamp helpers such as `ft_table_extra_touch()` and
   `ft_table_extra_touch_checked()` remain extra-specific.
 - Bucket sizing is variant-specific: use `ft_table_bucket_size()` for
-  pure and `ft_table_extra_bucket_size()` /
+  pure, `ft_mrsw_table_bucket_size()` for MRSW, and
+  `ft_table_extra_bucket_size()` /
   `flow4_extra_table_bucket_size()` /
   `flow6_extra_table_bucket_size()` /
   `flowu_extra_table_bucket_size()` for slot-extra.
+  `ft_mrsw_table_bucket_size()` intentionally uses the lower MRSW operating
+  boundary, targeting <=70% of the 15 usable slots per bucket.
 
 Private implementation headers live under `flowtable/src/`, and bench-only
 helpers live under `flowtable/test/`.
@@ -473,6 +516,16 @@ Primary APIs (shown for `flow4`; `flow6` and `flowu` are identical):
 - `ft_flow4_table_maintain()` / `ft_flow4_table_maintain_idx_bulk()`
 - `ft_flow4_table_walk()`
 - `ft_arch_init()` — one-time CPU detection and SIMD dispatch
+
+MRSW APIs mirror the pure table where the concurrency contract is compatible:
+
+- `FT_FLOW4_MRSW_TABLE_INIT_TYPED()` / `ft_flow4_mrsw_table_init()`
+- `ft_flow4_mrsw_table_find()` / `ft_flow4_mrsw_table_find_bulk()`
+- `ft_mrsw_table_add_idx()` / `ft_mrsw_table_add_idx_bulk()`
+- `ft_mrsw_table_del_idx()` / `ft_mrsw_table_del_idx_bulk()`
+- `ft_flow4_mrsw_table_del_key_bulk()`
+- `ft_mrsw_table_migrate()` (quiesced readers only)
+- `ft_mrsw_table_walk()`
 
 Architecture selection:
 
@@ -604,7 +657,7 @@ be >= the init-time bucket count.
 
 ## 10. Current Test Coverage
 
-The current test program is `flowtable/test/test_flow_table.c`.
+The current pure-table test program is `flowtable/test/test_flow_table.c`.
 
 It covers (for all three variants: flow4, flow6, flowu):
 
@@ -635,6 +688,15 @@ run by `test-extra` / `test-extra-arch`.  It covers `flow4_extra`,
 - bucket sweep maintenance
 - migrate followed by touch using the current bucket mask
 - `FT_TABLE_*` generic facade, including maintenance facade macros
+
+The MRSW test program is `flowtable/test/test_flow_mrsw.c` and is run by
+`test-mrsw`.  It covers:
+
+- separate MRSW entry/table API for flow4, flow6, and flowu
+- duplicate handling and delete by index/key path coverage
+- reader lookup with no timestamp touch, timeout state, or lookup-counter write
+- multi-reader/single-writer stress with concurrent lookup and add/remove
+- migrate followed by lookup using the current bucket mask
 
 Run:
 

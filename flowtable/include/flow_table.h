@@ -11,6 +11,7 @@
 #include "flowtable/flow4_table.h"
 #include "flowtable/flow6_table.h"
 #include "flowtable/flowu_table.h"
+#include "flowtable/flow_mrsw_table.h"
 #include "flowtable/flow_extra_table.h"
 
 /**

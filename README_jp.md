@@ -482,11 +482,80 @@ RIX_RB_FOREACH_REVERSE(var, name, head, base)   /* 降順 */
 | keyonly | `rix_hash_keyonly.h` | フィンガープリント→バケット、フルキー→ノード | (なし)                      | 128 B (2 CL) | 可変長キー、最小ノード |
 | hash32  | `rix_hash_32.h`       | `u32` キーをバケットに直接格納          | (なし)                      | 128 B (2 CL) | 32 ビット整数キー |
 | hash64  | `rix_hash_64.h`       | `u64` キーをバケットに直接格納          | (なし)                      | 192 B (3 CL) | 64 ビット整数キー |
+| mrsw    | `rix_hash_mrsw.h`     | フィンガープリント→バケット、フルキー→ノード | `hash_field`; bucket ごとに `ctrl` | 128 B (2 CL)、15 slots | lockless reader + single writer |
 
 fp/slot/keyonly の 3 バリアントは同じバケットレイアウトと staged-find パイプラインを共有します。
-`rix_hash.h` は extra 以外の 5 バリアントをインクルードする傘ヘッダです。
+`rix_hash.h` は MRSW を含む extra 以外のバリアントをインクルードする傘ヘッダです。
 `slot_extra` は大きいバケットレイアウトを使うため、
 `rix_hash_slot_extra.h` から明示的に opt-in します。
+
+#### MRSW memory ordering
+
+`RIX_HASH_MRSW` は multi-reader / single-writer 用の独立した fp 系
+variant です。128 B bucket を維持するため usable slot は 15 個です。
+1 本目の cache line は `hash[15]` と余り 1 個の packed `ctrl`、2 本目の
+cache line は `idx[15]` と reserved `u32` です。`ctrl` は bit 0..16
+(17 bit) を seqcount、bit 17..31 (15 bit) を valid bitmap として使います。
+`s < 15` の usable slot `s` に valid bit `s` が対応します。同じ bucket 数を
+指定した場合、16 slot variant より容量は 1/16 減るため、MRSW では
+`rix_hash_mrsw_nb_bk_hint()` を使って sizing してください。bucket fill の
+運用目安も pure より 5 ポイント低く見ます。pure は Green <75%、
+Yellow 75..85%、Red >85% ですが、MRSW は Green <70%、Yellow 70..80%、
+Red >80% とします。そのため MRSW sizing helper は power-of-two 丸め前に
+15 usable slot の 70% 以下を目標にします。
+
+各 bucket の 17 bit seqcount は generation counter です。reader は候補
+bucket 2 個だけを read-after-verify します。つまり、`ctrl` を acquire load
+し、通常版 hash table と同じ runtime SIMD `find_u32x16` dispatch で hash-hit
+bitmap を作り、同じ control word の valid bitmap と AND し、その valid-hit
+slot から idx/node 候補を読みます。valid-hit slot で key が見つかった場合、
+hit path は即座に返り、最後の `ctrl` verify は行いません。key が見つからない
+場合だけ、miss path が探索した `ctrl` word を再度 acquire load し、いずれかの
+control word が変わっていれば retry します。writer が触っていない bucket だけを
+候補に持つ reader は進行でき、頻度の高い hit path は探索 bucket ごとに 1 回の
+ctrl load だけで済みます。1 回の lookup が候補 bucket の 17 bit seq 一巡を跨が
+ないことが前提です。single writer では、同じ候補 bucket に対する 131072 回の
+completed ctrl update を reader が跨がない、という条件です。
+
+writer の memory ordering は API contract の一部です。insert/publish では
+`idx[slot]` と `hash[slot]` を先に書き、次に `ctrl.seq` increment と
+`ctrl.valid` bit set を同じ atomic u32 の release update で行います。
+remove/unpublish では `ctrl.seq` increment と `ctrl.valid` bit clear を同じ
+atomic u32 の release update で行います。`hash[slot]` と `idx[slot]` の clear
+は不要です。valid bit が落ちている間、slot payload に残った stale value は
+無視されます。miss は候補 2 bucket の最終 acquire verify が同一 control word
+を確認した場合だけ報告されます。
+
+lookup semantics は意図的に非対称です。writer と重なった hit は、scan に使った
+`ctrl` snapshot で visible だった slot の entry を返すことがあります。kickout
+中は publish-before-unpublish による transient duplicate のどちらを返しても
+構いません。どちらも同じ node を指します。一方、miss は候補 2 bucket の ctrl
+word が変化していないことを確認してからだけ受理されます。これにより hit path
+に 2 回目の ctrl load を追加せずに false negative を避けます。
+
+kickout/move の順序は publish-before-unpublish です。writer はまず移動先
+bucket に idx/hash を書き、seq increment と新しい valid bit set を含む release
+ctrl update を行います。その後で、旧 bucket の seq increment と旧 valid bit
+clear を含む release ctrl update を行います。この受け渡し中は同じ entry が
+両方の candidate bucket に見えることがあり、`find` はそのどちらを返しても
+構いません(指す node は同一です)。この一時的な重複は正当性のために必要です。
+逆順、つまり旧 slot を先に clear すると false negative window ができます。
+
+bucket 内で ordered atomic なのは `ctrl` だけです。`hash[]` と `idx[]` は
+hot path が SIMD load できるように ordinary payload array とします。これは
+BSD/Linux 流の "intentional benign race" です。reader による plain load は
+writer の plain store と重なる可能性がありますが、その観測結果は bucket の
+`valid` bitmap で無効化されるか、上記 hit semantics の concurrent hit として
+受理されるか、miss-side seq verify で捨てられます。そのため false negative は
+外部に漏れません。
+`hash[]/idx[]` を触る関数群には `__attribute__((no_sanitize("thread")))`
+(`RIX_NO_SANITIZE_THREAD`) を付与しているので、ThreadSanitizer ビルドでも
+これらの想定内の race は警告されません。
+
+slot 追跡を行う SLOT バリエーション (`RIX_HASH_MRSW_GENERATE_SLOT*`) も
+同梱しています。pure 側 `rix_hash_slot.h` と同じ流儀で、insert/kickout 時に
+node の `slot_field` を更新するため、remove は 15 slot を走査せず O(1) で
+bucket slot を直接参照できます。
 
 #### Find 性能 (DRAM コールド、パイプライン、平均 cycles/op)
 
