@@ -35,14 +35,46 @@
 #  endif
 
 /*===========================================================================
- * Fingerprint-variant bucket layout
- * 128 bytes = 2 x 64-byte cache lines, aligned to 64 bytes.
+ * Bucket layout - unified for FP / SLOT / keyonly / MRSW variants.
+ *
+ * 128 bytes = 2 x 64-byte cache lines, 64-byte aligned.
+ *
+ * The pure (FP / SLOT / keyonly) variants use all 16 slots of hash[] / idx[].
+ *
+ * The MRSW variant uses only slots 0..14 and reinterprets the 16th word of
+ * each cache line through an anonymous union:
+ *   hash[15] aliases an _Atomic u32 ctrl (packed seq / valid bitmap).
+ *   idx [15] aliases a  u32 reserved word.
+ * MRSW therefore offers 15 usable entries per bucket while keeping the same
+ * 128-byte envelope and SIMD-friendly hash line as the pure variants.
+ *
+ * The same memory layout serves both worlds; choose the appropriate generator
+ * (RIX_HASH_GENERATE* vs. RIX_HASH_MRSW_GENERATE*) for the desired access
+ * protocol.
  *===========================================================================*/
 struct rix_hash_bucket_s {
-    u32 hash[RIX_HASH_BUCKET_ENTRY_SZ]; /* 64 bytes: fingerprints       */
-    u32 idx [RIX_HASH_BUCKET_ENTRY_SZ]; /* 64 bytes: 1-origin node idx  */
+    union {
+        u32 hash[RIX_HASH_BUCKET_ENTRY_SZ];   /* pure: 16 fingerprints      */
+        struct {
+            u32         _hash_lo[RIX_HASH_BUCKET_ENTRY_SZ - 1u];
+                                              /* alias for hash[0..14]      */
+            _Atomic u32 ctrl;                 /* MRSW ctrl @ hash[15]       */
+        };
+    };
+    union {
+        u32 idx[RIX_HASH_BUCKET_ENTRY_SZ];    /* pure: 16 1-origin indices  */
+        struct {
+            u32 _idx_lo[RIX_HASH_BUCKET_ENTRY_SZ - 1u];
+                                              /* alias for idx[0..14]       */
+            u32 reserved;                     /* MRSW reserved @ idx[15]    */
+        };
+    };
 } __attribute__((aligned(RIX_CACHE_LINE_SIZE)));
 
+RIX_STATIC_ASSERT(sizeof(_Atomic u32) == sizeof(u32),
+                  "atomic u32 must have u32 storage size");
+RIX_STATIC_ASSERT(_Alignof(_Atomic u32) == _Alignof(u32),
+                  "atomic u32 must have u32 alignment");
 RIX_STATIC_ASSERT(sizeof(struct rix_hash_bucket_s) == 128u,
                   "rix_hash_bucket_s must be 128 bytes");
 RIX_STATIC_ASSERT(_Alignof(struct rix_hash_bucket_s) == RIX_CACHE_LINE_SIZE,
@@ -50,6 +82,11 @@ RIX_STATIC_ASSERT(_Alignof(struct rix_hash_bucket_s) == RIX_CACHE_LINE_SIZE,
 RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_s, idx)
                   == RIX_CACHE_LINE_SIZE,
                   "rix_hash_bucket_s.idx must start at cache line 1");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_s, ctrl) == 60u,
+                  "rix_hash_bucket_s.ctrl must alias hash[15]");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_s, reserved)
+                  == RIX_CACHE_LINE_SIZE + 60u,
+                  "rix_hash_bucket_s.reserved must alias idx[15]");
 
 /*===========================================================================
  * Head struct and init macros

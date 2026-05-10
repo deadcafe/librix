@@ -107,7 +107,7 @@ RIX_HASH_MRSW_GENERATE_SLOT(myslot_mrsw, myslot_node, key, cur_hash, slot,
 #define NB_BK_BASIC  4u
 
 static struct mynode g_basic[NB_BASIC];
-static struct rix_hash_mrsw_bucket_s g_bk[NB_BK_BASIC]
+static struct rix_hash_bucket_s g_bk[NB_BK_BASIC]
     __attribute__((aligned(64)));
 static struct myht_mrsw g_head;
 
@@ -115,7 +115,7 @@ static struct myht_mrsw g_head;
 #define CTL_NB_BK  4u
 
 static struct ctl_node g_ctl[CTL_NODES];
-static struct rix_hash_mrsw_bucket_s g_ctl_bk[CTL_NB_BK]
+static struct rix_hash_bucket_s g_ctl_bk[CTL_NB_BK]
     __attribute__((aligned(64)));
 static struct ctlht g_ctl_head;
 
@@ -851,7 +851,7 @@ test_same_slot_reuse_stress(void)
 #define STRESS_CHURN  256u
 
 static struct mynode g_stress[STRESS_N];
-static struct rix_hash_mrsw_bucket_s g_stress_bk[STRESS_NB_BK]
+static struct rix_hash_bucket_s g_stress_bk[STRESS_NB_BK]
     __attribute__((aligned(64)));
 static struct myht_mrsw g_stress_head;
 static _Atomic int g_stress_stop;
@@ -948,7 +948,7 @@ test_stress(void)
 #define NB_BK_SLOT_BASIC  32u
 
 static struct myslot_node g_slot[NB_SLOT_BASIC];
-static struct rix_hash_mrsw_bucket_s g_slot_bk[NB_BK_SLOT_BASIC]
+static struct rix_hash_bucket_s g_slot_bk[NB_BK_SLOT_BASIC]
     __attribute__((aligned(64)));
 static struct myslot_mrsw g_slot_head;
 

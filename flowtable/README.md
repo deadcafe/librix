@@ -84,7 +84,7 @@ existing hot path.  MRSW uses:
 
 - `struct ft_mrsw_table`
 - `struct flow4_mrsw_entry`, `flow6_mrsw_entry`, `flowu_mrsw_entry`
-- `struct rix_hash_mrsw_bucket_s` buckets with 15 usable slots
+- `struct rix_hash_bucket_s` buckets, 15 usable slots in MRSW mode (slot 15 of each cache line aliases the MRSW ctrl/reserved fields via the unified anonymous-union layout)
 - separate metadata containing only hash-table placement state
 
 Capacity planning uses a lower bucket-fill target than the pure table.  Pure

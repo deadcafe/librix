@@ -491,12 +491,17 @@ fp/slot/keyonly の 3 バリアントは同じバケットレイアウトと sta
 
 #### MRSW memory ordering
 
-`RIX_HASH_MRSW` は multi-reader / single-writer 用の独立した fp 系
-variant です。128 B bucket を維持するため usable slot は 15 個です。
-1 本目の cache line は `hash[15]` と余り 1 個の packed `ctrl`、2 本目の
-cache line は `idx[15]` と reserved `u32` です。`ctrl` は bit 0..16
-(17 bit) を seqcount、bit 17..31 (15 bit) を valid bitmap として使います。
-`s < 15` の usable slot `s` に valid bit `s` が対応します。同じ bucket 数を
+`RIX_HASH_MRSW` は pure fp/slot/keyonly と **同じ** `struct rix_hash_bucket_s`
+を共有する fp 系 variant です。bucket は無名 union を使い、各 cache line の
+16 番目 (slot 15) の `u32` を MRSW では別名で参照する設計です:
+- `hash[15]` は `_Atomic u32 ctrl` の別名(packed seq/valid)
+- `idx[15]` は `u32 reserved` の別名
+MRSW は usable slot を 0..14 の 15 個に制限し、16 番目の位置を `bk->ctrl` /
+`bk->reserved` という名前付きフィールドとしてアクセスします。pure 側の
+fp/slot/keyonly 変種はこれらの別名を使わないので、従来通り 16 slot として
+hash[]/idx[] にアクセスできます。`ctrl` は bit 0..16 (17 bit) を seqcount、
+bit 17..31 (15 bit) を valid bitmap として使います。`s < 15` の usable slot
+`s` に valid bit `s` が対応します。同じ bucket 数を
 指定した場合、16 slot variant より容量は 1/16 減るため、MRSW では
 `rix_hash_mrsw_nb_bk_hint()` を使って sizing してください。bucket fill の
 運用目安も pure より 5 ポイント低く見ます。pure は Green <75%、

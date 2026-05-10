@@ -132,25 +132,32 @@ ft_##prefix##_mrsw_head_for_hash_(struct ft_mrsw_table *ft)                   \
     return ft_##prefix##_mrsw_head_(ft);                                      \
 }
 
-FT_MRSW_DEFINE_HASH(flow4, struct flow4_mrsw_entry,
-                    ft_flow4_mrsw_cmp, ft_flow4_mrsw_hash_fn)
-
+/*
+ * Single shared indexer override.  base is always a struct ft_mrsw_table *
+ * cast through the entry-type pointer; the generic record helpers handle
+ * stride/offset arithmetic and the cast back to entry_t happens via the
+ * struct type * parameter.  This replaces three near-identical per-prefix
+ * #undef/#define blocks.
+ */
 #undef RIX_HASH_MRSW_DEFINE_INDEXERS
 #define RIX_HASH_MRSW_DEFINE_INDEXERS(name, type)                             \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
 name##_hidx(struct type *base, const struct type *p)                          \
 {                                                                             \
-    const struct ft_mrsw_table *ft =                                          \
-        (const struct ft_mrsw_table *)(const void *)base;                     \
-    return ft_flow4_mrsw_entry_idx_(ft, p);                                   \
+    return ft_mrsw_record_member_idx_(                                        \
+        (const struct ft_mrsw_table *)(const void *)base, p);                 \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
 name##_hptr(struct type *base, unsigned i)                                    \
 {                                                                             \
     const struct ft_mrsw_table *ft =                                          \
         (const struct ft_mrsw_table *)(const void *)base;                     \
-    return ft_flow4_mrsw_entry_ptr_(ft, i);                                   \
+    return (struct type *)__builtin_assume_aligned(                           \
+        ft_mrsw_record_member_ptr_(ft, i), _Alignof(struct type));            \
 }
+
+FT_MRSW_DEFINE_HASH(flow4, struct flow4_mrsw_entry,
+                    ft_flow4_mrsw_cmp, ft_flow4_mrsw_hash_fn)
 RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flow4_mrsw_ht, flow4_mrsw_entry,
                                        key, meta.cur_hash, meta.slot,
                                        ft_flow4_mrsw_cmp,
@@ -158,23 +165,6 @@ RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flow4_mrsw_ht, flow4_mrsw_entry,
 
 FT_MRSW_DEFINE_HASH(flow6, struct flow6_mrsw_entry,
                     ft_flow6_mrsw_cmp, ft_flow6_mrsw_hash_fn)
-
-#undef RIX_HASH_MRSW_DEFINE_INDEXERS
-#define RIX_HASH_MRSW_DEFINE_INDEXERS(name, type)                             \
-static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
-name##_hidx(struct type *base, const struct type *p)                          \
-{                                                                             \
-    const struct ft_mrsw_table *ft =                                          \
-        (const struct ft_mrsw_table *)(const void *)base;                     \
-    return ft_flow6_mrsw_entry_idx_(ft, p);                                   \
-}                                                                             \
-static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_hptr(struct type *base, unsigned i)                                    \
-{                                                                             \
-    const struct ft_mrsw_table *ft =                                          \
-        (const struct ft_mrsw_table *)(const void *)base;                     \
-    return ft_flow6_mrsw_entry_ptr_(ft, i);                                   \
-}
 RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flow6_mrsw_ht, flow6_mrsw_entry,
                                        key, meta.cur_hash, meta.slot,
                                        ft_flow6_mrsw_cmp,
@@ -182,23 +172,6 @@ RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flow6_mrsw_ht, flow6_mrsw_entry,
 
 FT_MRSW_DEFINE_HASH(flowu, struct flowu_mrsw_entry,
                     ft_flowu_mrsw_cmp, ft_flowu_mrsw_hash_fn)
-
-#undef RIX_HASH_MRSW_DEFINE_INDEXERS
-#define RIX_HASH_MRSW_DEFINE_INDEXERS(name, type)                             \
-static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
-name##_hidx(struct type *base, const struct type *p)                          \
-{                                                                             \
-    const struct ft_mrsw_table *ft =                                          \
-        (const struct ft_mrsw_table *)(const void *)base;                     \
-    return ft_flowu_mrsw_entry_idx_(ft, p);                                   \
-}                                                                             \
-static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_hptr(struct type *base, unsigned i)                                    \
-{                                                                             \
-    const struct ft_mrsw_table *ft =                                          \
-        (const struct ft_mrsw_table *)(const void *)base;                     \
-    return ft_flowu_mrsw_entry_ptr_(ft, i);                                   \
-}
 RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flowu_mrsw_ht, flowu_mrsw_entry,
                                        key, meta.cur_hash, meta.slot,
                                        ft_flowu_mrsw_cmp,
@@ -336,7 +309,7 @@ ft_##prefix##_mrsw_insert_dup_hashed_idx_(struct ft_mrsw_table *ft,           \
         *kickout_out = 0;                                                     \
     for (unsigned i = 0u; i < 2u; i++) {                                      \
         unsigned bki = (i == 0u) ? bk0 : bk1;                                 \
-        struct rix_hash_mrsw_bucket_s *bk = ft->buckets + bki;               \
+        struct rix_hash_bucket_s *bk = ft->buckets + bki;               \
         int slot = ft_##prefix##_mrsw_ht_find_empty(ft->buckets, bki);        \
         if (slot < 0)                                                         \
             continue;                                                         \
@@ -519,7 +492,7 @@ static int                                                                    \
 ft_##prefix##_mrsw_migrate_(struct ft_mrsw_table *ft,                         \
                             void *new_buckets_raw, size_t new_bucket_size)    \
 {                                                                             \
-    struct rix_hash_mrsw_bucket_s *new_buckets;                               \
+    struct rix_hash_bucket_s *new_buckets;                               \
     struct ft_##prefix##_mrsw_ht new_head;                                    \
     unsigned new_nb_bk;                                                       \
     if (ft == NULL || ft->buckets == NULL || new_buckets_raw == NULL ||       \
@@ -531,7 +504,7 @@ ft_##prefix##_mrsw_migrate_(struct ft_mrsw_table *ft,                         \
         return -1;                                                            \
     ft_##prefix##_mrsw_ht_init(&new_head, new_buckets, new_nb_bk);            \
     for (unsigned b = 0u; b < ft->nb_bk; b++) {                               \
-        struct rix_hash_mrsw_bucket_s *bk = &ft->buckets[b];                  \
+        struct rix_hash_bucket_s *bk = &ft->buckets[b];                  \
         u32 ctrl = rix_hash_mrsw_bucket_read_begin(bk);                       \
         u32 valid = rix_hash_mrsw_ctrl_valid(ctrl);                           \
         for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {       \

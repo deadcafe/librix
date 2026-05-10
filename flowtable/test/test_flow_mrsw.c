@@ -105,10 +105,10 @@ test_mrsw_bucket_size_guidance(void)
     size_t bsz_1m = ft_mrsw_table_bucket_size(1048576u);
 
     TEST_ASSERT(ft_mrsw_table_bucket_size(21u)
-                == FT_TABLE_MIN_NB_BK * sizeof(struct rix_hash_mrsw_bucket_s));
+                == FT_TABLE_MIN_NB_BK * sizeof(struct rix_hash_bucket_s));
     TEST_ASSERT(ft_mrsw_table_bucket_size(22u)
-                == FT_TABLE_MIN_NB_BK * sizeof(struct rix_hash_mrsw_bucket_s));
-    TEST_ASSERT(bsz_1m == 131072u * sizeof(struct rix_hash_mrsw_bucket_s));
+                == FT_TABLE_MIN_NB_BK * sizeof(struct rix_hash_bucket_s));
+    TEST_ASSERT(bsz_1m == 131072u * sizeof(struct rix_hash_bucket_s));
 }
 
 static void

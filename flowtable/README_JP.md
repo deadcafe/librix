@@ -89,7 +89,7 @@ MRSW 版は以下を使う。
 
 - `struct ft_mrsw_table`
 - `struct flow4_mrsw_entry`, `flow6_mrsw_entry`, `flowu_mrsw_entry`
-- 15 usable slot の `struct rix_hash_mrsw_bucket_s`
+- 共有 bucket 型 `struct rix_hash_bucket_s`(MRSW モードでは usable slot 15、各 cache line の slot 15 を MRSW ctrl/reserved に別名で割り当てる無名 union 構成)
 - hash-table placement state だけを持つ専用 metadata
 
 capacity planning では pure table より低い bucket-fill 目標を使う。pure は

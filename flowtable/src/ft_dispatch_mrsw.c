@@ -80,7 +80,7 @@ ft_mrsw_table_init_common_(struct ft_mrsw_table *ft,
                            const struct ft_table_config *cfg)
 {
     struct ft_table_config defcfg;
-    struct rix_hash_mrsw_bucket_s *buckets;
+    struct rix_hash_bucket_s *buckets;
     unsigned nb_bk;
 
     if (ft == NULL || array == NULL || max_entries == 0u ||

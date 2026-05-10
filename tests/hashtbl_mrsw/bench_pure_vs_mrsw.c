@@ -109,11 +109,10 @@ xorshift64(void)
 }
 
 /* ================================================================== */
-/* Benchmark fixture                                                   */
+/* Globals and helpers                                                 */
 /* ================================================================== */
 #define BENCH_N 256
 
-static u64 *g_keys;          /* probe keys (cache-cold sweep) */
 static u64  g_table_n;
 static u64  g_repeat;
 static int  g_rand_keys;
@@ -160,377 +159,126 @@ report(const char *label, u64 *samples, unsigned n, unsigned ops)
            label, med, per_op);
 }
 
-/* ================================================================== */
-/* pure FP                                                             */
-/* ================================================================== */
-static void
-bench_pure_fp(void)
+static u64 *
+build_probe_idx(void)
 {
-    unsigned nb_bk = rix_hash_nb_bk_hint((unsigned)g_table_n);
-    size_t bk_mem = (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
-    size_t nd_mem = (size_t)g_table_n * sizeof(struct n_pure_fp);
-    struct rix_hash_bucket_s *bk = xmmap(bk_mem);
-    struct n_pure_fp *nodes = xmmap(nd_mem);
-    struct ht_pure_fp head;
-    u64 *probe_idx;
-    u64 *samples;
-
-    ht_pure_fp_init(&head, nb_bk);
-    for (u64 i = 0u; i < g_table_n; i++) {
-        nodes[i].key.hi = (u64)(i + 1u);
-        if (ht_pure_fp_insert(&head, bk, nodes, &nodes[i]) != NULL) {
-            fprintf(stderr, "pure_fp: insert %llu failed\n",
-                    (unsigned long long)i);
-            exit(1);
-        }
-    }
-
-    /* probe keys */
-    probe_idx = (u64 *)xmmap((size_t)g_repeat * BENCH_N * sizeof(u64));
-    for (u64 i = 0u; i < g_repeat * BENCH_N; i++) {
-        probe_idx[i] = g_rand_keys
-            ? (xorshift64() % g_table_n)
-            : (i % g_table_n);
-    }
-    samples = (u64 *)malloc((size_t)g_repeat * sizeof(u64));
-
-    /* find single-shot */
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            struct mykey key = {
-                (u64)(probe_idx[r * BENCH_N + k] + 1u)
-            };
-            struct n_pure_fp *res =
-                ht_pure_fp_find(&head, bk, nodes, &key);
-            if (res != NULL)
-                g_sink += res->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("pure FP find x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    /* find x4 staged */
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k += 4u) {
-            struct rix_hash_find_ctx_s ctx[4];
-            struct n_pure_fp *res[4];
-            struct mykey keys[4];
-            const struct mykey *kp[4];
-            for (unsigned j = 0u; j < 4u; j++) {
-                keys[j].hi = (u64)(probe_idx[r * BENCH_N + k + j] + 1u);
-                kp[j] = &keys[j];
-            }
-            ht_pure_fp_hash_key_n(ctx, 4, &head, bk, kp);
-            ht_pure_fp_scan_bk_n(ctx, 4, &head, bk);
-            ht_pure_fp_prefetch_node_n(ctx, 4, nodes);
-            ht_pure_fp_cmp_key_n(ctx, 4, nodes, res);
-            for (unsigned j = 0u; j < 4u; j++)
-                if (res[j])
-                    g_sink += res[j]->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("pure FP find x4 staged", samples, (unsigned)g_repeat, BENCH_N);
-
-    /* remove + reinsert as a writer-side benchmark */
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 idx = probe_idx[r * BENCH_N] % g_table_n;
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            unsigned i = (unsigned)((idx + k) % g_table_n);
-            ht_pure_fp_remove(&head, bk, nodes, &nodes[i]);
-            ht_pure_fp_insert(&head, bk, nodes, &nodes[i]);
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("pure FP rm+ins x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    free(samples);
-    munmap(probe_idx, (size_t)g_repeat * BENCH_N * sizeof(u64));
-    munmap(nodes, nd_mem);
-    munmap(bk, bk_mem);
+    u64 *p = (u64 *)xmmap((size_t)g_repeat * BENCH_N * sizeof(u64));
+    for (u64 i = 0u; i < g_repeat * BENCH_N; i++)
+        p[i] = g_rand_keys ? (xorshift64() % g_table_n)
+                           : (i % g_table_n);
+    return p;
 }
 
 /* ================================================================== */
-/* pure SLOT                                                           */
+/* Per-variant bench template                                          */
+/*                                                                     */
+/*   prefix     : function-prefix used by RIX_HASH(_MRSW)?_GENERATE*   */
+/*   node_t     : struct node_type                                     */
+/*   ctx_t      : struct find_ctx_type                                 */
+/*   init_call  : full call expression that initializes 'head'         */
+/*   nb_bk_hint : sizing helper to call (rix_hash_(mrsw_)?nb_bk_hint)  */
 /* ================================================================== */
-static void
-bench_pure_slot(void)
-{
-    unsigned nb_bk = rix_hash_nb_bk_hint((unsigned)g_table_n);
-    size_t bk_mem = (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
-    size_t nd_mem = (size_t)g_table_n * sizeof(struct n_pure_slot);
-    struct rix_hash_bucket_s *bk = xmmap(bk_mem);
-    struct n_pure_slot *nodes = xmmap(nd_mem);
-    struct ht_pure_slot head;
-    u64 *probe_idx;
-    u64 *samples;
-
-    ht_pure_slot_init(&head, nb_bk);
-    for (u64 i = 0u; i < g_table_n; i++) {
-        nodes[i].key.hi = (u64)(i + 1u);
-        if (ht_pure_slot_insert(&head, bk, nodes, &nodes[i]) != NULL) {
-            fprintf(stderr, "pure_slot: insert %llu failed\n",
-                    (unsigned long long)i);
-            exit(1);
-        }
-    }
-
-    probe_idx = (u64 *)xmmap((size_t)g_repeat * BENCH_N * sizeof(u64));
-    for (u64 i = 0u; i < g_repeat * BENCH_N; i++) {
-        probe_idx[i] = g_rand_keys
-            ? (xorshift64() % g_table_n)
-            : (i % g_table_n);
-    }
-    samples = (u64 *)malloc((size_t)g_repeat * sizeof(u64));
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            struct mykey key = {
-                (u64)(probe_idx[r * BENCH_N + k] + 1u)
-            };
-            struct n_pure_slot *res =
-                ht_pure_slot_find(&head, bk, nodes, &key);
-            if (res != NULL)
-                g_sink += res->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("pure SLOT find x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k += 4u) {
-            struct rix_hash_find_ctx_s ctx[4];
-            struct n_pure_slot *res[4];
-            struct mykey keys[4];
-            const struct mykey *kp[4];
-            for (unsigned j = 0u; j < 4u; j++) {
-                keys[j].hi = (u64)(probe_idx[r * BENCH_N + k + j] + 1u);
-                kp[j] = &keys[j];
-            }
-            ht_pure_slot_hash_key_n(ctx, 4, &head, bk, kp);
-            ht_pure_slot_scan_bk_n(ctx, 4, &head, bk);
-            ht_pure_slot_prefetch_node_n(ctx, 4, nodes);
-            ht_pure_slot_cmp_key_n(ctx, 4, nodes, res);
-            for (unsigned j = 0u; j < 4u; j++)
-                if (res[j])
-                    g_sink += res[j]->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("pure SLOT find x4 staged", samples, (unsigned)g_repeat, BENCH_N);
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 idx = probe_idx[r * BENCH_N] % g_table_n;
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            unsigned i = (unsigned)((idx + k) % g_table_n);
-            ht_pure_slot_remove(&head, bk, nodes, &nodes[i]);
-            ht_pure_slot_insert(&head, bk, nodes, &nodes[i]);
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("pure SLOT rm+ins x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    free(samples);
-    munmap(probe_idx, (size_t)g_repeat * BENCH_N * sizeof(u64));
-    munmap(nodes, nd_mem);
-    munmap(bk, bk_mem);
+#define DEFINE_BENCH(label_str, prefix, node_t, ctx_t, init_call, nb_bk_hint) \
+static void                                                                   \
+bench_##prefix(void)                                                          \
+{                                                                             \
+    unsigned nb_bk = nb_bk_hint((unsigned)g_table_n);                         \
+    size_t bk_mem  = (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);        \
+    size_t nd_mem  = (size_t)g_table_n * sizeof(node_t);                      \
+    struct rix_hash_bucket_s *bk    = xmmap(bk_mem);                          \
+    node_t                   *nodes = xmmap(nd_mem);                          \
+    struct prefix             head;                                           \
+    u64                      *probe_idx;                                      \
+    u64                      *samples;                                        \
+                                                                              \
+    init_call;                                                                \
+    for (u64 i = 0u; i < g_table_n; i++) {                                    \
+        nodes[i].key.hi = (u64)(i + 1u);                                      \
+        if (prefix##_insert(&head, bk, nodes, &nodes[i]) != NULL) {           \
+            fprintf(stderr, "%s: insert %llu failed\n", label_str,            \
+                    (unsigned long long)i);                                   \
+            exit(1);                                                          \
+        }                                                                     \
+    }                                                                         \
+    probe_idx = build_probe_idx();                                            \
+    samples   = (u64 *)malloc((size_t)g_repeat * sizeof(u64));                \
+                                                                              \
+    /* find single-shot */                                                    \
+    for (u64 r = 0u; r < g_repeat; r++) {                                     \
+        u64 t0 = tsc_start();                                                 \
+        for (unsigned k = 0u; k < BENCH_N; k++) {                             \
+            struct mykey key = {                                              \
+                (u64)(probe_idx[r * BENCH_N + k] + 1u)                        \
+            };                                                                \
+            node_t *res = prefix##_find(&head, bk, nodes, &key);              \
+            if (res != NULL) g_sink += res->cur_hash;                         \
+        }                                                                     \
+        u64 t1 = tsc_end();                                                   \
+        samples[r] = t1 - t0;                                                 \
+    }                                                                         \
+    report(label_str " find x256", samples, (unsigned)g_repeat, BENCH_N);     \
+                                                                              \
+    /* find x4 staged */                                                      \
+    for (u64 r = 0u; r < g_repeat; r++) {                                     \
+        u64 t0 = tsc_start();                                                 \
+        for (unsigned k = 0u; k < BENCH_N; k += 4u) {                         \
+            ctx_t                ctx[4];                                      \
+            node_t              *res[4];                                      \
+            struct mykey         keys[4];                                     \
+            const struct mykey  *kp[4];                                       \
+            for (unsigned j = 0u; j < 4u; j++) {                              \
+                keys[j].hi = (u64)(probe_idx[r * BENCH_N + k + j] + 1u);      \
+                kp[j] = &keys[j];                                             \
+            }                                                                 \
+            prefix##_hash_key_n(ctx, 4, &head, bk, kp);                       \
+            prefix##_scan_bk_n(ctx, 4, &head, bk);                            \
+            prefix##_prefetch_node_n(ctx, 4, nodes);                          \
+            prefix##_cmp_key_n(ctx, 4, nodes, res);                           \
+            for (unsigned j = 0u; j < 4u; j++)                                \
+                if (res[j]) g_sink += res[j]->cur_hash;                       \
+        }                                                                     \
+        u64 t1 = tsc_end();                                                   \
+        samples[r] = t1 - t0;                                                 \
+    }                                                                         \
+    report(label_str " find x4 staged", samples, (unsigned)g_repeat,          \
+           BENCH_N);                                                          \
+                                                                              \
+    /* rm + ins (writer) */                                                   \
+    for (u64 r = 0u; r < g_repeat; r++) {                                     \
+        u64 idx = probe_idx[r * BENCH_N] % g_table_n;                         \
+        u64 t0 = tsc_start();                                                 \
+        for (unsigned k = 0u; k < BENCH_N; k++) {                             \
+            unsigned i = (unsigned)((idx + k) % g_table_n);                   \
+            prefix##_remove(&head, bk, nodes, &nodes[i]);                     \
+            prefix##_insert(&head, bk, nodes, &nodes[i]);                     \
+        }                                                                     \
+        u64 t1 = tsc_end();                                                   \
+        samples[r] = t1 - t0;                                                 \
+    }                                                                         \
+    report(label_str " rm+ins x256", samples, (unsigned)g_repeat, BENCH_N);   \
+                                                                              \
+    free(samples);                                                            \
+    munmap(probe_idx, (size_t)g_repeat * BENCH_N * sizeof(u64));              \
+    munmap(nodes, nd_mem);                                                    \
+    munmap(bk, bk_mem);                                                       \
 }
 
-/* ================================================================== */
-/* MRSW FP                                                             */
-/* ================================================================== */
-static void
-bench_mrsw_fp(void)
-{
-    unsigned nb_bk = rix_hash_mrsw_nb_bk_hint((unsigned)g_table_n);
-    size_t bk_mem = (size_t)nb_bk * sizeof(struct rix_hash_mrsw_bucket_s);
-    size_t nd_mem = (size_t)g_table_n * sizeof(struct n_mrsw_fp);
-    struct rix_hash_mrsw_bucket_s *bk = xmmap(bk_mem);
-    struct n_mrsw_fp *nodes = xmmap(nd_mem);
-    struct ht_mrsw_fp head;
-    u64 *probe_idx;
-    u64 *samples;
-
-    ht_mrsw_fp_init(&head, bk, nb_bk);
-    for (u64 i = 0u; i < g_table_n; i++) {
-        nodes[i].key.hi = (u64)(i + 1u);
-        if (ht_mrsw_fp_insert(&head, bk, nodes, &nodes[i]) != NULL) {
-            fprintf(stderr, "mrsw_fp: insert %llu failed\n",
-                    (unsigned long long)i);
-            exit(1);
-        }
-    }
-
-    probe_idx = (u64 *)xmmap((size_t)g_repeat * BENCH_N * sizeof(u64));
-    for (u64 i = 0u; i < g_repeat * BENCH_N; i++) {
-        probe_idx[i] = g_rand_keys
-            ? (xorshift64() % g_table_n)
-            : (i % g_table_n);
-    }
-    samples = (u64 *)malloc((size_t)g_repeat * sizeof(u64));
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            struct mykey key = {
-                (u64)(probe_idx[r * BENCH_N + k] + 1u)
-            };
-            struct n_mrsw_fp *res =
-                ht_mrsw_fp_find(&head, bk, nodes, &key);
-            if (res != NULL)
-                g_sink += res->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("MRSW FP find x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k += 4u) {
-            struct rix_hash_mrsw_find_ctx_s ctx[4];
-            struct n_mrsw_fp *res[4];
-            struct mykey keys[4];
-            const struct mykey *kp[4];
-            for (unsigned j = 0u; j < 4u; j++) {
-                keys[j].hi = (u64)(probe_idx[r * BENCH_N + k + j] + 1u);
-                kp[j] = &keys[j];
-            }
-            ht_mrsw_fp_hash_key_n(ctx, 4, &head, bk, kp);
-            ht_mrsw_fp_scan_bk_n(ctx, 4, &head, bk);
-            ht_mrsw_fp_prefetch_node_n(ctx, 4, nodes);
-            ht_mrsw_fp_cmp_key_n(ctx, 4, nodes, res);
-            for (unsigned j = 0u; j < 4u; j++)
-                if (res[j])
-                    g_sink += res[j]->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("MRSW FP find x4 staged", samples, (unsigned)g_repeat, BENCH_N);
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 idx = probe_idx[r * BENCH_N] % g_table_n;
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            unsigned i = (unsigned)((idx + k) % g_table_n);
-            ht_mrsw_fp_remove(&head, bk, nodes, &nodes[i]);
-            ht_mrsw_fp_insert(&head, bk, nodes, &nodes[i]);
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("MRSW FP rm+ins x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    free(samples);
-    munmap(probe_idx, (size_t)g_repeat * BENCH_N * sizeof(u64));
-    munmap(nodes, nd_mem);
-    munmap(bk, bk_mem);
-}
-
-/* ================================================================== */
-/* MRSW SLOT                                                           */
-/* ================================================================== */
-static void
-bench_mrsw_slot(void)
-{
-    unsigned nb_bk = rix_hash_mrsw_nb_bk_hint((unsigned)g_table_n);
-    size_t bk_mem = (size_t)nb_bk * sizeof(struct rix_hash_mrsw_bucket_s);
-    size_t nd_mem = (size_t)g_table_n * sizeof(struct n_mrsw_slot);
-    struct rix_hash_mrsw_bucket_s *bk = xmmap(bk_mem);
-    struct n_mrsw_slot *nodes = xmmap(nd_mem);
-    struct ht_mrsw_slot head;
-    u64 *probe_idx;
-    u64 *samples;
-
-    ht_mrsw_slot_init(&head, bk, nb_bk);
-    for (u64 i = 0u; i < g_table_n; i++) {
-        nodes[i].key.hi = (u64)(i + 1u);
-        if (ht_mrsw_slot_insert(&head, bk, nodes, &nodes[i]) != NULL) {
-            fprintf(stderr, "mrsw_slot: insert %llu failed\n",
-                    (unsigned long long)i);
-            exit(1);
-        }
-    }
-
-    probe_idx = (u64 *)xmmap((size_t)g_repeat * BENCH_N * sizeof(u64));
-    for (u64 i = 0u; i < g_repeat * BENCH_N; i++) {
-        probe_idx[i] = g_rand_keys
-            ? (xorshift64() % g_table_n)
-            : (i % g_table_n);
-    }
-    samples = (u64 *)malloc((size_t)g_repeat * sizeof(u64));
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            struct mykey key = {
-                (u64)(probe_idx[r * BENCH_N + k] + 1u)
-            };
-            struct n_mrsw_slot *res =
-                ht_mrsw_slot_find(&head, bk, nodes, &key);
-            if (res != NULL)
-                g_sink += res->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("MRSW SLOT find x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k += 4u) {
-            struct rix_hash_mrsw_find_ctx_s ctx[4];
-            struct n_mrsw_slot *res[4];
-            struct mykey keys[4];
-            const struct mykey *kp[4];
-            for (unsigned j = 0u; j < 4u; j++) {
-                keys[j].hi = (u64)(probe_idx[r * BENCH_N + k + j] + 1u);
-                kp[j] = &keys[j];
-            }
-            ht_mrsw_slot_hash_key_n(ctx, 4, &head, bk, kp);
-            ht_mrsw_slot_scan_bk_n(ctx, 4, &head, bk);
-            ht_mrsw_slot_prefetch_node_n(ctx, 4, nodes);
-            ht_mrsw_slot_cmp_key_n(ctx, 4, nodes, res);
-            for (unsigned j = 0u; j < 4u; j++)
-                if (res[j])
-                    g_sink += res[j]->cur_hash;
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("MRSW SLOT find x4 staged", samples, (unsigned)g_repeat, BENCH_N);
-
-    for (u64 r = 0u; r < g_repeat; r++) {
-        u64 idx = probe_idx[r * BENCH_N] % g_table_n;
-        u64 t0 = tsc_start();
-        for (unsigned k = 0u; k < BENCH_N; k++) {
-            unsigned i = (unsigned)((idx + k) % g_table_n);
-            ht_mrsw_slot_remove(&head, bk, nodes, &nodes[i]);
-            ht_mrsw_slot_insert(&head, bk, nodes, &nodes[i]);
-        }
-        u64 t1 = tsc_end();
-        samples[r] = t1 - t0;
-    }
-    report("MRSW SLOT rm+ins x256", samples, (unsigned)g_repeat, BENCH_N);
-
-    free(samples);
-    munmap(probe_idx, (size_t)g_repeat * BENCH_N * sizeof(u64));
-    munmap(nodes, nd_mem);
-    munmap(bk, bk_mem);
-}
+DEFINE_BENCH("pure FP",   ht_pure_fp,   struct n_pure_fp,
+             struct rix_hash_find_ctx_s,
+             ht_pure_fp_init(&head, nb_bk),
+             rix_hash_nb_bk_hint)
+DEFINE_BENCH("pure SLOT", ht_pure_slot, struct n_pure_slot,
+             struct rix_hash_find_ctx_s,
+             ht_pure_slot_init(&head, nb_bk),
+             rix_hash_nb_bk_hint)
+DEFINE_BENCH("MRSW FP",   ht_mrsw_fp,   struct n_mrsw_fp,
+             struct rix_hash_mrsw_find_ctx_s,
+             ht_mrsw_fp_init(&head, bk, nb_bk),
+             rix_hash_mrsw_nb_bk_hint)
+DEFINE_BENCH("MRSW SLOT", ht_mrsw_slot, struct n_mrsw_slot,
+             struct rix_hash_mrsw_find_ctx_s,
+             ht_mrsw_slot_init(&head, bk, nb_bk),
+             rix_hash_mrsw_nb_bk_hint)
 
 /* ================================================================== */
 /* main                                                                */
@@ -538,8 +286,8 @@ bench_mrsw_slot(void)
 int
 main(int argc, char **argv)
 {
-    g_table_n  = (argc > 1) ? strtoull(argv[1], NULL, 0) : 1048576ull;
-    g_repeat   = (argc > 2) ? strtoull(argv[2], NULL, 0) : 200ull;
+    g_table_n   = (argc > 1) ? strtoull(argv[1], NULL, 0) : 1048576ull;
+    g_repeat    = (argc > 2) ? strtoull(argv[2], NULL, 0) : 200ull;
     g_rand_keys = (argc > 3) ? (int)atoi(argv[3]) : 1;
 
     rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
@@ -551,11 +299,10 @@ main(int argc, char **argv)
            g_rand_keys, BENCH_N);
     printf("\n");
 
-    (void)g_keys;
-    bench_pure_fp();
-    bench_pure_slot();
-    bench_mrsw_fp();
-    bench_mrsw_slot();
+    bench_ht_pure_fp();
+    bench_ht_pure_slot();
+    bench_ht_mrsw_fp();
+    bench_ht_mrsw_slot();
 
     return 0;
 }

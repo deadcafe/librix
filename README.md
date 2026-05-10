@@ -515,13 +515,18 @@ bucket layout.
 
 #### MRSW memory ordering
 
-`RIX_HASH_MRSW` is an independent fp-style variant for multi-reader /
-single-writer use.  It keeps a 128 B bucket by using 15 usable slots:
-`hash[15]` occupies the first cache line, a packed `ctrl` word uses the spare
-hash-line `u32`, `idx[15]` occupies the second cache line, and the spare
-idx-line `u32` is reserved.  `ctrl` uses bits 0..16 (17 bits) for the
-seqcount and bits 17..31 (15 bits) for the valid bitmap; valid bit `s`
-corresponds to usable slot `s` for `s < 15`.  Use `rix_hash_mrsw_nb_bk_hint()`
+`RIX_HASH_MRSW` is an fp-style variant for multi-reader / single-writer use.
+It shares the same `struct rix_hash_bucket_s` definition as the pure
+fp/slot/keyonly variants.  The bucket type uses anonymous unions so that the
+16th word of each cache line aliases the MRSW control fields without
+disturbing the 16-slot view used by the pure variants:
+- `hash[15]` aliases an `_Atomic u32 ctrl` (packed seq/valid).
+- `idx[15]`  aliases a `u32 reserved` word.
+MRSW therefore restricts itself to slots 0..14 (15 usable entries) and
+treats `bk->ctrl` / `bk->reserved` as named accessors for the 16th-word
+positions.  `ctrl` uses bits 0..16 (17 bits) for the seqcount and bits
+17..31 (15 bits) for the valid bitmap; valid bit `s` corresponds to usable
+slot `s` for `s < 15`.  Use `rix_hash_mrsw_nb_bk_hint()`
 when sizing tables; with the same bucket count as the 16-slot variants,
 capacity is reduced by 1/16.  Operational bucket-fill guidance is also
 5 percentage points lower than pure tables: pure Green <75%, Yellow 75..85%,

@@ -86,20 +86,20 @@ enum {
     FT_MRSW_TABLE_BUCKET_ALIGN = 64u,
 };
 
-static inline struct rix_hash_mrsw_bucket_s *
+static inline struct rix_hash_bucket_s *
 ft_mrsw_table_bucket_carve(void *raw, size_t raw_size, unsigned *nb_bk_out)
 {
     uintptr_t addr = (uintptr_t)raw;
     uintptr_t aligned =
-        (addr + (_Alignof(struct rix_hash_mrsw_bucket_s) - 1u))
-        & ~(uintptr_t)(_Alignof(struct rix_hash_mrsw_bucket_s) - 1u);
+        (addr + (_Alignof(struct rix_hash_bucket_s) - 1u))
+        & ~(uintptr_t)(_Alignof(struct rix_hash_bucket_s) - 1u);
     size_t lost = (size_t)(aligned - addr);
     size_t usable = raw_size > lost ? raw_size - lost : 0u;
-    unsigned nb = (unsigned)(usable / sizeof(struct rix_hash_mrsw_bucket_s));
+    unsigned nb = (unsigned)(usable / sizeof(struct rix_hash_bucket_s));
 
     nb = ft_rounddown_pow2_u32(nb);
     *nb_bk_out = nb;
-    return (struct rix_hash_mrsw_bucket_s *)aligned;
+    return (struct rix_hash_bucket_s *)aligned;
 }
 
 static inline size_t
@@ -113,13 +113,13 @@ ft_mrsw_table_bucket_size(unsigned max_entries)
     if (nb_bk < FT_TABLE_MIN_NB_BK)
         nb_bk = FT_TABLE_MIN_NB_BK;
     return (size_t)ft_roundup_pow2_u32(nb_bk) *
-           sizeof(struct rix_hash_mrsw_bucket_s);
+           sizeof(struct rix_hash_bucket_s);
 }
 
 static inline size_t
 ft_mrsw_table_bucket_mem_size(unsigned nb_bk)
 {
-    return (size_t)nb_bk * sizeof(struct rix_hash_mrsw_bucket_s);
+    return (size_t)nb_bk * sizeof(struct rix_hash_bucket_s);
 }
 
 /*
@@ -153,7 +153,7 @@ struct ft_mrsw_flow_status {
 RIX_HASH_MRSW_HEAD(ft_mrsw_table_ht);
 
 struct ft_mrsw_table {
-    struct rix_hash_mrsw_bucket_s *buckets;
+    struct rix_hash_bucket_s *buckets;
     unsigned char                 *pool_base;
     size_t                         pool_stride;
     size_t                         pool_entry_offset;
