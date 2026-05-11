@@ -8,10 +8,10 @@
 /*
  * rix_hash_mrsw.h - multi-reader / single-writer cuckoo hash table.
  *
- * This is an independent hash-table variant.  It does not reuse
- * rix_hash_bucket_s because each bucket has a packed seq/valid control word
- * that lets readers reject observations that overlap a writer touching that
- * bucket.
+ * This is an independent hash-table variant.  It reuses the normal bucket
+ * layouts through ctrl/reserved aliases: MRSW readers only use slots 0..14
+ * and reserve physical slot 15 for a packed seq/valid control word that lets
+ * readers reject observations that overlap a writer touching that bucket.
  *
  * Concurrency contract:
  *   - any number of reader threads may call find / staged find concurrently.
