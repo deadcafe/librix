@@ -11,7 +11,7 @@ single-writer control-plane updates and user-plane lookups.
 
 ### Added
 
-- Added `rix_hash_mrsw.h`, an independent cuckoo hash variant for
+- Added `rix_hash_mr.h`, an independent cuckoo hash variant for
   multi-reader / single-writer use with per-bucket seq/valid control words,
   15 usable slots per 128 B bucket, and staged lookup APIs matching the normal
   hash table shape.
@@ -26,6 +26,11 @@ single-writer control-plane updates and user-plane lookups.
   kickout/duplicate behavior, and reader/writer stress coverage.
 - Added a local `bench_pure_vs_mrsw` benchmark for pure-vs-MRSW hash primitive
   comparisons.
+- Added initial MRMW fp/slot/keyonly hash generators with the same reader
+  protocol as MRSW and per-bucket writer locks for no-kickout insert/remove
+  fast paths.
+- Added MRMW convenience macros, MRMW unit/concurrency tests, and MRMW rows in
+  the local hash benchmark.
 
 ### Changed
 

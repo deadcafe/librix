@@ -24,7 +24,8 @@
 /* Bucket layout - unified for pure SLOT_EXTRA and MRSW SLOT_EXTRA variants.
  * Pure variants use all 16 slots; MRSW reinterprets slot 15 of hash[]/idx[]
  * as ctrl/reserved (same protocol as the other MRSW variants) and uses only
- * 15 usable entries.  extra[15] is unused under MRSW. */
+ * 15 usable entries.  MRMW uses reserved as an atomic writer lock.
+ * extra[15] is unused under MRSW/MRMW. */
 struct rix_hash_bucket_extra_s {
     union {
         u32 hash [RIX_HASH_BUCKET_ENTRY_SZ];
@@ -37,7 +38,10 @@ struct rix_hash_bucket_extra_s {
         u32 idx  [RIX_HASH_BUCKET_ENTRY_SZ];
         struct {
             u32 _idx_lo[RIX_HASH_BUCKET_ENTRY_SZ - 1u];
-            u32 reserved;
+            union {
+                u32         reserved;
+                _Atomic u32 wlock;
+            };
         };
     };
     u32 extra[RIX_HASH_BUCKET_ENTRY_SZ];

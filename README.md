@@ -505,7 +505,7 @@ The ordinary non-MRSW variants share:
 | keyonly | `rix_hash_keyonly.h` | fingerprint in bucket, full key in node | (none)                      | 128 B (2 CL) | Variable-length keys, smallest node |
 | hash32  | `rix_hash_u32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
 | hash64  | `rix_hash_u64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
-| mrsw    | `rix_hash_mrsw.h`      | fp/keyonly/u32/u64/slot_extra, selected by generator | per-bucket `ctrl`; optional `hash_field`/`slot_field` | 128 B or 192 B, 15 slots | Lockless readers with one writer |
+| mrsw/mrmw | `rix_hash_mr.h`    | fp/keyonly/u32/u64/slot_extra for MRSW; fp/slot/keyonly for initial MRMW | per-bucket `ctrl`; optional `hash_field`/`slot_field`; MRMW writer lock | 128 B or 192 B, 15 slots | Lockless readers with one or multiple writers |
 
 All fp/slot/keyonly variants share the same bucket layout and staged-find pipeline.
 `rix_hash.h` is the umbrella header that includes the common variants,
@@ -592,15 +592,30 @@ If you need to model the table under TSan, build the application against
 the MRSW headers without redefining `RIX_NO_SANITIZE_THREAD`; readers will
 remain race-clean as far as observable behavior is concerned.
 
-`rix_hash_mrsw.h` is an umbrella header for all MRSW variants.  Variant-only
-users may include `rix_hash_fp_mrsw.h` for fp/slot/keyonly,
-`rix_hash_u32_mrsw.h`,
-`rix_hash_u64_mrsw.h`, or `rix_hash_slot_extra_mrsw.h` directly.  The exposed
+`rix_hash_mr.h` is an umbrella header for multi-reader hash variants.  MRSW
+provides lockless readers with a caller-guaranteed single writer; MRMW keeps
+the same reader protocol and adds per-bucket writer locks for multi-writer
+fast paths.  MRMW readers do not load the lock word, so the generated find and
+staged-find hot paths are the same as MRSW for the same variant.  Writers take
+bucket ticket locks before changing slot payload or `ctrl`; those locks order
+writer-vs-writer access, while reader visibility is still governed only by the
+existing `ctrl` release/acquire protocol.  Variant-only
+users may include `rix_hash_fp_mr.h` for fp/slot/keyonly,
+`rix_hash_u32_mr.h`,
+`rix_hash_u64_mr.h`, or `rix_hash_slot_extra_mr.h` directly.  The exposed
 generator families mirror the pure variants: `RIX_HASH_MRSW_GENERATE*` for fp,
 `RIX_HASH_MRSW_GENERATE_SLOT*` for slot-tracking,
 `RIX_HASH_MRSW_GENERATE_KEYONLY*` for keyonly,
 `RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*` for integer-key
 buckets, and `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` for per-slot bucket metadata.
+The fp/slot/keyonly header also exposes initial MRMW generators
+(`RIX_HASH_MRMW_GENERATE*`, `RIX_HASH_MRMW_GENERATE_SLOT*`, and
+`RIX_HASH_MRMW_GENERATE_KEYONLY*`) plus matching `RIX_HASH_MRMW_*` convenience
+macros for init/find/insert/remove/remove_at and staged lookup.  This initial
+MRMW implementation covers the no-kickout fast path where one of the two
+candidate buckets has an empty slot.  MRMW kickout is isolated behind an
+`insert_slow` path so the slow-path algorithm can be added or replaced
+independently.
 All of them use the same ctrl seq/valid protocol.  The slot-tracking and
 slot_extra forms maintain a `slot_field` during insert/kickout so remove can
 address the bucket slot in O(1) without scanning all 15 entries.

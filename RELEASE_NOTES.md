@@ -21,7 +21,7 @@ verify both candidate buckets before reporting absence.
 
 ### Highlights
 
-- add `rix_hash_mrsw.h` with per-bucket seq/valid control words and staged
+- add `rix_hash_mr.h` with per-bucket seq/valid control words and staged
   lookup APIs matching the normal hash table shape
 - add MRSW SLOT generator macros for node-side slot tracking and O(1) remove
 - add MRSW `flow4`, `flow6`, and `flowu` table APIs
@@ -35,6 +35,9 @@ verify both candidate buckets before reporting absence.
 - document MRSW bucket fill guidance as Green <70%, Yellow 70..80%, Red >80%
 - add MRSW hash tests, MRSW flow tests, reader/writer stress tests, and a
   pure-vs-MRSW hash benchmark
+- add initial MRMW fp/slot/keyonly hash generators with MRSW-equivalent
+  lockless readers and per-bucket writer locks for no-kickout fast paths
+- add MRMW unit/concurrency tests and benchmark rows comparing MRSW and MRMW
 
 ### Validation status
 

@@ -482,7 +482,7 @@ RIX_RB_FOREACH_REVERSE(var, name, head, base)   /* 降順 */
 | keyonly | `rix_hash_keyonly.h` | フィンガープリント→バケット、フルキー→ノード | (なし)                      | 128 B (2 CL) | 可変長キー、最小ノード |
 | hash32  | `rix_hash_u32.h`       | `u32` キーをバケットに直接格納          | (なし)                      | 128 B (2 CL) | 32 ビット整数キー |
 | hash64  | `rix_hash_u64.h`       | `u64` キーをバケットに直接格納          | (なし)                      | 192 B (3 CL) | 64 ビット整数キー |
-| mrsw    | `rix_hash_mrsw.h`      | fp/keyonly/u32/u64/slot_extra を generator で選択 | bucket ごとに `ctrl`; 必要に応じて `hash_field`/`slot_field` | 128 B または 192 B、15 slots | lockless reader + single writer |
+| mrsw/mrmw | `rix_hash_mr.h`    | MRSW は fp/keyonly/u32/u64/slot_extra、初期 MRMW は fp/slot/keyonly | bucket ごとに `ctrl`; 必要に応じて `hash_field`/`slot_field`; MRMW writer lock | 128 B または 192 B、15 slots | lockless reader + single/multi writer |
 
 fp/slot/keyonly の 3 バリアントは同じバケットレイアウトと staged-find パイプラインを共有します。
 `rix_hash.h` は MRSW generator family を含む common variant をインクルードする傘ヘッダです。
@@ -561,16 +561,30 @@ writer の plain store と重なる可能性がありますが、その観測結
 (`RIX_NO_SANITIZE_THREAD`) を付与しているので、ThreadSanitizer ビルドでも
 これらの想定内の race は警告されません。
 
-`rix_hash_mrsw.h` は全 MRSW variant の umbrella header です。variant だけを
-使う場合は fp/slot/keyonly 用の `rix_hash_fp_mrsw.h`、
-`rix_hash_u32_mrsw.h`、
-`rix_hash_u64_mrsw.h`、`rix_hash_slot_extra_mrsw.h` を直接 include できます。
+`rix_hash_mr.h` は multi-reader hash variant の umbrella header です。
+MRSW は reader lockless / caller 保証 single writer、MRMW は同じ reader
+protocol に bucket writer lock を加えた multi-writer fast path です。MRMW
+reader は lock word を読まないため、同じ variant であれば生成される find /
+staged-find hot path は MRSW と同じです。writer は slot payload または `ctrl`
+を変更する前に bucket ticket lock を取得します。この lock は writer 同士を
+順序付けるためのもので、reader への公開順序は従来通り `ctrl` の
+release/acquire protocol だけで決まります。
+variant だけを使う場合は fp/slot/keyonly 用の `rix_hash_fp_mr.h`、
+`rix_hash_u32_mr.h`、
+`rix_hash_u64_mr.h`、`rix_hash_slot_extra_mr.h` を直接 include できます。
 公開 generator family は pure variant に対応しています:
 fp 用 `RIX_HASH_MRSW_GENERATE*`、slot 追跡用
 `RIX_HASH_MRSW_GENERATE_SLOT*`、keyonly 用
 `RIX_HASH_MRSW_GENERATE_KEYONLY*`、整数 key 用
 `RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*`、
 per-slot bucket metadata 用 `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` です。
+fp/slot/keyonly header は初期 MRMW generator
+(`RIX_HASH_MRMW_GENERATE*`、`RIX_HASH_MRMW_GENERATE_SLOT*`、
+`RIX_HASH_MRMW_GENERATE_KEYONLY*`) と、init/find/insert/remove/remove_at および
+staged lookup 用の `RIX_HASH_MRMW_*` convenience macro も提供します。今回の
+初期 MRMW 実装は、候補 2 bucket のいずれかに空き slot がある no-kickout fast
+path を対象にします。MRMW kickout は `insert_slow` に隔離しており、slow path
+algorithm を後から独立して追加または差し替え可能です。
 いずれも同じ ctrl seq/valid protocol を使います。slot 追跡版と slot_extra 版は
 insert/kickout 時に node の `slot_field` を更新するため、remove は 15 slot を
 走査せず O(1) で bucket slot を直接参照できます。

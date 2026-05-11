@@ -5,10 +5,10 @@
  * All rights reserved.
  */
 
-#ifndef _RIX_HASH_SLOT_EXTRA_MRSW_H_
-#  define _RIX_HASH_SLOT_EXTRA_MRSW_H_
+#ifndef _RIX_HASH_SLOT_EXTRA_MR_H_
+#  define _RIX_HASH_SLOT_EXTRA_MR_H_
 
-#  include "rix_hash_mrsw_core.h"
+#  include "rix_hash_mr_core.h"
 #  include "rix_hash_slot_extra.h"
 
 /* MRSW SLOT_EXTRA reuses struct rix_hash_bucket_extra_s (192 B, 3 CL).
@@ -563,7 +563,7 @@ name##_remove(struct name *head, struct rix_hash_bucket_extra_s *buckets,     \
 }
 
 
-#endif /* _RIX_HASH_SLOT_EXTRA_MRSW_H_ */
+#endif /* _RIX_HASH_SLOT_EXTRA_MR_H_ */
 
 /*
  * Local Variables:

@@ -5,10 +5,10 @@
  * All rights reserved.
  */
 
-#ifndef _RIX_HASH_U64_MRSW_H_
-#  define _RIX_HASH_U64_MRSW_H_
+#ifndef _RIX_HASH_U64_MR_H_
+#  define _RIX_HASH_U64_MR_H_
 
-#  include "rix_hash_mrsw_core.h"
+#  include "rix_hash_mr_core.h"
 #  include "rix_hash_u64.h"
 
 /* MRSW U64 reuses struct rix_hash64_bucket_s defined in rix_hash_u64.h.
@@ -537,7 +537,7 @@ name##_remove(struct name *head, struct rix_hash64_bucket_s *buckets,         \
 }
 
 
-#endif /* _RIX_HASH_U64_MRSW_H_ */
+#endif /* _RIX_HASH_U64_MR_H_ */
 
 /*
  * Local Variables:

@@ -66,7 +66,7 @@ extern "C" {
 /* Suppress ThreadSanitizer for routines that intentionally race on
  * non-atomic payload words guarded by an external publish/verify protocol
  * (e.g. the MRSW cuckoo hash hash[]/idx[] arrays validated via the bucket
- * ctrl seq+valid word).  See rix_hash_mrsw.h for the protocol contract. */
+ * ctrl seq+valid word).  See rix_hash_mr.h for the protocol contract. */
 #  ifndef RIX_NO_SANITIZE_THREAD
 #    if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 8)
 #      define RIX_NO_SANITIZE_THREAD __attribute__((no_sanitize("thread")))

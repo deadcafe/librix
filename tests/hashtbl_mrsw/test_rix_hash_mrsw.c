@@ -18,7 +18,7 @@ static void mrsw_test_hook(const char *name, const char *event,
     mrsw_test_hook((name), (event), (void *)(head), (void *)(buckets),       \
                    (bk), (slot))
 
-#include "rix/rix_hash_mrsw.h"
+#include "rix/rix_hash_mr.h"
 
 #define FAIL(msg) do {                                                       \
     fprintf(stderr, "FAIL %s:%d:%s: %s\n",                                  \
@@ -51,6 +51,9 @@ mykey_cmp(const struct mykey *a, const struct mykey *b)
 
 RIX_HASH_MRSW_HEAD(myht_mrsw);
 RIX_HASH_MRSW_GENERATE(myht_mrsw, mynode, key, cur_hash, mykey_cmp)
+
+RIX_HASH_MRMW_HEAD(myht_mrmw);
+RIX_HASH_MRMW_GENERATE(myht_mrmw, mynode, key, cur_hash, mykey_cmp)
 
 struct ctl_key {
     u32 id;
@@ -103,6 +106,10 @@ RIX_HASH_MRSW_HEAD(myslot_mrsw);
 RIX_HASH_MRSW_GENERATE_SLOT(myslot_mrsw, myslot_node, key, cur_hash, slot,
                             mykey_cmp)
 
+RIX_HASH_MRMW_HEAD(myslot_mrmw);
+RIX_HASH_MRMW_GENERATE_SLOT(myslot_mrmw, myslot_node, key, cur_hash, slot,
+                            mykey_cmp)
+
 /* KEYONLY variant test fixture (no hash_field, no slot_field in node). */
 struct mykeyonly_node {
     u32 value;
@@ -111,6 +118,9 @@ struct mykeyonly_node {
 
 RIX_HASH_MRSW_HEAD(mykeyonly_mrsw);
 RIX_HASH_MRSW_GENERATE_KEYONLY(mykeyonly_mrsw, mykeyonly_node, key, mykey_cmp)
+
+RIX_HASH_MRMW_HEAD(mykeyonly_mrmw);
+RIX_HASH_MRMW_GENERATE_KEYONLY(mykeyonly_mrmw, mykeyonly_node, key, mykey_cmp)
 
 /* U32 variant test fixture (u32 key stored in bucket, no node aux). */
 struct myu32_node {
@@ -1991,6 +2001,408 @@ test_extra_stress(void)
         FAIL("extra stress reader observed wrong node");
 }
 
+#define MRMW_N       1024u
+#define MRMW_NB_BK   1024u
+#define MRMW_WRITERS    4u
+#define MRMW_READERS    4u
+
+static struct mynode g_mrmw[MRMW_N];
+static struct rix_hash_bucket_s g_mrmw_bk[MRMW_NB_BK]
+    __attribute__((aligned(64)));
+static struct myht_mrmw g_mrmw_head;
+static struct myslot_node g_mrmw_slot[MRMW_N];
+static struct rix_hash_bucket_s g_mrmw_slot_bk[MRMW_NB_BK]
+    __attribute__((aligned(64)));
+static struct myslot_mrmw g_mrmw_slot_head;
+static struct mykeyonly_node g_mrmw_ko[MRMW_N];
+static struct rix_hash_bucket_s g_mrmw_ko_bk[MRMW_NB_BK]
+    __attribute__((aligned(64)));
+static struct mykeyonly_mrmw g_mrmw_ko_head;
+static _Atomic int g_mrmw_start;
+static _Atomic int g_mrmw_stop;
+static _Atomic int g_mrmw_fail;
+
+static void
+mrmw_init(void)
+{
+    memset(g_mrmw, 0, sizeof(g_mrmw));
+    myht_mrmw_init(&g_mrmw_head, g_mrmw_bk, MRMW_NB_BK);
+    for (unsigned i = 0u; i < MRMW_N; i++) {
+        g_mrmw[i].key.hi = UINT64_C(0xABC0000000000000) | (u64)i;
+        g_mrmw[i].key.lo = UINT64_C(0x1234000000000000) ^ (u64)(i * 17u);
+        g_mrmw[i].value = i;
+    }
+}
+
+static void
+mrmw_slot_init(void)
+{
+    memset(g_mrmw_slot, 0, sizeof(g_mrmw_slot));
+    myslot_mrmw_init(&g_mrmw_slot_head, g_mrmw_slot_bk, MRMW_NB_BK);
+    for (unsigned i = 0u; i < MRMW_N; i++) {
+        g_mrmw_slot[i].key.hi = UINT64_C(0xABC1000000000000) | (u64)i;
+        g_mrmw_slot[i].key.lo = UINT64_C(0x1235000000000000) ^ (u64)(i * 19u);
+        g_mrmw_slot[i].value = i;
+    }
+}
+
+static void
+mrmw_ko_init(void)
+{
+    memset(g_mrmw_ko, 0, sizeof(g_mrmw_ko));
+    mykeyonly_mrmw_init(&g_mrmw_ko_head, g_mrmw_ko_bk, MRMW_NB_BK);
+    for (unsigned i = 0u; i < MRMW_N; i++) {
+        g_mrmw_ko[i].key.hi = UINT64_C(0xABC2000000000000) | (u64)i;
+        g_mrmw_ko[i].key.lo = UINT64_C(0x1236000000000000) ^ (u64)(i * 23u);
+        g_mrmw_ko[i].value = i;
+    }
+}
+
+struct mrmw_worker_arg {
+    unsigned begin;
+    unsigned end;
+};
+
+static void
+mrmw_wait_start(void)
+{
+    while (!atomic_load_explicit(&g_mrmw_start, memory_order_acquire))
+        sched_yield();
+}
+
+static void *
+mrmw_insert_worker(void *arg)
+{
+    struct mrmw_worker_arg *a = (struct mrmw_worker_arg *)arg;
+
+    mrmw_wait_start();
+    for (unsigned i = a->begin; i < a->end; i++) {
+        struct mynode *ret =
+            myht_mrmw_insert(&g_mrmw_head, g_mrmw_bk, g_mrmw, &g_mrmw[i]);
+        if (ret != NULL) {
+            atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void *
+mrmw_remove_worker(void *arg)
+{
+    struct mrmw_worker_arg *a = (struct mrmw_worker_arg *)arg;
+
+    mrmw_wait_start();
+    for (unsigned i = a->begin; i < a->end; i++) {
+        struct mynode *ret =
+            myht_mrmw_remove(&g_mrmw_head, g_mrmw_bk, g_mrmw, &g_mrmw[i]);
+        if (ret != &g_mrmw[i]) {
+            atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void *
+mrmw_reader_worker(void *arg)
+{
+    uintptr_t tid = (uintptr_t)arg;
+    u32 x = (u32)(0x9e3779b9u ^ (tid * 2654435761u));
+
+    mrmw_wait_start();
+    while (!atomic_load_explicit(&g_mrmw_stop, memory_order_acquire)) {
+        x = x * 1664525u + 1013904223u;
+        unsigned i = x & (MRMW_N - 1u);
+        struct mynode *ret =
+            myht_mrmw_find(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                           &g_mrmw[i].key);
+        if (ret != NULL && ret != &g_mrmw[i]) {
+            atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void
+test_mrmw_insert_find_remove(void)
+{
+    printf("[T] mrmw fp insert/find/remove\n");
+    mrmw_init();
+
+    for (unsigned i = 0u; i < 32u; i++) {
+        if (myht_mrmw_insert(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                             &g_mrmw[i]) != NULL)
+            FAILF("mrmw basic insert[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < 32u; i++) {
+        if (myht_mrmw_find(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                           &g_mrmw[i].key) != &g_mrmw[i])
+            FAILF("mrmw basic find[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < 32u; i += 2u) {
+        if (myht_mrmw_remove(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                             &g_mrmw[i]) != &g_mrmw[i])
+            FAILF("mrmw basic remove[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < 32u; i++) {
+        struct mynode *ret =
+            myht_mrmw_find(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                           &g_mrmw[i].key);
+        if (((i & 1u) == 0u && ret != NULL) ||
+            ((i & 1u) != 0u && ret != &g_mrmw[i]))
+            FAILF("mrmw post-remove find[%u] mismatch", i);
+    }
+}
+
+static void
+test_mrmw_duplicate_remove_at(void)
+{
+    printf("[T] mrmw fp duplicate/remove_at\n");
+    mrmw_init();
+
+    if (myht_mrmw_insert(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                         &g_mrmw[7]) != NULL)
+        FAIL("mrmw duplicate first insert returned non-NULL");
+    if (myht_mrmw_insert(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                         &g_mrmw[7]) != &g_mrmw[7])
+        FAIL("mrmw duplicate same-node did not return existing");
+
+    struct mynode dup;
+    memset(&dup, 0, sizeof(dup));
+    dup.key = g_mrmw[7].key;
+    if (myht_mrmw_insert(&g_mrmw_head, g_mrmw_bk, g_mrmw, &dup)
+        != &g_mrmw[7])
+        FAIL("mrmw duplicate same-key did not return existing");
+    if (atomic_load_explicit(&g_mrmw_head.rhh_nb, memory_order_relaxed) != 1u)
+        FAIL("mrmw duplicate changed count");
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_common(g_mrmw_bk, g_mrmw_head.rhh_mask, 8u, &bk, &slot))
+        FAIL("mrmw remove_at target not located");
+    if (RIX_HASH_MRMW_REMOVE_AT(myht_mrmw, &g_mrmw_head, g_mrmw_bk, bk, slot)
+        != 8u)
+        FAIL("mrmw remove_at returned wrong idx");
+    if (myht_mrmw_find(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                       &g_mrmw[7].key) != NULL)
+        FAIL("mrmw remove_at target still found");
+}
+
+static void
+test_mrmw_staged_api(void)
+{
+    printf("[T] mrmw fp staged API\n");
+    mrmw_init();
+
+    for (unsigned i = 0u; i < 16u; i++) {
+        if (RIX_HASH_MRMW_INSERT(myht_mrmw, &g_mrmw_head, g_mrmw_bk,
+                                 g_mrmw, &g_mrmw[i]) != NULL)
+            FAILF("mrmw staged setup insert[%u] failed", i);
+    }
+
+    struct rix_hash_mrsw_find_ctx_s ctx[4];
+    const struct mykey *keys[4] = {
+        &g_mrmw[1].key, &g_mrmw[3].key, &g_mrmw[5].key, &g_mrmw[7].key
+    };
+    struct mynode *res[4];
+
+    RIX_HASH_MRMW_HASH_KEY_N(myht_mrmw, ctx, 4u, &g_mrmw_head,
+                             g_mrmw_bk, keys);
+    RIX_HASH_MRMW_SCAN_BK_N(myht_mrmw, ctx, 4u, &g_mrmw_head, g_mrmw_bk);
+    RIX_HASH_MRMW_PREFETCH_NODE_N(myht_mrmw, ctx, 4u, g_mrmw);
+    RIX_HASH_MRMW_CMP_KEY_N(myht_mrmw, ctx, 4u, g_mrmw, res);
+    if (res[0] != &g_mrmw[1] || res[1] != &g_mrmw[3] ||
+        res[2] != &g_mrmw[5] || res[3] != &g_mrmw[7])
+        FAIL("mrmw staged result mismatch");
+}
+
+static void
+test_mrmw_slot_insert_find_remove(void)
+{
+    printf("[T] mrmw slot insert/find/remove\n");
+    mrmw_slot_init();
+
+    for (unsigned i = 0u; i < 64u; i++) {
+        if (myslot_mrmw_insert(&g_mrmw_slot_head, g_mrmw_slot_bk,
+                               g_mrmw_slot, &g_mrmw_slot[i]) != NULL)
+            FAILF("mrmw slot insert[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < 64u; i++) {
+        unsigned bk = (unsigned)(g_mrmw_slot[i].cur_hash &
+                                 g_mrmw_slot_head.rhh_mask);
+        unsigned slot = (unsigned)g_mrmw_slot[i].slot;
+        if (slot >= RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
+            FAILF("mrmw slot field out of range[%u]: %u", i, slot);
+        if (g_mrmw_slot_bk[bk].idx[slot] != i + 1u)
+            FAILF("mrmw slot field mismatch[%u]: bk=%u slot=%u idx=%u",
+                  i, bk, slot, g_mrmw_slot_bk[bk].idx[slot]);
+        if (myslot_mrmw_find(&g_mrmw_slot_head, g_mrmw_slot_bk,
+                             g_mrmw_slot, &g_mrmw_slot[i].key)
+            != &g_mrmw_slot[i])
+            FAILF("mrmw slot find[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < 64u; i += 2u) {
+        if (myslot_mrmw_remove(&g_mrmw_slot_head, g_mrmw_slot_bk,
+                               g_mrmw_slot, &g_mrmw_slot[i])
+            != &g_mrmw_slot[i])
+            FAILF("mrmw slot remove[%u] failed", i);
+    }
+}
+
+static void
+test_mrmw_keyonly_insert_find_remove(void)
+{
+    printf("[T] mrmw keyonly insert/find/remove\n");
+    mrmw_ko_init();
+
+    for (unsigned i = 0u; i < 64u; i++) {
+        if (mykeyonly_mrmw_insert(&g_mrmw_ko_head, g_mrmw_ko_bk,
+                                  g_mrmw_ko, &g_mrmw_ko[i]) != NULL)
+            FAILF("mrmw keyonly insert[%u] failed", i);
+    }
+    if (mykeyonly_mrmw_insert(&g_mrmw_ko_head, g_mrmw_ko_bk,
+                              g_mrmw_ko, &g_mrmw_ko[7]) != &g_mrmw_ko[7])
+        FAIL("mrmw keyonly duplicate did not return existing");
+    for (unsigned i = 0u; i < 64u; i++) {
+        if (mykeyonly_mrmw_find(&g_mrmw_ko_head, g_mrmw_ko_bk,
+                                g_mrmw_ko, &g_mrmw_ko[i].key)
+            != &g_mrmw_ko[i])
+            FAILF("mrmw keyonly find[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < 64u; i += 2u) {
+        if (mykeyonly_mrmw_remove(&g_mrmw_ko_head, g_mrmw_ko_bk,
+                                  g_mrmw_ko, &g_mrmw_ko[i])
+            != &g_mrmw_ko[i])
+            FAILF("mrmw keyonly remove[%u] failed", i);
+    }
+}
+
+#define MRMW_DUP_THREADS 8u
+
+static struct mynode g_mrmw_dup[MRMW_DUP_THREADS];
+static struct rix_hash_bucket_s g_mrmw_dup_bk[16]
+    __attribute__((aligned(64)));
+static struct myht_mrmw g_mrmw_dup_head;
+static _Atomic unsigned g_mrmw_dup_inserted;
+
+static void *
+mrmw_duplicate_insert_worker(void *arg)
+{
+    uintptr_t idx = (uintptr_t)arg;
+
+    mrmw_wait_start();
+    struct mynode *ret =
+        myht_mrmw_insert(&g_mrmw_dup_head, g_mrmw_dup_bk, g_mrmw_dup,
+                         &g_mrmw_dup[idx]);
+    if (ret == NULL) {
+        atomic_fetch_add_explicit(&g_mrmw_dup_inserted, 1u,
+                                  memory_order_relaxed);
+    } else if (mykey_cmp(&ret->key, &g_mrmw_dup[idx].key) != 0) {
+        atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+    }
+    return NULL;
+}
+
+static void
+test_mrmw_duplicate_race(void)
+{
+    printf("[T] mrmw duplicate insert race\n");
+    memset(g_mrmw_dup, 0, sizeof(g_mrmw_dup));
+    myht_mrmw_init(&g_mrmw_dup_head, g_mrmw_dup_bk, 16u);
+    for (unsigned i = 0u; i < MRMW_DUP_THREADS; i++) {
+        g_mrmw_dup[i].key.hi = UINT64_C(0xD00D000000000000);
+        g_mrmw_dup[i].key.lo = UINT64_C(0xCAFE000000000000);
+        g_mrmw_dup[i].value = i;
+    }
+
+    atomic_store_explicit(&g_mrmw_start, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_mrmw_fail, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_mrmw_dup_inserted, 0u, memory_order_relaxed);
+    pthread_t threads[MRMW_DUP_THREADS];
+    for (uintptr_t i = 0u; i < MRMW_DUP_THREADS; i++) {
+        if (pthread_create(&threads[i], NULL, mrmw_duplicate_insert_worker,
+                           (void *)i) != 0)
+            FAIL("pthread_create mrmw duplicate writer failed");
+    }
+    atomic_store_explicit(&g_mrmw_start, 1, memory_order_release);
+    for (unsigned i = 0u; i < MRMW_DUP_THREADS; i++)
+        pthread_join(threads[i], NULL);
+
+    if (atomic_load_explicit(&g_mrmw_fail, memory_order_acquire))
+        FAIL("mrmw duplicate race returned wrong key");
+    if (atomic_load_explicit(&g_mrmw_dup_inserted, memory_order_relaxed) != 1u)
+        FAIL("mrmw duplicate race did not publish exactly one entry");
+    if (atomic_load_explicit(&g_mrmw_dup_head.rhh_nb, memory_order_relaxed)
+        != 1u)
+        FAIL("mrmw duplicate race count mismatch");
+    if (myht_mrmw_find(&g_mrmw_dup_head, g_mrmw_dup_bk, g_mrmw_dup,
+                       &g_mrmw_dup[0].key) == NULL)
+        FAIL("mrmw duplicate race entry not found");
+}
+
+static void
+test_mrmw_multi_writer_stress(void)
+{
+    printf("[T] mrmw fp multi-writer stress\n");
+    mrmw_init();
+    atomic_store_explicit(&g_mrmw_start, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_mrmw_stop, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_mrmw_fail, 0, memory_order_relaxed);
+
+    pthread_t writers[MRMW_WRITERS];
+    pthread_t readers[MRMW_READERS];
+    struct mrmw_worker_arg args[MRMW_WRITERS];
+    unsigned step = MRMW_N / MRMW_WRITERS;
+
+    for (unsigned i = 0u; i < MRMW_WRITERS; i++) {
+        args[i].begin = i * step;
+        args[i].end = (i == MRMW_WRITERS - 1u) ? MRMW_N : (i + 1u) * step;
+        if (pthread_create(&writers[i], NULL, mrmw_insert_worker,
+                           &args[i]) != 0)
+            FAIL("pthread_create mrmw writer failed");
+    }
+    for (uintptr_t i = 0u; i < MRMW_READERS; i++) {
+        if (pthread_create(&readers[i], NULL, mrmw_reader_worker,
+                           (void *)(i + 1u)) != 0)
+            FAIL("pthread_create mrmw reader failed");
+    }
+
+    atomic_store_explicit(&g_mrmw_start, 1, memory_order_release);
+    for (unsigned i = 0u; i < MRMW_WRITERS; i++)
+        pthread_join(writers[i], NULL);
+    atomic_store_explicit(&g_mrmw_stop, 1, memory_order_release);
+    for (unsigned i = 0u; i < MRMW_READERS; i++)
+        pthread_join(readers[i], NULL);
+
+    if (atomic_load_explicit(&g_mrmw_fail, memory_order_acquire))
+        FAIL("mrmw insert/read stress failed");
+    if (atomic_load_explicit(&g_mrmw_head.rhh_nb, memory_order_relaxed) !=
+        MRMW_N)
+        FAIL("mrmw inserted count mismatch");
+    for (unsigned i = 0u; i < MRMW_N; i++) {
+        if (myht_mrmw_find(&g_mrmw_head, g_mrmw_bk, g_mrmw,
+                           &g_mrmw[i].key) != &g_mrmw[i])
+            FAILF("mrmw final find[%u] failed", i);
+    }
+
+    atomic_store_explicit(&g_mrmw_start, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_mrmw_fail, 0, memory_order_relaxed);
+    for (unsigned i = 0u; i < MRMW_WRITERS; i++) {
+        if (pthread_create(&writers[i], NULL, mrmw_remove_worker,
+                           &args[i]) != 0)
+            FAIL("pthread_create mrmw remove writer failed");
+    }
+    atomic_store_explicit(&g_mrmw_start, 1, memory_order_release);
+    for (unsigned i = 0u; i < MRMW_WRITERS; i++)
+        pthread_join(writers[i], NULL);
+    if (atomic_load_explicit(&g_mrmw_fail, memory_order_acquire))
+        FAIL("mrmw remove stress failed");
+    if (atomic_load_explicit(&g_mrmw_head.rhh_nb, memory_order_relaxed) != 0u)
+        FAIL("mrmw removed count mismatch");
+}
+
 int
 main(void)
 {
@@ -2032,6 +2444,13 @@ main(void)
     test_extra_kickout_carries_extra();
     test_extra_staged_remove_at();
     test_extra_stress();
+    test_mrmw_insert_find_remove();
+    test_mrmw_duplicate_remove_at();
+    test_mrmw_staged_api();
+    test_mrmw_slot_insert_find_remove();
+    test_mrmw_keyonly_insert_find_remove();
+    test_mrmw_duplicate_race();
+    test_mrmw_multi_writer_stress();
 
     printf("OK\n");
     return 0;

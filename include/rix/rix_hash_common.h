@@ -44,7 +44,8 @@
  * The MRSW variant uses only slots 0..14 and reinterprets the 16th word of
  * each cache line through an anonymous union:
  *   hash[15] aliases an _Atomic u32 ctrl (packed seq / valid bitmap).
- *   idx [15] aliases a  u32 reserved word.
+ *   idx [15] aliases a  u32 reserved word, or an atomic writer lock for
+ *   multi-writer variants.
  * MRSW therefore offers 15 usable entries per bucket while keeping the same
  * 128-byte envelope and SIMD-friendly hash line as the pure variants.
  *
@@ -66,7 +67,10 @@ struct rix_hash_bucket_s {
         struct {
             u32 _idx_lo[RIX_HASH_BUCKET_ENTRY_SZ - 1u];
                                               /* alias for idx[0..14]       */
-            u32 reserved;                     /* MRSW reserved @ idx[15]    */
+            union {
+                u32         reserved;         /* MRSW reserved @ idx[15]    */
+                _Atomic u32 wlock;            /* MRMW writer lock @ idx[15] */
+            };
         };
     };
 } __attribute__((aligned(RIX_CACHE_LINE_SIZE)));

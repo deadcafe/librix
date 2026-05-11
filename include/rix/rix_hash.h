@@ -18,7 +18,7 @@
  *   rix_hash_keyonly.h  - key-only variant (no auxiliary fields in node)
  *   rix_hash_u32.h     - u32 key stored directly in bucket
  *   rix_hash_u64.h     - u64 key stored directly in bucket
- *   rix_hash_mrsw.h    - multi-reader/single-writer generator family
+ *   rix_hash_mr.h      - multi-reader generator families (MRSW/MRMW)
  *
  * The variants provide staged-find helpers
  * (hash_key -> scan_bk -> prefetch_node -> cmp_key) where applicable.
@@ -37,7 +37,7 @@
 #  include "rix_hash_keyonly.h"
 #  include "rix_hash_u32.h"
 #  include "rix_hash_u64.h"
-#  include "rix_hash_mrsw.h"
+#  include "rix_hash_mr.h"
 
 /*===========================================================================
  * Convenience macro API

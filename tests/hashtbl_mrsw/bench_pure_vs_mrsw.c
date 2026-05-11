@@ -1,7 +1,8 @@
 /* bench_pure_vs_mrsw.c
- *  Compare pure cuckoo hash variants against their MRSW counterparts under
- *  identical single-threaded workloads.  This isolates the per-bucket ctrl
- *  protocol overhead rather than contention.
+ *  Compare pure cuckoo hash variants against their MRSW counterparts and,
+ *  for the currently implemented fp/slot/keyonly family, MRMW counterparts
+ *  under identical single-threaded workloads.  This isolates the per-bucket
+ *  ctrl protocol and MRMW writer-lock overhead rather than contention.
  *
  *  Usage:
  *    ./bench_pure_vs_mrsw [table_n [repeat [rand_keys]]]
@@ -17,7 +18,7 @@
 #include <sys/mman.h>
 
 #include "rix/rix_hash.h"
-#include "rix/rix_hash_mrsw.h"
+#include "rix/rix_hash_mr.h"
 #include "rix/rix_hash_slot_extra.h"
 
 #define BENCH_N 256u
@@ -107,6 +108,32 @@ struct n_mrsw_keyonly {
 };
 RIX_HASH_MRSW_HEAD(ht_mrsw_keyonly);
 RIX_HASH_MRSW_GENERATE_KEYONLY(ht_mrsw_keyonly, n_mrsw_keyonly, key,
+                               mykey_cmp)
+
+struct n_mrmw_fp {
+    u32 cur_hash;
+    u32 pad;
+    struct mykey key;
+};
+RIX_HASH_MRMW_HEAD(ht_mrmw_fp);
+RIX_HASH_MRMW_GENERATE(ht_mrmw_fp, n_mrmw_fp, key, cur_hash, mykey_cmp)
+
+struct n_mrmw_slot {
+    u32 cur_hash;
+    u16 slot;
+    u16 pad;
+    struct mykey key;
+};
+RIX_HASH_MRMW_HEAD(ht_mrmw_slot);
+RIX_HASH_MRMW_GENERATE_SLOT(ht_mrmw_slot, n_mrmw_slot, key, cur_hash, slot,
+                            mykey_cmp)
+
+struct n_mrmw_keyonly {
+    struct mykey key;
+    u32          value;
+};
+RIX_HASH_MRMW_HEAD(ht_mrmw_keyonly);
+RIX_HASH_MRMW_GENERATE_KEYONLY(ht_mrmw_keyonly, n_mrmw_keyonly, key,
                                mykey_cmp)
 
 struct n_mrsw_extra {
@@ -695,6 +722,31 @@ DEFINE_MRSW_PTR_BENCH("MRSW KEYONLY", ht_mrsw_keyonly,
                       ht_mrsw_keyonly_remove(&head, bk, nodes, &nodes[i]),
                       RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
+DEFINE_MRSW_PTR_BENCH("MRMW FP", ht_mrmw_fp, struct n_mrmw_fp,
+                      struct rix_hash_mrsw_find_ctx_s,
+                      struct rix_hash_bucket_s,
+                      ht_mrmw_fp_init(&head, bk, nb_bk),
+                      if (ht_mrmw_fp_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
+                      ht_mrmw_fp_remove(&head, bk, nodes, &nodes[i]),
+                      RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
+
+DEFINE_MRSW_PTR_BENCH("MRMW SLOT", ht_mrmw_slot, struct n_mrmw_slot,
+                      struct rix_hash_mrsw_find_ctx_s,
+                      struct rix_hash_bucket_s,
+                      ht_mrmw_slot_init(&head, bk, nb_bk),
+                      if (ht_mrmw_slot_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
+                      ht_mrmw_slot_remove(&head, bk, nodes, &nodes[i]),
+                      RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
+
+DEFINE_MRSW_PTR_BENCH("MRMW KEYONLY", ht_mrmw_keyonly,
+                      struct n_mrmw_keyonly,
+                      struct rix_hash_mrsw_find_ctx_s,
+                      struct rix_hash_bucket_s,
+                      ht_mrmw_keyonly_init(&head, bk, nb_bk),
+                      if (ht_mrmw_keyonly_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
+                      ht_mrmw_keyonly_remove(&head, bk, nodes, &nodes[i]),
+                      RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
+
 DEFINE_MRSW_PTR_BENCH("MRSW SLOT_EXTRA", ht_mrsw_extra, struct n_mrsw_extra,
                       struct rix_hash_mrsw_extra_find_ctx_s,
                       struct rix_hash_bucket_extra_s,
@@ -738,10 +790,13 @@ main(int argc, char **argv)
 
     bench_ht_pure_fp();
     bench_ht_mrsw_fp();
+    bench_ht_mrmw_fp();
     bench_ht_pure_slot();
     bench_ht_mrsw_slot();
+    bench_ht_mrmw_slot();
     bench_ht_pure_keyonly();
     bench_ht_mrsw_keyonly();
+    bench_ht_mrmw_keyonly();
     bench_ht_pure_u32();
     bench_ht_mrsw_u32();
     bench_ht_pure_u64();

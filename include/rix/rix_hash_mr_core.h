@@ -6,14 +6,14 @@
  */
 
 /*
- * rix_hash_mrsw_core.h - MRSW hash table core protocol.
+ * rix_hash_mr_core.h - multi-reader hash table core protocol.
  *
  * This is an independent hash-table variant.  It reuses the normal bucket
  * layouts through ctrl/reserved aliases: MRSW readers only use slots 0..14
  * and reserve physical slot 15 for a packed seq/valid control word that lets
  * readers reject observations that overlap a writer touching that bucket.
  *
- * Concurrency contract:
+ * MRSW concurrency contract:
  *   - any number of reader threads may call find / staged find concurrently.
  *   - exactly one writer thread may call insert / remove / remove_at.
  *   - node keys are immutable while the node is published.
@@ -62,16 +62,17 @@
  *     a miss is accepted only after both searched ctrl words are verified
  *     unchanged.  This gives strong no-false-negative behavior for misses
  *     without putting the hit path through a second ctrl load.
- *   - ctrl is the only ordered atomic object in the bucket.  hash[]/idx[] are
- *     ordinary payload words so the hot hash scan can use the same SIMD
- *     find_u32x16 dispatch as the normal hash table.  Miss-side ctrl verify
- *     discards overlapped payload observations that could otherwise become a
- *     false negative.
+ *   - ctrl is the only ordered atomic object observed by readers.  MRMW adds
+ *     a writer-only bucket lock in the reserved word, but readers never load
+ *     it.  hash[]/idx[] are ordinary payload words so the hot hash scan can
+ *     use the same SIMD find_u32x16 dispatch as the normal hash table.
+ *     Miss-side ctrl verify discards overlapped payload observations that
+ *     could otherwise become a false negative.
  *
  * Bucket layout:
  *   MRSW keeps the classic 128 B / 2 cache-line bucket envelope by using
  *   slot 15 of the hash line for the packed seq/valid control word.  The
- *   spare u32 after idx[15] is reserved.
+ *   spare u32 after idx[15] is reserved; MRMW reuses it as a writer lock.
  *   Therefore each bucket has 15 usable entries.
  *
  * Hash scan vs. ctrl word at slot 15:
@@ -91,19 +92,20 @@
  *   extra cost (the SIMD compare is intrinsically 16-wide).
  */
 
-#ifndef _RIX_HASH_MRSW_CORE_H_
-#  define _RIX_HASH_MRSW_CORE_H_
+#ifndef _RIX_HASH_MR_CORE_H_
+#  define _RIX_HASH_MR_CORE_H_
 
 #  include "rix_hash_common.h"
 
 #  include <stdatomic.h>
 
 /*
- * MRSW reuses struct rix_hash_bucket_s defined in rix_hash_common.h.  The
- * unified bucket exposes ctrl/reserved through anonymous unions so MRSW can
- * access the control word atomically while pure FP/SLOT/keyonly variants
- * still see 16-slot hash[]/idx[] arrays.  MRSW restricts itself to slots
- * 0..14 (15 usable entries) so that hash[15]/idx[15] remain ctrl/reserved.
+ * Multi-reader variants reuse struct rix_hash_bucket_s defined in
+ * rix_hash_common.h.  The unified bucket exposes ctrl/reserved through
+ * anonymous unions so MRSW/MRMW can access the control word atomically while
+ * pure FP/SLOT/keyonly variants still see 16-slot hash[]/idx[] arrays.
+ * MRSW/MRMW restrict themselves to slots 0..14 (15 usable entries) so that
+ * hash[15]/idx[15] remain ctrl/reserved.
  */
 #  define RIX_HASH_MRSW_BUCKET_ENTRY_SZ (RIX_HASH_BUCKET_ENTRY_SZ - 1u)
 
@@ -145,6 +147,21 @@ rix_hash_mrsw_nb_bk_hint(unsigned max_entries)
         _Atomic unsigned rhh_nb;                                              \
     }
 
+#  define RIX_HASH_MRMW_HEAD(name)                                           \
+    struct name {                                                             \
+        unsigned         rhh_mask;                                            \
+        _Atomic unsigned rhh_nb;                                              \
+        _Atomic u32      rhh_kickout_lock;                                    \
+    }
+
+#  define RIX_HASH_MR_HEAD_INIT_MRSW(head)                                   \
+    do {                                                                      \
+        (void)(head);                                                         \
+    } while (0)
+
+#  define RIX_HASH_MR_HEAD_INIT_MRMW(head)                                   \
+    atomic_init(&(head)->rhh_kickout_lock, 0u)
+
 static RIX_FORCE_INLINE u32
 rix_hash_mrsw_ctrl_seq(u32 ctrl)
 {
@@ -170,6 +187,101 @@ rix_hash_mrsw_ctrl_next_seq(u32 ctrl)
     return (ctrl & ~RIX_HASH_MRSW_CTRL_SEQ_MASK) |
            ((ctrl + UINT32_C(1)) & RIX_HASH_MRSW_CTRL_SEQ_MASK);
 }
+
+static RIX_FORCE_INLINE void
+rix_hash_mr_pause(void)
+{
+#  if defined(__x86_64__) || defined(__i386__)
+    __asm__ __volatile__("pause" ::: "memory");
+#  else
+    atomic_signal_fence(memory_order_seq_cst);
+#  endif
+}
+
+#  define RIX_HASH_MRMW_LOCK_NEXT_INC UINT32_C(0x00010000)
+#  define RIX_HASH_MRMW_LOCK_OWNER_MASK UINT32_C(0x0000ffff)
+#  define RIX_HASH_MRMW_LOCK_NEXT_SHIFT 16u
+
+/* Per-bucket MRMW writer lock.  Readers never observe this word; it orders
+ * only writer-vs-writer access before the existing ctrl release/acquire
+ * publication protocol.  The ticket form gives bounded FIFO progress for a
+ * locked bucket and avoids random backoff in correctness-sensitive paths. */
+static RIX_FORCE_INLINE void
+rix_hash_mrmw_lock(_Atomic u32 *lock)
+{
+    u32 old = atomic_fetch_add_explicit(lock, RIX_HASH_MRMW_LOCK_NEXT_INC,
+                                        memory_order_acquire);
+    u32 ticket = old >> RIX_HASH_MRMW_LOCK_NEXT_SHIFT;
+
+    for (;;) {
+        u32 cur = atomic_load_explicit(lock, memory_order_acquire);
+        if ((cur & RIX_HASH_MRMW_LOCK_OWNER_MASK) == ticket)
+            return;
+        rix_hash_mr_pause();
+    }
+}
+
+static RIX_FORCE_INLINE void
+rix_hash_mrmw_unlock(_Atomic u32 *lock)
+{
+    atomic_fetch_add_explicit(lock, 1u, memory_order_release);
+}
+
+static RIX_FORCE_INLINE void
+rix_hash_mrmw_lock2(_Atomic u32 *a, _Atomic u32 *b)
+{
+    if (a == b) {
+        rix_hash_mrmw_lock(a);
+    } else if ((uintptr_t)a < (uintptr_t)b) {
+        rix_hash_mrmw_lock(a);
+        rix_hash_mrmw_lock(b);
+    } else {
+        rix_hash_mrmw_lock(b);
+        rix_hash_mrmw_lock(a);
+    }
+}
+
+static RIX_FORCE_INLINE void
+rix_hash_mrmw_unlock2(_Atomic u32 *a, _Atomic u32 *b)
+{
+    if (a == b) {
+        rix_hash_mrmw_unlock(a);
+    } else if ((uintptr_t)a < (uintptr_t)b) {
+        rix_hash_mrmw_unlock(b);
+        rix_hash_mrmw_unlock(a);
+    } else {
+        rix_hash_mrmw_unlock(a);
+        rix_hash_mrmw_unlock(b);
+    }
+}
+
+#  define RIX_HASH_MR_BK_LOCK_MRSW(bk)                                       \
+    do {                                                                      \
+        (void)(bk);                                                           \
+    } while (0)
+#  define RIX_HASH_MR_BK_UNLOCK_MRSW(bk)                                     \
+    do {                                                                      \
+        (void)(bk);                                                           \
+    } while (0)
+#  define RIX_HASH_MR_BK_LOCK2_MRSW(a, b)                                    \
+    do {                                                                      \
+        (void)(a);                                                            \
+        (void)(b);                                                            \
+    } while (0)
+#  define RIX_HASH_MR_BK_UNLOCK2_MRSW(a, b)                                  \
+    do {                                                                      \
+        (void)(a);                                                            \
+        (void)(b);                                                            \
+    } while (0)
+
+#  define RIX_HASH_MR_BK_LOCK_MRMW(bk)                                       \
+    rix_hash_mrmw_lock(&(bk)->wlock)
+#  define RIX_HASH_MR_BK_UNLOCK_MRMW(bk)                                     \
+    rix_hash_mrmw_unlock(&(bk)->wlock)
+#  define RIX_HASH_MR_BK_LOCK2_MRMW(a, b)                                    \
+    rix_hash_mrmw_lock2(&(a)->wlock, &(b)->wlock)
+#  define RIX_HASH_MR_BK_UNLOCK2_MRMW(a, b)                                  \
+    rix_hash_mrmw_unlock2(&(a)->wlock, &(b)->wlock)
 
 static RIX_FORCE_INLINE u32
 rix_hash_mrsw_bucket_valid_load(struct rix_hash_bucket_s *bk,
@@ -230,7 +342,7 @@ rix_hash_mrsw_buckets_init(struct rix_hash_bucket_s *buckets,
     for (unsigned b = 0u; b < nb_bk; b++) {
         struct rix_hash_bucket_s *bk = buckets + b;
         atomic_init(&bk->ctrl, 0u);
-        bk->reserved = 0u;
+        atomic_init(&bk->wlock, 0u);
         for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
             bk->hash[s] = 0u;
             bk->idx [s] = (u32)RIX_NIL;
@@ -337,8 +449,87 @@ name##_hptr(struct type *base, unsigned i) {                                  \
 #  define RIX_HASH_MRSW_CMP_KEY_N(name, ctx, n, base, results)               \
     name##_cmp_key_n(ctx, n, base, results)
 
+/* MRMW exposes the same reader/staged API shape as MRSW.  These aliases keep
+ * call sites from depending on MRSW names when the generated table uses
+ * bucket writer locks. */
+#  define RIX_HASH_MRMW_INIT(name, head, buckets, nb_bk)                     \
+    RIX_HASH_MRSW_INIT(name, head, buckets, nb_bk)
 
-#endif /* _RIX_HASH_MRSW_CORE_H_ */
+#  define RIX_HASH_MRMW_FIND(name, head, buckets, base, key)                 \
+    RIX_HASH_MRSW_FIND(name, head, buckets, base, key)
+
+#  define RIX_HASH_MRMW_INSERT(name, head, buckets, base, elm)               \
+    RIX_HASH_MRSW_INSERT(name, head, buckets, base, elm)
+
+#  define RIX_HASH_MRMW_REMOVE(name, head, buckets, base, elm)               \
+    RIX_HASH_MRSW_REMOVE(name, head, buckets, base, elm)
+
+#  define RIX_HASH_MRMW_REMOVE_AT(name, head, buckets, bk, slot)             \
+    RIX_HASH_MRSW_REMOVE_AT(name, head, buckets, bk, slot)
+
+#  define RIX_HASH_MRMW_WALK(name, head, buckets, base, cb, arg)             \
+    RIX_HASH_MRSW_WALK(name, head, buckets, base, cb, arg)
+
+#  define RIX_HASH_MRMW_HASH_KEY(name, ctx, head, buckets, key)              \
+    RIX_HASH_MRSW_HASH_KEY(name, ctx, head, buckets, key)
+
+#  define RIX_HASH_MRMW_HASH_KEY_MASKED(name, ctx, head, buckets, key,       \
+                                        hash_mask, bk_mask)                  \
+    RIX_HASH_MRSW_HASH_KEY_MASKED(name, ctx, head, buckets, key,             \
+                                  hash_mask, bk_mask)
+
+#  define RIX_HASH_MRMW_SCAN_BK(name, ctx, head, buckets)                    \
+    RIX_HASH_MRSW_SCAN_BK(name, ctx, head, buckets)
+
+#  define RIX_HASH_MRMW_PREFETCH_NODE(name, ctx, base)                       \
+    RIX_HASH_MRSW_PREFETCH_NODE(name, ctx, base)
+
+#  define RIX_HASH_MRMW_CMP_KEY(name, ctx, base)                             \
+    RIX_HASH_MRSW_CMP_KEY(name, ctx, base)
+
+#  define RIX_HASH_MRMW_HASH_KEY2(name, ctx, head, buckets, keys)            \
+    RIX_HASH_MRSW_HASH_KEY2(name, ctx, head, buckets, keys)
+
+#  define RIX_HASH_MRMW_SCAN_BK2(name, ctx, head, buckets)                   \
+    RIX_HASH_MRSW_SCAN_BK2(name, ctx, head, buckets)
+
+#  define RIX_HASH_MRMW_PREFETCH_NODE2(name, ctx, base)                      \
+    RIX_HASH_MRSW_PREFETCH_NODE2(name, ctx, base)
+
+#  define RIX_HASH_MRMW_CMP_KEY2(name, ctx, base, results)                   \
+    RIX_HASH_MRSW_CMP_KEY2(name, ctx, base, results)
+
+#  define RIX_HASH_MRMW_HASH_KEY4(name, ctx, head, buckets, keys)            \
+    RIX_HASH_MRSW_HASH_KEY4(name, ctx, head, buckets, keys)
+
+#  define RIX_HASH_MRMW_SCAN_BK4(name, ctx, head, buckets)                   \
+    RIX_HASH_MRSW_SCAN_BK4(name, ctx, head, buckets)
+
+#  define RIX_HASH_MRMW_PREFETCH_NODE4(name, ctx, base)                      \
+    RIX_HASH_MRSW_PREFETCH_NODE4(name, ctx, base)
+
+#  define RIX_HASH_MRMW_CMP_KEY4(name, ctx, base, results)                   \
+    RIX_HASH_MRSW_CMP_KEY4(name, ctx, base, results)
+
+#  define RIX_HASH_MRMW_HASH_KEY_N(name, ctx, n, head, buckets, keys)        \
+    RIX_HASH_MRSW_HASH_KEY_N(name, ctx, n, head, buckets, keys)
+
+#  define RIX_HASH_MRMW_HASH_KEY_N_MASKED(name, ctx, n, head, buckets, keys, \
+                                          hash_mask, bk_mask)                \
+    RIX_HASH_MRSW_HASH_KEY_N_MASKED(name, ctx, n, head, buckets, keys,       \
+                                    hash_mask, bk_mask)
+
+#  define RIX_HASH_MRMW_SCAN_BK_N(name, ctx, n, head, buckets)               \
+    RIX_HASH_MRSW_SCAN_BK_N(name, ctx, n, head, buckets)
+
+#  define RIX_HASH_MRMW_PREFETCH_NODE_N(name, ctx, n, base)                  \
+    RIX_HASH_MRSW_PREFETCH_NODE_N(name, ctx, n, base)
+
+#  define RIX_HASH_MRMW_CMP_KEY_N(name, ctx, n, base, results)               \
+    RIX_HASH_MRSW_CMP_KEY_N(name, ctx, n, base, results)
+
+
+#endif /* _RIX_HASH_MR_CORE_H_ */
 
 /*
  * Local Variables:

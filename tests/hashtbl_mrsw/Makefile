@@ -21,10 +21,10 @@ BENCH_SRC    = bench_pure_vs_mrsw.c
 .PHONY: all clean test bench avx512
 all: $(TEST_TARGET) $(BENCH_TARGET)
 
-$(TEST_TARGET): $(TEST_SRC) ../../include/rix/rix_hash_mrsw.h
+$(TEST_TARGET): $(TEST_SRC) ../../include/rix/rix_hash_mr.h
 	$(CC) $(CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(TEST_SRC)
 
-$(BENCH_TARGET): $(BENCH_SRC) ../../include/rix/rix_hash_mrsw.h ../../include/rix/rix_hash.h
+$(BENCH_TARGET): $(BENCH_SRC) ../../include/rix/rix_hash_mr.h ../../include/rix/rix_hash.h
 	$(CC) $(BENCH_CFLAGS) $(DEPFLAGS) -MF $@.d -MT $@ -o $@ $(BENCH_SRC)
 
 test: $(TEST_TARGET)

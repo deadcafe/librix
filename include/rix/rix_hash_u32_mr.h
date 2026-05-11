@@ -5,10 +5,10 @@
  * All rights reserved.
  */
 
-#ifndef _RIX_HASH_U32_MRSW_H_
-#  define _RIX_HASH_U32_MRSW_H_
+#ifndef _RIX_HASH_U32_MR_H_
+#  define _RIX_HASH_U32_MR_H_
 
-#  include "rix_hash_mrsw_core.h"
+#  include "rix_hash_mr_core.h"
 
 /* MRSW U32 stores u32 keys directly in bk->hash[]; valid bits in the
  * shared ctrl word decide which slots are visible to readers. */
@@ -494,7 +494,7 @@ name##_remove(struct name *head, struct rix_hash_bucket_s *buckets,           \
 }
 
 
-#endif /* _RIX_HASH_U32_MRSW_H_ */
+#endif /* _RIX_HASH_U32_MR_H_ */
 
 /*
  * Local Variables:

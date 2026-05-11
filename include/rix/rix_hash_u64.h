@@ -90,7 +90,8 @@
  *   CL2      idx[0..15] : 16 x u32 =  64 B  (node indices, 1-origin)
  *
  * For MRSW the 16th u64 slot of key[] aliases an _Atomic u32 ctrl followed
- * by 4 spare bytes, and the 16th u32 slot of idx[] aliases a u32 reserved.
+ * by 4 spare bytes, and the 16th u32 slot of idx[] aliases a u32 reserved
+ * or an atomic writer lock for multi-writer variants.
  * MRSW thus offers 15 usable entries while pure U64 keeps the full 16.
  *
  * Allocators must honour the 64-byte alignment (static __attribute__((aligned
@@ -111,7 +112,10 @@ struct rix_hash64_bucket_s {
         u32 idx[RIX_HASH_U64_BUCKET_ENTRY_SZ];
         struct {
             u32 _idx_lo[RIX_HASH_U64_BUCKET_ENTRY_SZ - 1];
-            u32 reserved;                      /* MRSW: byte 188..191   */
+            union {
+                u32         reserved;          /* MRSW: byte 188..191   */
+                _Atomic u32 wlock;             /* MRMW writer lock      */
+            };
         };
     };
 } __attribute__((aligned(RIX_CACHE_LINE_SIZE)));
