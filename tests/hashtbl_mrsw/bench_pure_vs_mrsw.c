@@ -1,6 +1,6 @@
 /* bench_pure_vs_mrsw.c
  *  Compare pure cuckoo hash variants against their MRSW counterparts and,
- *  for the currently implemented fp/slot/keyonly family, MRMW counterparts
+ *  for the currently implemented fp/slot/keyonly/u32 family, MRMW counterparts
  *  under identical single-threaded workloads.  This isolates the per-bucket
  *  ctrl protocol and MRMW writer-lock overhead rather than contention.
  *
@@ -152,6 +152,13 @@ struct n_mrsw_u32 {
 };
 RIX_HASH_MRSW_HEAD(ht_mrsw_u32);
 RIX_HASH_MRSW_GENERATE_U32(ht_mrsw_u32, struct n_mrsw_u32, key)
+
+struct n_mrmw_u32 {
+    u32 key;
+    u32 value;
+};
+RIX_HASH_MRMW_HEAD(ht_mrmw_u32);
+RIX_HASH_MRMW_GENERATE_U32(ht_mrmw_u32, struct n_mrmw_u32, key)
 
 struct n_mrsw_u64 {
     u64 key;
@@ -763,6 +770,14 @@ DEFINE_U32_BENCH("MRSW U32", ht_mrsw_u32, struct n_mrsw_u32,
                  ht_mrsw_u32_remove(&head, bk, nodes, &nodes[i]),
                  rix_hash_mrsw_nb_bk_hint, RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
+DEFINE_U32_BENCH("MRMW U32", ht_mrmw_u32, struct n_mrmw_u32,
+                 struct rix_hash_mrsw_u32_find_ctx_s,
+                 struct rix_hash_bucket_s,
+                 ht_mrmw_u32_init(&head, bk, nb_bk),
+                 if (ht_mrmw_u32_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
+                 ht_mrmw_u32_remove(&head, bk, nodes, &nodes[i]),
+                 rix_hash_mrsw_nb_bk_hint, RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
+
 DEFINE_U64_BENCH("MRSW U64", ht_mrsw_u64, struct n_mrsw_u64,
                  struct rix_hash_mrsw_u64_find_ctx_s,
                  struct rix_hash64_bucket_s,
@@ -799,6 +814,7 @@ main(int argc, char **argv)
     bench_ht_mrmw_keyonly();
     bench_ht_pure_u32();
     bench_ht_mrsw_u32();
+    bench_ht_mrmw_u32();
     bench_ht_pure_u64();
     bench_ht_mrsw_u64();
     bench_ht_pure_extra();

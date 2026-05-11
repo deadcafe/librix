@@ -131,6 +131,9 @@ struct myu32_node {
 RIX_HASH_MRSW_HEAD(myu32_mrsw);
 RIX_HASH_MRSW_GENERATE_U32(myu32_mrsw, struct myu32_node, key)
 
+RIX_HASH_MRMW_HEAD(myu32_mrmw);
+RIX_HASH_MRMW_GENERATE_U32(myu32_mrmw, struct myu32_node, key)
+
 /* U64 variant test fixture. */
 struct myu64_node {
     u64 key;
@@ -2018,6 +2021,10 @@ static struct mykeyonly_node g_mrmw_ko[MRMW_N];
 static struct rix_hash_bucket_s g_mrmw_ko_bk[MRMW_NB_BK]
     __attribute__((aligned(64)));
 static struct mykeyonly_mrmw g_mrmw_ko_head;
+static struct myu32_node g_mrmw_u32[MRMW_N];
+static struct rix_hash_bucket_s g_mrmw_u32_bk[MRMW_NB_BK]
+    __attribute__((aligned(64)));
+static struct myu32_mrmw g_mrmw_u32_head;
 static _Atomic int g_mrmw_start;
 static _Atomic int g_mrmw_stop;
 static _Atomic int g_mrmw_fail;
@@ -2055,6 +2062,17 @@ mrmw_ko_init(void)
         g_mrmw_ko[i].key.hi = UINT64_C(0xABC2000000000000) | (u64)i;
         g_mrmw_ko[i].key.lo = UINT64_C(0x1236000000000000) ^ (u64)(i * 23u);
         g_mrmw_ko[i].value = i;
+    }
+}
+
+static void
+mrmw_u32_init(void)
+{
+    memset(g_mrmw_u32, 0, sizeof(g_mrmw_u32));
+    myu32_mrmw_init(&g_mrmw_u32_head, g_mrmw_u32_bk, MRMW_NB_BK);
+    for (unsigned i = 0u; i < MRMW_N; i++) {
+        g_mrmw_u32[i].key = i + 1u;
+        g_mrmw_u32[i].value = i + 3000u;
     }
 }
 
@@ -2279,6 +2297,49 @@ test_mrmw_keyonly_insert_find_remove(void)
     }
 }
 
+static void
+test_mrmw_u32_insert_find_remove(void)
+{
+    printf("[T] mrmw u32 insert/find/remove\n");
+    mrmw_u32_init();
+
+    for (unsigned i = 0u; i < 64u; i++) {
+        if (myu32_mrmw_insert(&g_mrmw_u32_head, g_mrmw_u32_bk,
+                              g_mrmw_u32, &g_mrmw_u32[i]) != NULL)
+            FAILF("mrmw u32 insert[%u] failed", i);
+    }
+    if (myu32_mrmw_insert(&g_mrmw_u32_head, g_mrmw_u32_bk,
+                          g_mrmw_u32, &g_mrmw_u32[7]) != &g_mrmw_u32[7])
+        FAIL("mrmw u32 duplicate did not return existing");
+
+    struct rix_hash_mrsw_u32_find_ctx_s ctx[4];
+    u32 keys[4] = {
+        g_mrmw_u32[1].key, g_mrmw_u32[3].key, 999999u, g_mrmw_u32[7].key
+    };
+    struct myu32_node *res[4];
+    RIX_HASH_MRMW_HASH_KEY_N(myu32_mrmw, ctx, 4u, &g_mrmw_u32_head,
+                             g_mrmw_u32_bk, keys);
+    RIX_HASH_MRMW_SCAN_BK_N(myu32_mrmw, ctx, 4u, &g_mrmw_u32_head,
+                            g_mrmw_u32_bk);
+    RIX_HASH_MRMW_PREFETCH_NODE_N(myu32_mrmw, ctx, 4u, g_mrmw_u32);
+    RIX_HASH_MRMW_CMP_KEY_N(myu32_mrmw, ctx, 4u, g_mrmw_u32, res);
+    if (res[0] != &g_mrmw_u32[1] || res[1] != &g_mrmw_u32[3] ||
+        res[2] != NULL || res[3] != &g_mrmw_u32[7])
+        FAIL("mrmw u32 staged result mismatch");
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_common(g_mrmw_u32_bk, g_mrmw_u32_head.rhh_mask, 8u,
+                           &bk, &slot))
+        FAIL("mrmw u32 remove_at target not located");
+    if (RIX_HASH_MRMW_REMOVE_AT(myu32_mrmw, &g_mrmw_u32_head,
+                               g_mrmw_u32_bk, bk, slot) != 8u)
+        FAIL("mrmw u32 remove_at returned wrong idx");
+    if (myu32_mrmw_find(&g_mrmw_u32_head, g_mrmw_u32_bk,
+                        g_mrmw_u32, g_mrmw_u32[7].key) != NULL)
+        FAIL("mrmw u32 remove_at target still found");
+}
+
 #define MRMW_DUP_THREADS 8u
 
 static struct mynode g_mrmw_dup[MRMW_DUP_THREADS];
@@ -2449,6 +2510,7 @@ main(void)
     test_mrmw_staged_api();
     test_mrmw_slot_insert_find_remove();
     test_mrmw_keyonly_insert_find_remove();
+    test_mrmw_u32_insert_find_remove();
     test_mrmw_duplicate_race();
     test_mrmw_multi_writer_stress();
 
