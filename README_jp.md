@@ -561,7 +561,11 @@ writer の plain store と重なる可能性がありますが、その観測結
 (`RIX_NO_SANITIZE_THREAD`) を付与しているので、ThreadSanitizer ビルドでも
 これらの想定内の race は警告されません。
 
-MRSW header は pure variant に対応する generator family を持ちます:
+`rix_hash_mrsw.h` は全 MRSW variant の umbrella header です。variant だけを
+使う場合は fp/slot/keyonly 用の `rix_hash_fp_mrsw.h`、
+`rix_hash_u32_mrsw.h`、
+`rix_hash_u64_mrsw.h`、`rix_hash_slot_extra_mrsw.h` を直接 include できます。
+公開 generator family は pure variant に対応しています:
 fp 用 `RIX_HASH_MRSW_GENERATE*`、slot 追跡用
 `RIX_HASH_MRSW_GENERATE_SLOT*`、keyonly 用
 `RIX_HASH_MRSW_GENERATE_KEYONLY*`、整数 key 用

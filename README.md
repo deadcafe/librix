@@ -592,9 +592,13 @@ If you need to model the table under TSan, build the application against
 the MRSW headers without redefining `RIX_NO_SANITIZE_THREAD`; readers will
 remain race-clean as far as observable behavior is concerned.
 
-The MRSW header exposes generator families that mirror the pure variants:
-`RIX_HASH_MRSW_GENERATE*` for fp, `RIX_HASH_MRSW_GENERATE_SLOT*` for
-slot-tracking, `RIX_HASH_MRSW_GENERATE_KEYONLY*` for keyonly,
+`rix_hash_mrsw.h` is an umbrella header for all MRSW variants.  Variant-only
+users may include `rix_hash_fp_mrsw.h` for fp/slot/keyonly,
+`rix_hash_u32_mrsw.h`,
+`rix_hash_u64_mrsw.h`, or `rix_hash_slot_extra_mrsw.h` directly.  The exposed
+generator families mirror the pure variants: `RIX_HASH_MRSW_GENERATE*` for fp,
+`RIX_HASH_MRSW_GENERATE_SLOT*` for slot-tracking,
+`RIX_HASH_MRSW_GENERATE_KEYONLY*` for keyonly,
 `RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*` for integer-key
 buckets, and `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` for per-slot bucket metadata.
 All of them use the same ctrl seq/valid protocol.  The slot-tracking and
