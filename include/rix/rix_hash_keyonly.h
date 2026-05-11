@@ -53,16 +53,16 @@
                          int (*cb)(struct type *, void *),                    \
                          void *arg);
 
-#  define RIX_HASH_KEYONLY_PROTOTYPE_EX(name, type, key_field, cmp_fn, hash_fn) \
+#  define RIX_HASH_PROTOTYPE_KEYONLY_EX(name, type, key_field, cmp_fn, hash_fn) \
     RIX_HASH_KEYONLY_PROTOTYPE_INTERNAL(name, type, key_field, cmp_fn, )
 
-#  define RIX_HASH_KEYONLY_PROTOTYPE_STATIC_EX(name, type, key_field, cmp_fn, hash_fn) \
+#  define RIX_HASH_PROTOTYPE_KEYONLY_STATIC_EX(name, type, key_field, cmp_fn, hash_fn) \
     RIX_HASH_KEYONLY_PROTOTYPE_INTERNAL(name, type, key_field, cmp_fn, RIX_UNUSED static)
 
-#  define RIX_HASH_KEYONLY_PROTOTYPE(name, type, key_field, cmp_fn)           \
+#  define RIX_HASH_PROTOTYPE_KEYONLY(name, type, key_field, cmp_fn)           \
     RIX_HASH_KEYONLY_PROTOTYPE_INTERNAL(name, type, key_field, cmp_fn, )
 
-#  define RIX_HASH_KEYONLY_PROTOTYPE_STATIC(name, type, key_field, cmp_fn)    \
+#  define RIX_HASH_PROTOTYPE_KEYONLY_STATIC(name, type, key_field, cmp_fn)    \
     RIX_HASH_KEYONLY_PROTOTYPE_INTERNAL(name, type, key_field, cmp_fn, RIX_UNUSED static)
 
 #  define RIX_HASH_GENERATE_KEYONLY_EX(name, type, key_field, cmp_fn, hash_fn) \

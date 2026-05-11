@@ -79,7 +79,7 @@
 /*===========================================================================
  * Bucket entry count
  *===========================================================================*/
-#  define RIX_HASH64_BUCKET_ENTRY_SZ 16
+#  define RIX_HASH_U64_BUCKET_ENTRY_SZ 16
 
 /*===========================================================================
  * Bucket layout
@@ -91,8 +91,8 @@
  * idx[16] is exactly u32[16] - find_u32x16 scans it directly in remove.
  *===========================================================================*/
 struct rix_hash64_bucket_s {
-    u64 key[RIX_HASH64_BUCKET_ENTRY_SZ]; /* CL0+CL1: 64-bit keys        */
-    u32 idx[RIX_HASH64_BUCKET_ENTRY_SZ]; /* CL2: 1-origin node idx      */
+    u64 key[RIX_HASH_U64_BUCKET_ENTRY_SZ]; /* CL0+CL1: 64-bit keys        */
+    u32 idx[RIX_HASH_U64_BUCKET_ENTRY_SZ]; /* CL2: 1-origin node idx      */
 } __attribute__((aligned(RIX_CACHE_LINE_SIZE)));
 
 RIX_STATIC_ASSERT(sizeof(struct rix_hash64_bucket_s) == 192u,
@@ -106,7 +106,7 @@ RIX_STATIC_ASSERT(offsetof(struct rix_hash64_bucket_s, idx)
 /*===========================================================================
  * Head struct
  *===========================================================================*/
-#  define RIX_HASH64_HEAD(name)                                               \
+#  define RIX_HASH_U64_HEAD(name)                                               \
     struct name {                                                             \
         unsigned rhh_mask;                                                    \
         unsigned rhh_nb;                                                      \
@@ -127,10 +127,10 @@ RIX_STATIC_ASSERT(_Alignof(struct rix_hash64_find_ctx_s) == _Alignof(void *),
                   "rix_hash64_find_ctx_s must keep pointer alignment");
 
 /*===========================================================================
- * RIX_HASH64_GENERATE(name, type, key_field, invalid_key)
+ * RIX_HASH_U64_GENERATE(name, type, key_field, invalid_key)
  *
  *   name        - head struct tag AND generated-function prefix (must match
- *                 the tag given to RIX_HASH64_HEAD)
+ *                 the tag given to RIX_HASH_U64_HEAD)
  *   type        - element struct type
  *   key_field   - field name inside type; must be u64
  *   invalid_key - compile-time constant written to bk->key[] for empty/
@@ -195,16 +195,16 @@ RIX_STATIC_ASSERT(_Alignof(struct rix_hash64_find_ctx_s) == _Alignof(void *),
                          int (*cb)(type *, void *),                           \
                          void *arg);
 
-#  define RIX_HASH64_PROTOTYPE(name, type, key_field, invalid_key)            \
+#  define RIX_HASH_U64_PROTOTYPE(name, type, key_field, invalid_key)            \
     RIX_HASH64_PROTOTYPE_INTERNAL(name, type, key_field, invalid_key, )
 
-#  define RIX_HASH64_PROTOTYPE_STATIC(name, type, key_field, invalid_key)     \
+#  define RIX_HASH_U64_PROTOTYPE_STATIC(name, type, key_field, invalid_key)     \
     RIX_HASH64_PROTOTYPE_INTERNAL(name, type, key_field, invalid_key, RIX_UNUSED static)
 
-#  define RIX_HASH64_GENERATE(name, type, key_field, invalid_key)             \
+#  define RIX_HASH_U64_GENERATE(name, type, key_field, invalid_key)             \
     RIX_HASH64_GENERATE_INTERNAL(name, type, key_field, invalid_key, )
 
-#  define RIX_HASH64_GENERATE_STATIC(name, type, key_field, invalid_key)      \
+#  define RIX_HASH_U64_GENERATE_STATIC(name, type, key_field, invalid_key)      \
     RIX_HASH64_GENERATE_INTERNAL(name, type, key_field, invalid_key, RIX_UNUSED static)
 
 #  define RIX_HASH64_GENERATE_INTERNAL(name, type, key_field, invalid_key, attr) \
@@ -224,7 +224,7 @@ name##_init(struct name *head,                                                \
     head->rhh_nb   = 0u;                                                      \
     for (unsigned _b = 0u; _b < nb_bk; _b++) {                                \
         struct rix_hash64_bucket_s *_bk = buckets + _b;                       \
-        for (unsigned _s = 0u; _s < RIX_HASH64_BUCKET_ENTRY_SZ; _s++) {       \
+        for (unsigned _s = 0u; _s < RIX_HASH_U64_BUCKET_ENTRY_SZ; _s++) {       \
             _bk->key[_s] = (u64)(invalid_key);                                \
             _bk->idx[_s] = (u32)RIX_NIL;                                      \
         }                                                                     \
@@ -418,11 +418,11 @@ name##_kickout(struct rix_hash64_bucket_s *buckets,                           \
 {                                                                             \
     if (depth <= 0) return -1;                                                \
     struct rix_hash64_bucket_s *_bk = buckets + bk_idx;                       \
-    for (unsigned _s = 0; _s < RIX_HASH64_BUCKET_ENTRY_SZ; _s++) {            \
+    for (unsigned _s = 0; _s < RIX_HASH_U64_BUCKET_ENTRY_SZ; _s++) {            \
         if (name##_flipflop(buckets, mask, bk_idx, _s) >= 0)                  \
             return (int)_s;                                                   \
     }                                                                         \
-    for (unsigned _s = 0; _s < RIX_HASH64_BUCKET_ENTRY_SZ; _s++) {            \
+    for (unsigned _s = 0; _s < RIX_HASH_U64_BUCKET_ENTRY_SZ; _s++) {            \
         u64 _key = _bk->key[_s];                                              \
         unsigned _si  = _bk->idx[_s];                                         \
         if (_si == (unsigned)RIX_NIL) continue;                               \
@@ -559,7 +559,7 @@ name##_walk(struct name *head,                                                \
     unsigned _nb_bk = head->rhh_mask + 1u;                                    \
     for (unsigned _b = 0u; _b < _nb_bk; _b++) {                               \
         struct rix_hash64_bucket_s *_bk = buckets + _b;                       \
-        for (unsigned _s = 0u; _s < RIX_HASH64_BUCKET_ENTRY_SZ; _s++) {       \
+        for (unsigned _s = 0u; _s < RIX_HASH_U64_BUCKET_ENTRY_SZ; _s++) {       \
             unsigned _nidx = _bk->idx[_s];                                    \
             if (_nidx == (unsigned)RIX_NIL)                                   \
                 continue;                                                     \
@@ -576,102 +576,102 @@ name##_walk(struct name *head,                                                \
  * Convenience macro API
  *
  * Single-shot ops:
- *   RIX_HASH64_INIT        (name, head, buckets, nb_bk)
- *   RIX_HASH64_FIND        (name, head, buckets, base, key)
- *   RIX_HASH64_INSERT      (name, head, buckets, base, elm)
- *   RIX_HASH64_REMOVE      (name, head, buckets, base, elm)
- *   RIX_HASH64_WALK        (name, head, buckets, base, cb, arg)
+ *   RIX_HASH_U64_INIT        (name, head, buckets, nb_bk)
+ *   RIX_HASH_U64_FIND        (name, head, buckets, base, key)
+ *   RIX_HASH_U64_INSERT      (name, head, buckets, base, elm)
+ *   RIX_HASH_U64_REMOVE      (name, head, buckets, base, elm)
+ *   RIX_HASH_U64_WALK        (name, head, buckets, base, cb, arg)
  *
  * Staged find - x1:
- *   RIX_HASH64_HASH_KEY    (name, ctx, head, buckets, key)
- *   RIX_HASH64_SCAN_BK     (name, ctx, head, buckets)
- *   RIX_HASH64_PREFETCH_NODE(name, ctx, base)
- *   RIX_HASH64_CMP_KEY     (name, ctx, base)
+ *   RIX_HASH_U64_HASH_KEY    (name, ctx, head, buckets, key)
+ *   RIX_HASH_U64_SCAN_BK     (name, ctx, head, buckets)
+ *   RIX_HASH_U64_PREFETCH_NODE(name, ctx, base)
+ *   RIX_HASH_U64_CMP_KEY     (name, ctx, base)
  *
  * Staged find - x2 / x4:
- *   RIX_HASH64_HASH_KEY2   (name, ctx, head, buckets, keys)
- *   RIX_HASH64_SCAN_BK2    (name, ctx, head, buckets)
- *   RIX_HASH64_PREFETCH_NODE2(name, ctx, base)
- *   RIX_HASH64_CMP_KEY2    (name, ctx, base, results)
+ *   RIX_HASH_U64_HASH_KEY2   (name, ctx, head, buckets, keys)
+ *   RIX_HASH_U64_SCAN_BK2    (name, ctx, head, buckets)
+ *   RIX_HASH_U64_PREFETCH_NODE2(name, ctx, base)
+ *   RIX_HASH_U64_CMP_KEY2    (name, ctx, base, results)
  *
- *   RIX_HASH64_HASH_KEY4   (name, ctx, head, buckets, keys)
- *   RIX_HASH64_SCAN_BK4    (name, ctx, head, buckets)
- *   RIX_HASH64_PREFETCH_NODE4(name, ctx, base)
- *   RIX_HASH64_CMP_KEY4    (name, ctx, base, results)
+ *   RIX_HASH_U64_HASH_KEY4   (name, ctx, head, buckets, keys)
+ *   RIX_HASH_U64_SCAN_BK4    (name, ctx, head, buckets)
+ *   RIX_HASH_U64_PREFETCH_NODE4(name, ctx, base)
+ *   RIX_HASH_U64_CMP_KEY4    (name, ctx, base, results)
  *
  * Staged find - xN:
- *   RIX_HASH64_HASH_KEY_N  (name, ctx, n, head, buckets, keys)
- *   RIX_HASH64_SCAN_BK_N   (name, ctx, n, head, buckets)
- *   RIX_HASH64_PREFETCH_NODE_N(name, ctx, n, base)
- *   RIX_HASH64_CMP_KEY_N   (name, ctx, n, base, results)
+ *   RIX_HASH_U64_HASH_KEY_N  (name, ctx, n, head, buckets, keys)
+ *   RIX_HASH_U64_SCAN_BK_N   (name, ctx, n, head, buckets)
+ *   RIX_HASH_U64_PREFETCH_NODE_N(name, ctx, n, base)
+ *   RIX_HASH_U64_CMP_KEY_N   (name, ctx, n, base, results)
  *===========================================================================*/
 
 /* ---- single-shot ops ---------------------------------------------------- */
-#  define RIX_HASH64_INIT(name, head, buckets, nb_bk)                         \
+#  define RIX_HASH_U64_INIT(name, head, buckets, nb_bk)                         \
     name##_init(head, buckets, nb_bk)
 
-#  define RIX_HASH64_FIND(name, head, buckets, base, key)                     \
+#  define RIX_HASH_U64_FIND(name, head, buckets, base, key)                     \
     name##_find(head, buckets, base, key)
 
-#  define RIX_HASH64_INSERT(name, head, buckets, base, elm)                   \
+#  define RIX_HASH_U64_INSERT(name, head, buckets, base, elm)                   \
     name##_insert(head, buckets, base, elm)
 
-#  define RIX_HASH64_REMOVE(name, head, buckets, base, elm)                   \
+#  define RIX_HASH_U64_REMOVE(name, head, buckets, base, elm)                   \
     name##_remove(head, buckets, base, elm)
 
-#  define RIX_HASH64_WALK(name, head, buckets, base, cb, arg)                 \
+#  define RIX_HASH_U64_WALK(name, head, buckets, base, cb, arg)                 \
     name##_walk(head, buckets, base, cb, arg)
 
 /* ---- staged find - x1 --------------------------------------------------- */
-#  define RIX_HASH64_HASH_KEY(name, ctx, head, buckets, key)                  \
+#  define RIX_HASH_U64_HASH_KEY(name, ctx, head, buckets, key)                  \
     name##_hash_key(ctx, head, buckets, key)
 
-#  define RIX_HASH64_SCAN_BK(name, ctx, head, buckets)                        \
+#  define RIX_HASH_U64_SCAN_BK(name, ctx, head, buckets)                        \
     name##_scan_bk(ctx, head, buckets)
 
-#  define RIX_HASH64_PREFETCH_NODE(name, ctx, base)                           \
+#  define RIX_HASH_U64_PREFETCH_NODE(name, ctx, base)                           \
     name##_prefetch_node(ctx, base)
 
-#  define RIX_HASH64_CMP_KEY(name, ctx, base)                                 \
+#  define RIX_HASH_U64_CMP_KEY(name, ctx, base)                                 \
     name##_cmp_key(ctx, base)
 
 /* ---- staged find - x2 --------------------------------------------------- */
-#  define RIX_HASH64_HASH_KEY2(name, ctx, head, buckets, keys)                \
+#  define RIX_HASH_U64_HASH_KEY2(name, ctx, head, buckets, keys)                \
     name##_hash_key_n(ctx, 2, head, buckets, keys)
 
-#  define RIX_HASH64_SCAN_BK2(name, ctx, head, buckets)                       \
+#  define RIX_HASH_U64_SCAN_BK2(name, ctx, head, buckets)                       \
     name##_scan_bk_n(ctx, 2, head, buckets)
 
-#  define RIX_HASH64_PREFETCH_NODE2(name, ctx, base)                          \
+#  define RIX_HASH_U64_PREFETCH_NODE2(name, ctx, base)                          \
     name##_prefetch_node_n(ctx, 2, base)
 
-#  define RIX_HASH64_CMP_KEY2(name, ctx, base, results)                       \
+#  define RIX_HASH_U64_CMP_KEY2(name, ctx, base, results)                       \
     name##_cmp_key_n(ctx, 2, base, results)
 
 /* ---- staged find - x4 --------------------------------------------------- */
-#  define RIX_HASH64_HASH_KEY4(name, ctx, head, buckets, keys)                \
+#  define RIX_HASH_U64_HASH_KEY4(name, ctx, head, buckets, keys)                \
     name##_hash_key_n(ctx, 4, head, buckets, keys)
 
-#  define RIX_HASH64_SCAN_BK4(name, ctx, head, buckets)                       \
+#  define RIX_HASH_U64_SCAN_BK4(name, ctx, head, buckets)                       \
     name##_scan_bk_n(ctx, 4, head, buckets)
 
-#  define RIX_HASH64_PREFETCH_NODE4(name, ctx, base)                          \
+#  define RIX_HASH_U64_PREFETCH_NODE4(name, ctx, base)                          \
     name##_prefetch_node_n(ctx, 4, base)
 
-#  define RIX_HASH64_CMP_KEY4(name, ctx, base, results)                       \
+#  define RIX_HASH_U64_CMP_KEY4(name, ctx, base, results)                       \
     name##_cmp_key_n(ctx, 4, base, results)
 
 /* ---- staged find - xN --------------------------------------------------- */
-#  define RIX_HASH64_HASH_KEY_N(name, ctx, n, head, buckets, keys)            \
+#  define RIX_HASH_U64_HASH_KEY_N(name, ctx, n, head, buckets, keys)            \
     name##_hash_key_n(ctx, n, head, buckets, keys)
 
-#  define RIX_HASH64_SCAN_BK_N(name, ctx, n, head, buckets)                   \
+#  define RIX_HASH_U64_SCAN_BK_N(name, ctx, n, head, buckets)                   \
     name##_scan_bk_n(ctx, n, head, buckets)
 
-#  define RIX_HASH64_PREFETCH_NODE_N(name, ctx, n, base)                      \
+#  define RIX_HASH_U64_PREFETCH_NODE_N(name, ctx, n, base)                      \
     name##_prefetch_node_n(ctx, n, base)
 
-#  define RIX_HASH64_CMP_KEY_N(name, ctx, n, base, results)                   \
+#  define RIX_HASH_U64_CMP_KEY_N(name, ctx, n, base, results)                   \
     name##_cmp_key_n(ctx, n, base, results)
 
 #endif /* _RIX_HASH64_H_ */

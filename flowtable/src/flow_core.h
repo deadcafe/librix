@@ -34,7 +34,7 @@
  *   #define RIX_HASH_SLOT_DEFINE_INDEXERS(name, type) ...
  *
  *   // 5. Generate rix_hash_slot for flowX_entry
- *   RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flow4_ht, flow4_entry,
+ *   RIX_HASH_GENERATE_SLOT_STATIC_EX(fcore_flow4_ht, flow4_entry,
  *       key, cur_hash, slot, fcore_flow4_cmp, fcore_flow4_hash_fn)
  *
  *   // 6. Optional hit hook
@@ -207,7 +207,7 @@ fcore_record_member_ptr_nonnull(void *base,
  * hash_fn : hash function for this variant
  * cmp_fn  : compare function for this variant
  *
- * Prerequisite: RIX_HASH_GENERATE_STATIC_SLOT_EX must be expanded
+ * Prerequisite: RIX_HASH_GENERATE_SLOT_STATIC_EX must be expanded
  *               with name = <ht>, type = <p>_entry.
  *===========================================================================*/
 

@@ -474,8 +474,8 @@ struct pnode {
 };
 
 RIX_HASH_HEAD(pht);
-RIX_HASH_PROTOTYPE_STATIC_SLOT_EXTRA(pht, pnode, key, cur_hash, slot, ek_cmp)
-RIX_HASH_GENERATE_STATIC_SLOT_EXTRA(pht, pnode, key, cur_hash, slot, ek_cmp)
+RIX_HASH_PROTOTYPE_SLOT_EXTRA_STATIC(pht, pnode, key, cur_hash, slot, ek_cmp)
+RIX_HASH_GENERATE_SLOT_EXTRA_STATIC(pht, pnode, key, cur_hash, slot, ek_cmp)
 
 static void
 test_prototype_split(void)

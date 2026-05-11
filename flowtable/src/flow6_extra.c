@@ -91,7 +91,7 @@ name##_hptr(struct type *base, unsigned i)                                     \
     return fcore_flow6_extra_layout_entry_ptr_(ft, i);                         \
 }
 
-RIX_HASH_GENERATE_STATIC_SLOT_EXTRA_EX(fcore_flow6_extra_ht, flow6_extra_entry,
+RIX_HASH_GENERATE_SLOT_EXTRA_STATIC_EX(fcore_flow6_extra_ht, flow6_extra_entry,
     key, meta.cur_hash, meta.slot, ft_flow6_extra_cmp, ft_flow6_extra_hash_fn)
 
 #define FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, idx)                               \
@@ -171,7 +171,7 @@ name##_hptr(struct type *base, unsigned i)                                     \
     return ft_flow6_extra_layout_entry_ptr_(ft, i);                            \
 }
 
-RIX_HASH_GENERATE_STATIC_SLOT_EXTRA_EX(ft_flow6_extra_ht, flow6_extra_entry,
+RIX_HASH_GENERATE_SLOT_EXTRA_STATIC_EX(ft_flow6_extra_ht, flow6_extra_entry,
                                        key, meta.cur_hash, meta.slot,
                                        ft_flow6_extra_cmp,
                                        ft_flow6_extra_hash_fn)

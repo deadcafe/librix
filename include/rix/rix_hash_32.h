@@ -71,7 +71,7 @@ RIX_STATIC_ASSERT(offsetof(struct rix_hash32_bucket_s, idx)
 /*===========================================================================
  * Head struct
  *===========================================================================*/
-#  define RIX_HASH32_HEAD(name)                                               \
+#  define RIX_HASH_U32_HEAD(name)                                               \
     struct name {                                                             \
         unsigned rhh_mask;                                                    \
         unsigned rhh_nb;                                                      \
@@ -92,10 +92,10 @@ RIX_STATIC_ASSERT(_Alignof(struct rix_hash32_find_ctx_s) == _Alignof(void *),
                   "rix_hash32_find_ctx_s must keep pointer alignment");
 
 /*===========================================================================
- * RIX_HASH32_GENERATE(name, type, key_field, invalid_key)
+ * RIX_HASH_U32_GENERATE(name, type, key_field, invalid_key)
  *
  *   name        - head struct tag AND generated-function prefix (must match
- *                 the tag given to RIX_HASH32_HEAD)
+ *                 the tag given to RIX_HASH_U32_HEAD)
  *   type        - element struct type
  *   key_field   - field name inside type; must be u32
  *   invalid_key - compile-time constant written to bk->key[] for empty/
@@ -153,16 +153,16 @@ RIX_STATIC_ASSERT(_Alignof(struct rix_hash32_find_ctx_s) == _Alignof(void *),
                          int (*cb)(type *, void *),                           \
                          void *arg);
 
-#  define RIX_HASH32_PROTOTYPE(name, type, key_field, invalid_key)            \
+#  define RIX_HASH_U32_PROTOTYPE(name, type, key_field, invalid_key)            \
     RIX_HASH32_PROTOTYPE_INTERNAL(name, type, key_field, invalid_key, )
 
-#  define RIX_HASH32_PROTOTYPE_STATIC(name, type, key_field, invalid_key)     \
+#  define RIX_HASH_U32_PROTOTYPE_STATIC(name, type, key_field, invalid_key)     \
     RIX_HASH32_PROTOTYPE_INTERNAL(name, type, key_field, invalid_key, RIX_UNUSED static)
 
-#  define RIX_HASH32_GENERATE(name, type, key_field, invalid_key)             \
+#  define RIX_HASH_U32_GENERATE(name, type, key_field, invalid_key)             \
     RIX_HASH32_GENERATE_INTERNAL(name, type, key_field, invalid_key, )
 
-#  define RIX_HASH32_GENERATE_STATIC(name, type, key_field, invalid_key)      \
+#  define RIX_HASH_U32_GENERATE_STATIC(name, type, key_field, invalid_key)      \
     RIX_HASH32_GENERATE_INTERNAL(name, type, key_field, invalid_key, RIX_UNUSED static)
 
 #  define RIX_HASH32_GENERATE_INTERNAL(name, type, key_field, invalid_key, attr) \
@@ -545,105 +545,105 @@ name##_walk(struct name *head,                                                \
  *
  * Wraps the generated name##_xxx() functions with BSD queue-style macros
  * that embed the table-name prefix explicitly.  The name argument must
- * match the tag passed to RIX_HASH32_HEAD / RIX_HASH32_GENERATE.
+ * match the tag passed to RIX_HASH_U32_HEAD / RIX_HASH_U32_GENERATE.
  *
  * Single-shot ops:
- *   RIX_HASH32_INIT        (name, head, buckets, nb_bk)
- *   RIX_HASH32_FIND        (name, head, buckets, base, key)
- *   RIX_HASH32_INSERT      (name, head, buckets, base, elm)
- *   RIX_HASH32_REMOVE      (name, head, buckets, base, elm)
- *   RIX_HASH32_WALK        (name, head, buckets, base, cb, arg)
+ *   RIX_HASH_U32_INIT        (name, head, buckets, nb_bk)
+ *   RIX_HASH_U32_FIND        (name, head, buckets, base, key)
+ *   RIX_HASH_U32_INSERT      (name, head, buckets, base, elm)
+ *   RIX_HASH_U32_REMOVE      (name, head, buckets, base, elm)
+ *   RIX_HASH_U32_WALK        (name, head, buckets, base, cb, arg)
  *
  * Staged find - x1:
- *   RIX_HASH32_HASH_KEY    (name, ctx, head, buckets, key)
- *   RIX_HASH32_SCAN_BK     (name, ctx, head, buckets)
- *   RIX_HASH32_PREFETCH_NODE(name, ctx, base)
- *   RIX_HASH32_CMP_KEY     (name, ctx, base)
+ *   RIX_HASH_U32_HASH_KEY    (name, ctx, head, buckets, key)
+ *   RIX_HASH_U32_SCAN_BK     (name, ctx, head, buckets)
+ *   RIX_HASH_U32_PREFETCH_NODE(name, ctx, base)
+ *   RIX_HASH_U32_CMP_KEY     (name, ctx, base)
  *
  * Staged find - x2 / x4  (named shorthands; expand to _n internally):
- *   RIX_HASH32_HASH_KEY2   (name, ctx, head, buckets, keys)
- *   RIX_HASH32_SCAN_BK2    (name, ctx, head, buckets)
- *   RIX_HASH32_PREFETCH_NODE2(name, ctx, base)
- *   RIX_HASH32_CMP_KEY2    (name, ctx, base, results)
+ *   RIX_HASH_U32_HASH_KEY2   (name, ctx, head, buckets, keys)
+ *   RIX_HASH_U32_SCAN_BK2    (name, ctx, head, buckets)
+ *   RIX_HASH_U32_PREFETCH_NODE2(name, ctx, base)
+ *   RIX_HASH_U32_CMP_KEY2    (name, ctx, base, results)
  *
- *   RIX_HASH32_HASH_KEY4   (name, ctx, head, buckets, keys)
- *   RIX_HASH32_SCAN_BK4    (name, ctx, head, buckets)
- *   RIX_HASH32_PREFETCH_NODE4(name, ctx, base)
- *   RIX_HASH32_CMP_KEY4    (name, ctx, base, results)
+ *   RIX_HASH_U32_HASH_KEY4   (name, ctx, head, buckets, keys)
+ *   RIX_HASH_U32_SCAN_BK4    (name, ctx, head, buckets)
+ *   RIX_HASH_U32_PREFETCH_NODE4(name, ctx, base)
+ *   RIX_HASH_U32_CMP_KEY4    (name, ctx, base, results)
  *
  * Staged find - xN  (arbitrary n; FORCE_INLINE + constant n -> unrolled):
- *   RIX_HASH32_HASH_KEY_N  (name, ctx, n, head, buckets, keys)
- *   RIX_HASH32_SCAN_BK_N   (name, ctx, n, head, buckets)
- *   RIX_HASH32_PREFETCH_NODE_N(name, ctx, n, base)
- *   RIX_HASH32_CMP_KEY_N   (name, ctx, n, base, results)
+ *   RIX_HASH_U32_HASH_KEY_N  (name, ctx, n, head, buckets, keys)
+ *   RIX_HASH_U32_SCAN_BK_N   (name, ctx, n, head, buckets)
+ *   RIX_HASH_U32_PREFETCH_NODE_N(name, ctx, n, base)
+ *   RIX_HASH_U32_CMP_KEY_N   (name, ctx, n, base, results)
  *===========================================================================*/
 
 /* ---- single-shot ops ---------------------------------------------------- */
-#  define RIX_HASH32_INIT(name, head, buckets, nb_bk)                         \
+#  define RIX_HASH_U32_INIT(name, head, buckets, nb_bk)                         \
     name##_init(head, buckets, nb_bk)
 
-#  define RIX_HASH32_FIND(name, head, buckets, base, key)                     \
+#  define RIX_HASH_U32_FIND(name, head, buckets, base, key)                     \
     name##_find(head, buckets, base, key)
 
-#  define RIX_HASH32_INSERT(name, head, buckets, base, elm)                   \
+#  define RIX_HASH_U32_INSERT(name, head, buckets, base, elm)                   \
     name##_insert(head, buckets, base, elm)
 
-#  define RIX_HASH32_REMOVE(name, head, buckets, base, elm)                   \
+#  define RIX_HASH_U32_REMOVE(name, head, buckets, base, elm)                   \
     name##_remove(head, buckets, base, elm)
 
-#  define RIX_HASH32_WALK(name, head, buckets, base, cb, arg)                 \
+#  define RIX_HASH_U32_WALK(name, head, buckets, base, cb, arg)                 \
     name##_walk(head, buckets, base, cb, arg)
 
 /* ---- staged find - x1 --------------------------------------------------- */
-#  define RIX_HASH32_HASH_KEY(name, ctx, head, buckets, key)                  \
+#  define RIX_HASH_U32_HASH_KEY(name, ctx, head, buckets, key)                  \
     name##_hash_key(ctx, head, buckets, key)
 
-#  define RIX_HASH32_SCAN_BK(name, ctx, head, buckets)                        \
+#  define RIX_HASH_U32_SCAN_BK(name, ctx, head, buckets)                        \
     name##_scan_bk(ctx, head, buckets)
 
-#  define RIX_HASH32_PREFETCH_NODE(name, ctx, base)                           \
+#  define RIX_HASH_U32_PREFETCH_NODE(name, ctx, base)                           \
     name##_prefetch_node(ctx, base)
 
-#  define RIX_HASH32_CMP_KEY(name, ctx, base)                                 \
+#  define RIX_HASH_U32_CMP_KEY(name, ctx, base)                                 \
     name##_cmp_key(ctx, base)
 
 /* ---- staged find - x2 --------------------------------------------------- */
-#  define RIX_HASH32_HASH_KEY2(name, ctx, head, buckets, keys)                \
+#  define RIX_HASH_U32_HASH_KEY2(name, ctx, head, buckets, keys)                \
     name##_hash_key_n(ctx, 2, head, buckets, keys)
 
-#  define RIX_HASH32_SCAN_BK2(name, ctx, head, buckets)                       \
+#  define RIX_HASH_U32_SCAN_BK2(name, ctx, head, buckets)                       \
     name##_scan_bk_n(ctx, 2, head, buckets)
 
-#  define RIX_HASH32_PREFETCH_NODE2(name, ctx, base)                          \
+#  define RIX_HASH_U32_PREFETCH_NODE2(name, ctx, base)                          \
     name##_prefetch_node_n(ctx, 2, base)
 
-#  define RIX_HASH32_CMP_KEY2(name, ctx, base, results)                       \
+#  define RIX_HASH_U32_CMP_KEY2(name, ctx, base, results)                       \
     name##_cmp_key_n(ctx, 2, base, results)
 
 /* ---- staged find - x4 --------------------------------------------------- */
-#  define RIX_HASH32_HASH_KEY4(name, ctx, head, buckets, keys)                \
+#  define RIX_HASH_U32_HASH_KEY4(name, ctx, head, buckets, keys)                \
     name##_hash_key_n(ctx, 4, head, buckets, keys)
 
-#  define RIX_HASH32_SCAN_BK4(name, ctx, head, buckets)                       \
+#  define RIX_HASH_U32_SCAN_BK4(name, ctx, head, buckets)                       \
     name##_scan_bk_n(ctx, 4, head, buckets)
 
-#  define RIX_HASH32_PREFETCH_NODE4(name, ctx, base)                          \
+#  define RIX_HASH_U32_PREFETCH_NODE4(name, ctx, base)                          \
     name##_prefetch_node_n(ctx, 4, base)
 
-#  define RIX_HASH32_CMP_KEY4(name, ctx, base, results)                       \
+#  define RIX_HASH_U32_CMP_KEY4(name, ctx, base, results)                       \
     name##_cmp_key_n(ctx, 4, base, results)
 
 /* ---- staged find - xN (arbitrary n) ------------------------------------- */
-#  define RIX_HASH32_HASH_KEY_N(name, ctx, n, head, buckets, keys)            \
+#  define RIX_HASH_U32_HASH_KEY_N(name, ctx, n, head, buckets, keys)            \
     name##_hash_key_n(ctx, n, head, buckets, keys)
 
-#  define RIX_HASH32_SCAN_BK_N(name, ctx, n, head, buckets)                   \
+#  define RIX_HASH_U32_SCAN_BK_N(name, ctx, n, head, buckets)                   \
     name##_scan_bk_n(ctx, n, head, buckets)
 
-#  define RIX_HASH32_PREFETCH_NODE_N(name, ctx, n, base)                      \
+#  define RIX_HASH_U32_PREFETCH_NODE_N(name, ctx, n, base)                      \
     name##_prefetch_node_n(ctx, n, base)
 
-#  define RIX_HASH32_CMP_KEY_N(name, ctx, n, base, results)                   \
+#  define RIX_HASH_U32_CMP_KEY_N(name, ctx, n, base, results)                   \
     name##_cmp_key_n(ctx, n, base, results)
 
 #endif /* _RIX_HASH32_H_ */

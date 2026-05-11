@@ -74,7 +74,7 @@ name##_hptr(struct type *base, unsigned i)                                    \
     return fcore_flowu_layout_entry_ptr_(ft, i);                              \
 }
 
-RIX_HASH_GENERATE_STATIC_SLOT_EX(fcore_flowu_ht, flowu_entry,
+RIX_HASH_GENERATE_SLOT_STATIC_EX(fcore_flowu_ht, flowu_entry,
     key, meta.cur_hash, meta.slot, ft_flowu_cmp, ft_flowu_hash_fn)
 
 #define FCORE_LAYOUT_ENTRY_PTR(owner, idx) \
@@ -140,7 +140,7 @@ name##_hptr(struct type *base, unsigned i)                                    \
     return ft_flowu_layout_entry_ptr_(ft, i);                                 \
 }
 
-RIX_HASH_GENERATE_STATIC_SLOT_EX(ft_flowu_ht, flowu_entry, key,
+RIX_HASH_GENERATE_SLOT_STATIC_EX(ft_flowu_ht, flowu_entry, key,
                                  meta.cur_hash, meta.slot,
                                  ft_flowu_cmp, ft_flowu_hash_fn)
 

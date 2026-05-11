@@ -33,7 +33,7 @@
  *   // 4. Override RIX_HASH_SLOT_EXTRA_DEFINE_INDEXERS if needed
  *
  *   // 5. Generate rix_hash_slot_extra for flowX_extra_entry
- *   RIX_HASH_GENERATE_STATIC_SLOT_EXTRA_EX(fcore_flow4x_ht, flow4_extra_entry,
+ *   RIX_HASH_GENERATE_SLOT_EXTRA_STATIC_EX(fcore_flow4x_ht, flow4_extra_entry,
  *       key, meta.cur_hash, meta.slot, fcore_flow4x_cmp, fcore_flow4x_hash_fn)
  *
  *   // 6. Optional hit hook
@@ -219,7 +219,7 @@ fcore_extra_record_member_ptr_nonnull(void *base,
  * hash_fn : hash function for this variant
  * cmp_fn  : compare function for this variant
  *
- * Prerequisite: RIX_HASH_GENERATE_STATIC_SLOT_EXTRA_EX must be expanded
+ * Prerequisite: RIX_HASH_GENERATE_SLOT_EXTRA_STATIC_EX must be expanded
  *               with name = <ht>, type = <p>_entry.
  *===========================================================================*/
 

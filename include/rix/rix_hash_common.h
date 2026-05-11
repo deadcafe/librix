@@ -384,10 +384,10 @@ rix_hash_fp(const union rix_hash_hash_u h, unsigned mask,
 #  define RIX_HASH_PROTOTYPE_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn) \
     RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, )
 
-#  define RIX_HASH_PROTOTYPE_STATIC_SLOT_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
+#  define RIX_HASH_PROTOTYPE_SLOT_STATIC_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
     RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
-#  define RIX_HASH_PROTOTYPE_STATIC_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn) \
+#  define RIX_HASH_PROTOTYPE_SLOT_STATIC(name, type, key_field, hash_field, slot_field, cmp_fn) \
     RIX_HASH_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
 #  define RIX_HASH_DEFAULT_HASH_FN_NAME(name) name ## _default_hash

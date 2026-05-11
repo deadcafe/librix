@@ -158,21 +158,21 @@ name##_hptr(struct type *base, unsigned i)                                    \
 
 FT_MRSW_DEFINE_HASH(flow4, struct flow4_mrsw_entry,
                     ft_flow4_mrsw_cmp, ft_flow4_mrsw_hash_fn)
-RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flow4_mrsw_ht, flow4_mrsw_entry,
+RIX_HASH_MRSW_GENERATE_SLOT_STATIC_EX(ft_flow4_mrsw_ht, flow4_mrsw_entry,
                                        key, meta.cur_hash, meta.slot,
                                        ft_flow4_mrsw_cmp,
                                        ft_flow4_mrsw_hash_fn)
 
 FT_MRSW_DEFINE_HASH(flow6, struct flow6_mrsw_entry,
                     ft_flow6_mrsw_cmp, ft_flow6_mrsw_hash_fn)
-RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flow6_mrsw_ht, flow6_mrsw_entry,
+RIX_HASH_MRSW_GENERATE_SLOT_STATIC_EX(ft_flow6_mrsw_ht, flow6_mrsw_entry,
                                        key, meta.cur_hash, meta.slot,
                                        ft_flow6_mrsw_cmp,
                                        ft_flow6_mrsw_hash_fn)
 
 FT_MRSW_DEFINE_HASH(flowu, struct flowu_mrsw_entry,
                     ft_flowu_mrsw_cmp, ft_flowu_mrsw_hash_fn)
-RIX_HASH_MRSW_GENERATE_STATIC_SLOT_EX(ft_flowu_mrsw_ht, flowu_mrsw_entry,
+RIX_HASH_MRSW_GENERATE_SLOT_STATIC_EX(ft_flowu_mrsw_ht, flowu_mrsw_entry,
                                        key, meta.cur_hash, meta.slot,
                                        ft_flowu_mrsw_cmp,
                                        ft_flowu_mrsw_hash_fn)

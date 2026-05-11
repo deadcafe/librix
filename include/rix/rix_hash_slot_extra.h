@@ -302,10 +302,10 @@ rix_hash_slot_extra_touch_2bk(struct rix_hash_bucket_extra_s *bk0,
 #  define RIX_HASH_PROTOTYPE_SLOT_EXTRA(name, type, key_field, hash_field, slot_field, cmp_fn) \
     RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, )
 
-#  define RIX_HASH_PROTOTYPE_STATIC_SLOT_EXTRA_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
+#  define RIX_HASH_PROTOTYPE_SLOT_EXTRA_STATIC_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
     RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
-#  define RIX_HASH_PROTOTYPE_STATIC_SLOT_EXTRA(name, type, key_field, hash_field, slot_field, cmp_fn) \
+#  define RIX_HASH_PROTOTYPE_SLOT_EXTRA_STATIC(name, type, key_field, hash_field, slot_field, cmp_fn) \
     RIX_HASH_PROTOTYPE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field, cmp_fn, RIX_UNUSED static)
 
 /* ---- GENERATE wrappers ------------------------------------------------- */
@@ -314,7 +314,7 @@ rix_hash_slot_extra_touch_2bk(struct rix_hash_bucket_extra_s *bk0,
     RIX_HASH_GENERATE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field,  \
                                           slot_field, cmp_fn, hash_fn, )
 
-#  define RIX_HASH_GENERATE_STATIC_SLOT_EXTRA_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
+#  define RIX_HASH_GENERATE_SLOT_EXTRA_STATIC_EX(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn) \
     RIX_HASH_GENERATE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field,  \
                                           slot_field, cmp_fn, hash_fn,        \
                                           RIX_UNUSED static)
@@ -325,7 +325,7 @@ rix_hash_slot_extra_touch_2bk(struct rix_hash_bucket_extra_s *bk0,
                                           slot_field, cmp_fn,                 \
                                           RIX_HASH_DEFAULT_HASH_FN_NAME(name), )
 
-#  define RIX_HASH_GENERATE_STATIC_SLOT_EXTRA(name, type, key_field, hash_field, slot_field, cmp_fn) \
+#  define RIX_HASH_GENERATE_SLOT_EXTRA_STATIC(name, type, key_field, hash_field, slot_field, cmp_fn) \
     RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                    \
     RIX_HASH_GENERATE_SLOT_EXTRA_INTERNAL(name, type, key_field, hash_field,  \
                                           slot_field, cmp_fn,                 \
