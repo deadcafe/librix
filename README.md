@@ -505,7 +505,7 @@ The ordinary non-MRSW variants share:
 | keyonly | `rix_hash_keyonly.h` | fingerprint in bucket, full key in node | (none)                      | 128 B (2 CL) | Variable-length keys, smallest node |
 | hash32  | `rix_hash_u32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
 | hash64  | `rix_hash_u64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
-| mrsw/mrmw | `rix_hash_mr.h`    | fp/keyonly/u32/u64/slot_extra for MRSW; fp/slot/keyonly/u32 for initial MRMW | per-bucket `ctrl`; optional `hash_field`/`slot_field`; MRMW writer lock | 128 B or 192 B, 15 slots | Lockless readers with one or multiple writers |
+| mrsw/mrmw | `rix_hash_mr.h`    | fp/keyonly/u32/u64/slot_extra for MRSW; fp/slot/keyonly/u32/u64 for initial MRMW | per-bucket `ctrl`; optional `hash_field`/`slot_field`; MRMW writer lock | 128 B or 192 B, 15 slots | Lockless readers with one or multiple writers |
 
 All fp/slot/keyonly variants share the same bucket layout and staged-find pipeline.
 `rix_hash.h` is the umbrella header that includes the common variants,
@@ -608,9 +608,10 @@ generator families mirror the pure variants: `RIX_HASH_MRSW_GENERATE*` for fp,
 `RIX_HASH_MRSW_GENERATE_KEYONLY*` for keyonly,
 `RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*` for integer-key
 buckets, and `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` for per-slot bucket metadata.
-The fp/slot/keyonly/u32 headers also expose initial MRMW generators
+The fp/slot/keyonly/u32/u64 headers also expose initial MRMW generators
 (`RIX_HASH_MRMW_GENERATE*`, `RIX_HASH_MRMW_GENERATE_SLOT*`, and
-`RIX_HASH_MRMW_GENERATE_KEYONLY*`, `RIX_HASH_MRMW_GENERATE_U32*`) plus matching `RIX_HASH_MRMW_*` convenience
+`RIX_HASH_MRMW_GENERATE_KEYONLY*`, `RIX_HASH_MRMW_GENERATE_U32*`,
+`RIX_HASH_MRMW_GENERATE_U64*`) plus matching `RIX_HASH_MRMW_*` convenience
 macros for init/find/insert/remove/remove_at and staged lookup.  This initial
 MRMW implementation covers the no-kickout fast path where one of the two
 candidate buckets has an empty slot.  MRMW kickout is isolated behind an

@@ -482,7 +482,7 @@ RIX_RB_FOREACH_REVERSE(var, name, head, base)   /* 降順 */
 | keyonly | `rix_hash_keyonly.h` | フィンガープリント→バケット、フルキー→ノード | (なし)                      | 128 B (2 CL) | 可変長キー、最小ノード |
 | hash32  | `rix_hash_u32.h`       | `u32` キーをバケットに直接格納          | (なし)                      | 128 B (2 CL) | 32 ビット整数キー |
 | hash64  | `rix_hash_u64.h`       | `u64` キーをバケットに直接格納          | (なし)                      | 192 B (3 CL) | 64 ビット整数キー |
-| mrsw/mrmw | `rix_hash_mr.h`    | MRSW は fp/keyonly/u32/u64/slot_extra、初期 MRMW は fp/slot/keyonly/u32 | bucket ごとに `ctrl`; 必要に応じて `hash_field`/`slot_field`; MRMW writer lock | 128 B または 192 B、15 slots | lockless reader + single/multi writer |
+| mrsw/mrmw | `rix_hash_mr.h`    | MRSW は fp/keyonly/u32/u64/slot_extra、初期 MRMW は fp/slot/keyonly/u32/u64 | bucket ごとに `ctrl`; 必要に応じて `hash_field`/`slot_field`; MRMW writer lock | 128 B または 192 B、15 slots | lockless reader + single/multi writer |
 
 fp/slot/keyonly の 3 バリアントは同じバケットレイアウトと staged-find パイプラインを共有します。
 `rix_hash.h` は MRSW generator family を含む common variant をインクルードする傘ヘッダです。
@@ -578,9 +578,10 @@ fp 用 `RIX_HASH_MRSW_GENERATE*`、slot 追跡用
 `RIX_HASH_MRSW_GENERATE_KEYONLY*`、整数 key 用
 `RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*`、
 per-slot bucket metadata 用 `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` です。
-fp/slot/keyonly/u32 header は初期 MRMW generator
+fp/slot/keyonly/u32/u64 header は初期 MRMW generator
 (`RIX_HASH_MRMW_GENERATE*`、`RIX_HASH_MRMW_GENERATE_SLOT*`、
-`RIX_HASH_MRMW_GENERATE_KEYONLY*`、`RIX_HASH_MRMW_GENERATE_U32*`) と、init/find/insert/remove/remove_at および
+`RIX_HASH_MRMW_GENERATE_KEYONLY*`、`RIX_HASH_MRMW_GENERATE_U32*`、
+`RIX_HASH_MRMW_GENERATE_U64*`) と、init/find/insert/remove/remove_at および
 staged lookup 用の `RIX_HASH_MRMW_*` convenience macro も提供します。今回の
 初期 MRMW 実装は、候補 2 bucket のいずれかに空き slot がある no-kickout fast
 path を対象にします。MRMW kickout は `insert_slow` に隔離しており、slow path

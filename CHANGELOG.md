@@ -26,7 +26,7 @@ single-writer control-plane updates and user-plane lookups.
   kickout/duplicate behavior, and reader/writer stress coverage.
 - Added a local `bench_pure_vs_mrsw` benchmark for pure-vs-MRSW hash primitive
   comparisons.
-- Added initial MRMW fp/slot/keyonly/u32 hash generators with the same reader
+- Added initial MRMW fp/slot/keyonly/u32/u64 hash generators with the same reader
   protocol as MRSW and per-bucket writer locks for no-kickout insert/remove
   fast paths.
 - Added MRMW convenience macros, MRMW unit/concurrency tests, and MRMW rows in

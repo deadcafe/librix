@@ -143,6 +143,9 @@ struct myu64_node {
 RIX_HASH_MRSW_HEAD(myu64_mrsw);
 RIX_HASH_MRSW_GENERATE_U64(myu64_mrsw, struct myu64_node, key)
 
+RIX_HASH_MRMW_HEAD(myu64_mrmw);
+RIX_HASH_MRMW_GENERATE_U64(myu64_mrmw, struct myu64_node, key)
+
 /* SLOT_EXTRA variant test fixture (mirrors slot, but with extra[] in bucket). */
 struct myextra_node {
     u32 cur_hash;
@@ -2025,6 +2028,10 @@ static struct myu32_node g_mrmw_u32[MRMW_N];
 static struct rix_hash_bucket_s g_mrmw_u32_bk[MRMW_NB_BK]
     __attribute__((aligned(64)));
 static struct myu32_mrmw g_mrmw_u32_head;
+static struct myu64_node g_mrmw_u64[MRMW_N];
+static struct rix_hash64_bucket_s g_mrmw_u64_bk[MRMW_NB_BK]
+    __attribute__((aligned(64)));
+static struct myu64_mrmw g_mrmw_u64_head;
 static _Atomic int g_mrmw_start;
 static _Atomic int g_mrmw_stop;
 static _Atomic int g_mrmw_fail;
@@ -2073,6 +2080,17 @@ mrmw_u32_init(void)
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw_u32[i].key = i + 1u;
         g_mrmw_u32[i].value = i + 3000u;
+    }
+}
+
+static void
+mrmw_u64_init(void)
+{
+    memset(g_mrmw_u64, 0, sizeof(g_mrmw_u64));
+    myu64_mrmw_init(&g_mrmw_u64_head, g_mrmw_u64_bk, MRMW_NB_BK);
+    for (unsigned i = 0u; i < MRMW_N; i++) {
+        g_mrmw_u64[i].key = UINT64_C(0xDADA000000000000) | (u64)(i + 1u);
+        g_mrmw_u64[i].value = i + 4000u;
     }
 }
 
@@ -2340,6 +2358,50 @@ test_mrmw_u32_insert_find_remove(void)
         FAIL("mrmw u32 remove_at target still found");
 }
 
+static void
+test_mrmw_u64_insert_find_remove(void)
+{
+    printf("[T] mrmw u64 insert/find/remove\n");
+    mrmw_u64_init();
+
+    for (unsigned i = 0u; i < 64u; i++) {
+        if (myu64_mrmw_insert(&g_mrmw_u64_head, g_mrmw_u64_bk,
+                              g_mrmw_u64, &g_mrmw_u64[i]) != NULL)
+            FAILF("mrmw u64 insert[%u] failed", i);
+    }
+    if (myu64_mrmw_insert(&g_mrmw_u64_head, g_mrmw_u64_bk,
+                          g_mrmw_u64, &g_mrmw_u64[7]) != &g_mrmw_u64[7])
+        FAIL("mrmw u64 duplicate did not return existing");
+
+    struct rix_hash_mrsw_u64_find_ctx_s ctx[4];
+    u64 keys[4] = {
+        g_mrmw_u64[1].key, g_mrmw_u64[3].key,
+        UINT64_C(0xFACE000000000000), g_mrmw_u64[7].key
+    };
+    struct myu64_node *res[4];
+    RIX_HASH_MRMW_HASH_KEY_N(myu64_mrmw, ctx, 4u, &g_mrmw_u64_head,
+                             g_mrmw_u64_bk, keys);
+    RIX_HASH_MRMW_SCAN_BK_N(myu64_mrmw, ctx, 4u, &g_mrmw_u64_head,
+                            g_mrmw_u64_bk);
+    RIX_HASH_MRMW_PREFETCH_NODE_N(myu64_mrmw, ctx, 4u, g_mrmw_u64);
+    RIX_HASH_MRMW_CMP_KEY_N(myu64_mrmw, ctx, 4u, g_mrmw_u64, res);
+    if (res[0] != &g_mrmw_u64[1] || res[1] != &g_mrmw_u64[3] ||
+        res[2] != NULL || res[3] != &g_mrmw_u64[7])
+        FAIL("mrmw u64 staged result mismatch");
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_u64(g_mrmw_u64_bk, g_mrmw_u64_head.rhh_mask, 8u,
+                        &bk, &slot))
+        FAIL("mrmw u64 remove_at target not located");
+    if (RIX_HASH_MRMW_REMOVE_AT(myu64_mrmw, &g_mrmw_u64_head,
+                               g_mrmw_u64_bk, bk, slot) != 8u)
+        FAIL("mrmw u64 remove_at returned wrong idx");
+    if (myu64_mrmw_find(&g_mrmw_u64_head, g_mrmw_u64_bk,
+                        g_mrmw_u64, g_mrmw_u64[7].key) != NULL)
+        FAIL("mrmw u64 remove_at target still found");
+}
+
 #define MRMW_DUP_THREADS 8u
 
 static struct mynode g_mrmw_dup[MRMW_DUP_THREADS];
@@ -2511,6 +2573,7 @@ main(void)
     test_mrmw_slot_insert_find_remove();
     test_mrmw_keyonly_insert_find_remove();
     test_mrmw_u32_insert_find_remove();
+    test_mrmw_u64_insert_find_remove();
     test_mrmw_duplicate_race();
     test_mrmw_multi_writer_stress();
 

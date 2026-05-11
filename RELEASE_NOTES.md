@@ -35,7 +35,7 @@ verify both candidate buckets before reporting absence.
 - document MRSW bucket fill guidance as Green <70%, Yellow 70..80%, Red >80%
 - add MRSW hash tests, MRSW flow tests, reader/writer stress tests, and a
   pure-vs-MRSW hash benchmark
-- add initial MRMW fp/slot/keyonly/u32 hash generators with MRSW-equivalent
+- add initial MRMW fp/slot/keyonly/u32/u64 hash generators with MRSW-equivalent
   lockless readers and per-bucket writer locks for no-kickout fast paths
 - add MRMW unit/concurrency tests and benchmark rows comparing MRSW and MRMW
 
