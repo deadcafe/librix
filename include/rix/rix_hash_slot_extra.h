@@ -21,9 +21,25 @@
 
 #  include "rix_hash_common.h"
 
+/* Bucket layout - unified for pure SLOT_EXTRA and MRSW SLOT_EXTRA variants.
+ * Pure variants use all 16 slots; MRSW reinterprets slot 15 of hash[]/idx[]
+ * as ctrl/reserved (same protocol as the other MRSW variants) and uses only
+ * 15 usable entries.  extra[15] is unused under MRSW. */
 struct rix_hash_bucket_extra_s {
-    u32 hash [RIX_HASH_BUCKET_ENTRY_SZ];
-    u32 idx  [RIX_HASH_BUCKET_ENTRY_SZ];
+    union {
+        u32 hash [RIX_HASH_BUCKET_ENTRY_SZ];
+        struct {
+            u32         _hash_lo[RIX_HASH_BUCKET_ENTRY_SZ - 1u];
+            _Atomic u32 ctrl;
+        };
+    };
+    union {
+        u32 idx  [RIX_HASH_BUCKET_ENTRY_SZ];
+        struct {
+            u32 _idx_lo[RIX_HASH_BUCKET_ENTRY_SZ - 1u];
+            u32 reserved;
+        };
+    };
     u32 extra[RIX_HASH_BUCKET_ENTRY_SZ];
 } __attribute__((aligned(RIX_CACHE_LINE_SIZE)));
 
@@ -38,6 +54,11 @@ RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_extra_s, idx)
 RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_extra_s, extra)
                   == (2u * RIX_CACHE_LINE_SIZE),
                   "rix_hash_bucket_extra_s.extra must start at cache line 2");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_extra_s, ctrl) == 60u,
+                  "rix_hash_bucket_extra_s.ctrl must alias hash[15]");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_extra_s, reserved)
+                  == RIX_CACHE_LINE_SIZE + 60u,
+                  "rix_hash_bucket_extra_s.reserved must alias idx[15]");
 
 struct rix_hash_find_ctx_extra_s {
     union rix_hash_hash_u            hash;

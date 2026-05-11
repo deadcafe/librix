@@ -130,6 +130,18 @@ struct myu64_node {
 RIX_HASH_MRSW_HEAD(myu64_mrsw);
 RIX_HASH_MRSW_GENERATE_U64(myu64_mrsw, struct myu64_node, key)
 
+/* SLOT_EXTRA variant test fixture (mirrors slot, but with extra[] in bucket). */
+struct myextra_node {
+    u32 cur_hash;
+    u8  slot;
+    u8  pad[3];
+    struct mykey key;
+};
+
+RIX_HASH_MRSW_HEAD(myextra_mrsw);
+RIX_HASH_MRSW_GENERATE_SLOT_EXTRA(myextra_mrsw, myextra_node, key, cur_hash,
+                                   slot, mykey_cmp)
+
 #define NB_BASIC    20u
 #define NB_BK_BASIC  4u
 
@@ -1771,6 +1783,214 @@ test_u64_stress(void)
         FAIL("u64 stress reader observed wrong node");
 }
 
+/* ---- SLOT_EXTRA variant tests --------------------------------------- */
+
+#define NB_EXTRA_BASIC    300u
+#define NB_BK_EXTRA_BASIC  32u
+
+static struct myextra_node g_xn[NB_EXTRA_BASIC];
+static struct rix_hash_bucket_extra_s g_xn_bk[NB_BK_EXTRA_BASIC]
+    __attribute__((aligned(64)));
+static struct myextra_mrsw g_xn_head;
+
+static int
+locate_idx_extra(struct rix_hash_bucket_extra_s *buckets, unsigned mask,
+                 u32 idx, unsigned *bk_out, unsigned *slot_out)
+{
+    for (unsigned b = 0u; b <= mask; b++) {
+        u32 ctrl = atomic_load_explicit(&buckets[b].ctrl,
+                                        memory_order_acquire);
+        u32 valid = rix_hash_mrsw_ctrl_valid(ctrl);
+        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
+            if ((valid & (UINT32_C(1) << s)) != 0u &&
+                buckets[b].idx[s] == idx) {
+                *bk_out = b;
+                *slot_out = s;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void
+xn_init(void)
+{
+    memset(g_xn, 0, sizeof(g_xn));
+    myextra_mrsw_init(&g_xn_head, g_xn_bk, NB_BK_EXTRA_BASIC);
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i++) {
+        g_xn[i].key.hi = (u64)(i + 1u);
+        g_xn[i].key.lo = UINT64_C(0xEEEE000000000000) ^ (u64)i;
+    }
+}
+
+static void
+test_extra_insert_find_remove(void)
+{
+    printf("[T] mrsw slot_extra insert/find/remove\n");
+    xn_init();
+
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i++) {
+        u32 extra = 0xAA00u + i;
+        struct myextra_node *r =
+            myextra_mrsw_insert(&g_xn_head, g_xn_bk, g_xn, &g_xn[i], extra);
+        if (r != NULL)
+            FAILF("extra insert[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i++) {
+        struct myextra_node *f = myextra_mrsw_find(&g_xn_head, g_xn_bk,
+                                                   g_xn, &g_xn[i].key);
+        if (f != &g_xn[i])
+            FAILF("extra find[%u] mismatch", i);
+        unsigned bk = (unsigned)(f->cur_hash & g_xn_head.rhh_mask);
+        unsigned slot = (unsigned)f->slot;
+        if (g_xn_bk[bk].extra[slot] != (u32)(0xAA00u + i))
+            FAILF("extra[%u] mismatch: bk=%u slot=%u got=0x%x",
+                  i, bk, slot, g_xn_bk[bk].extra[slot]);
+    }
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i += 3u) {
+        struct myextra_node *r = myextra_mrsw_remove(&g_xn_head, g_xn_bk,
+                                                     g_xn, &g_xn[i]);
+        if (r != &g_xn[i])
+            FAILF("extra remove[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i++) {
+        struct myextra_node *f = myextra_mrsw_find(&g_xn_head, g_xn_bk,
+                                                   g_xn, &g_xn[i].key);
+        if ((i % 3u) == 0u) {
+            if (f != NULL)
+                FAILF("extra removed[%u] still found", i);
+        } else if (f != &g_xn[i]) {
+            FAILF("extra remaining[%u] mismatch", i);
+        }
+    }
+}
+
+static void
+test_extra_kickout_carries_extra(void)
+{
+    printf("[T] mrsw slot_extra extra survives kickout\n");
+    xn_init();
+
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i++) {
+        u32 extra = 0xBEEF0000u | i;
+        if (myextra_mrsw_insert(&g_xn_head, g_xn_bk, g_xn, &g_xn[i], extra)
+            != NULL)
+            FAILF("extra kickout setup insert[%u] failed", i);
+    }
+    /* Every entry should still report its original extra value, even after
+     * any kickout reshuffles. */
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i++) {
+        unsigned bk = (unsigned)(g_xn[i].cur_hash & g_xn_head.rhh_mask);
+        unsigned slot = (unsigned)g_xn[i].slot;
+        u32 expected = 0xBEEF0000u | i;
+        if (g_xn_bk[bk].extra[slot] != expected)
+            FAILF("extra[%u] kickout-lost: bk=%u slot=%u got=0x%x exp=0x%x",
+                  i, bk, slot, g_xn_bk[bk].extra[slot], expected);
+    }
+}
+
+static void
+test_extra_staged_remove_at(void)
+{
+    printf("[T] mrsw slot_extra staged/remove_at API\n");
+    xn_init();
+
+    for (unsigned i = 0u; i < NB_EXTRA_BASIC; i++) {
+        if (myextra_mrsw_insert(&g_xn_head, g_xn_bk, g_xn, &g_xn[i],
+                                0xCC000000u | i) != NULL)
+            FAILF("extra staged setup insert[%u] failed", i);
+    }
+
+    struct rix_hash_mrsw_extra_find_ctx_s ctx[4];
+    struct mykey bad = { 999999u, UINT64_C(0xEEEEDEAD00000000) };
+    const struct mykey *keys[4] = {
+        &g_xn[1].key, &g_xn[7].key, &bad, &g_xn[13].key
+    };
+    struct myextra_node *res[4];
+    RIX_HASH_MRSW_HASH_KEY_N_MASKED(myextra_mrsw, ctx, 4u, &g_xn_head,
+                                    g_xn_bk, keys, g_xn_head.rhh_mask,
+                                    g_xn_head.rhh_mask);
+    RIX_HASH_MRSW_SCAN_BK_N(myextra_mrsw, ctx, 4u, &g_xn_head, g_xn_bk);
+    RIX_HASH_MRSW_PREFETCH_NODE_N(myextra_mrsw, ctx, 4u, g_xn);
+    RIX_HASH_MRSW_CMP_KEY_N(myextra_mrsw, ctx, 4u, g_xn, res);
+    if (res[0] != &g_xn[1] || res[1] != &g_xn[7] ||
+        res[2] != NULL || res[3] != &g_xn[13])
+        FAIL("extra staged N mismatch");
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_extra(g_xn_bk, g_xn_head.rhh_mask, 8u, &bk, &slot))
+        FAIL("extra remove_at target not located");
+    if (RIX_HASH_MRSW_REMOVE_AT(myextra_mrsw, &g_xn_head, g_xn_bk, bk, slot)
+        != 8u)
+        FAIL("extra remove_at returned wrong idx");
+    if (myextra_mrsw_find(&g_xn_head, g_xn_bk, g_xn, &g_xn[7].key) != NULL)
+        FAIL("extra remove_at target still found");
+}
+
+static _Atomic int g_xn_stop;
+static _Atomic int g_xn_fail;
+
+static void *
+xn_stress_reader(void *arg)
+{
+    uintptr_t tid = (uintptr_t)arg;
+    u32 x = (u32)(0x9e3779b9u ^ (tid * 2654435761u));
+    while (!atomic_load_explicit(&g_xn_stop, memory_order_acquire)) {
+        x = x * 1664525u + 1013904223u;
+        unsigned i = x % NB_EXTRA_BASIC;
+        struct myextra_node *f = myextra_mrsw_find(&g_xn_head, g_xn_bk,
+                                                   g_xn, &g_xn[i].key);
+        if (f != NULL && f != &g_xn[i]) {
+            atomic_store_explicit(&g_xn_fail, 1, memory_order_release);
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void
+test_extra_stress(void)
+{
+    printf("[T] mrsw slot_extra reader/writer stress\n");
+    xn_init();
+    for (unsigned i = 0u; i < 200u; i++) {
+        if (myextra_mrsw_insert(&g_xn_head, g_xn_bk, g_xn, &g_xn[i],
+                                0xCAFE0000u | i) != NULL)
+            FAILF("extra stress setup insert[%u] failed", i);
+    }
+    atomic_store_explicit(&g_xn_stop, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_xn_fail, 0, memory_order_relaxed);
+    enum { NR = 4 };
+    pthread_t readers[NR];
+    for (uintptr_t i = 0u; i < NR; i++)
+        if (pthread_create(&readers[i], NULL, xn_stress_reader,
+                           (void *)(i + 1u)) != 0)
+            FAIL("pthread_create extra reader failed");
+    for (unsigned iter = 0u; iter < 50000u; iter++) {
+        unsigned i = 200u + (iter % 64u);
+        struct myextra_node *r = myextra_mrsw_find(&g_xn_head, g_xn_bk,
+                                                   g_xn, &g_xn[i].key);
+        if (r == NULL) {
+            if (myextra_mrsw_insert(&g_xn_head, g_xn_bk, g_xn, &g_xn[i],
+                                    iter) != NULL)
+                FAILF("extra stress insert[%u] failed", i);
+        } else {
+            if (myextra_mrsw_remove(&g_xn_head, g_xn_bk, g_xn,
+                                    &g_xn[i]) != &g_xn[i])
+                FAILF("extra stress remove[%u] failed", i);
+        }
+        if (atomic_load_explicit(&g_xn_fail, memory_order_acquire))
+            break;
+    }
+    atomic_store_explicit(&g_xn_stop, 1, memory_order_release);
+    for (unsigned i = 0u; i < NR; i++)
+        pthread_join(readers[i], NULL);
+    if (atomic_load_explicit(&g_xn_fail, memory_order_acquire))
+        FAIL("extra stress reader observed wrong node");
+}
+
 int
 main(void)
 {
@@ -1808,6 +2028,10 @@ main(void)
     test_u64_duplicate();
     test_u64_staged_remove_at();
     test_u64_stress();
+    test_extra_insert_find_remove();
+    test_extra_kickout_carries_extra();
+    test_extra_staged_remove_at();
+    test_extra_stress();
 
     printf("OK\n");
     return 0;
