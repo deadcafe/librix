@@ -103,6 +103,15 @@ RIX_HASH_MRSW_HEAD(myslot_mrsw);
 RIX_HASH_MRSW_GENERATE_SLOT(myslot_mrsw, myslot_node, key, cur_hash, slot,
                             mykey_cmp)
 
+/* KEYONLY variant test fixture (no hash_field, no slot_field in node). */
+struct mykeyonly_node {
+    u32 value;
+    struct mykey key;
+};
+
+RIX_HASH_MRSW_HEAD(mykeyonly_mrsw);
+RIX_HASH_MRSW_GENERATE_KEYONLY(mykeyonly_mrsw, mykeyonly_node, key, mykey_cmp)
+
 #define NB_BASIC    20u
 #define NB_BK_BASIC  4u
 
@@ -1160,6 +1169,209 @@ test_slot_stress(void)
         FAIL("slot stress reader observed wrong node");
 }
 
+/* ---- KEYONLY variant tests ------------------------------------------ */
+
+#define NB_KEYONLY_BASIC    300u
+#define NB_BK_KEYONLY_BASIC  32u
+
+static struct mykeyonly_node g_ko[NB_KEYONLY_BASIC];
+static struct rix_hash_bucket_s g_ko_bk[NB_BK_KEYONLY_BASIC]
+    __attribute__((aligned(64)));
+static struct mykeyonly_mrsw g_ko_head;
+
+static int
+locate_idx_common(struct rix_hash_bucket_s *buckets, unsigned mask,
+                  u32 idx, unsigned *bk_out, unsigned *slot_out)
+{
+    for (unsigned b = 0u; b <= mask; b++) {
+        u32 ctrl = atomic_load_explicit(&buckets[b].ctrl,
+                                        memory_order_acquire);
+        u32 valid = rix_hash_mrsw_ctrl_valid(ctrl);
+        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
+            if ((valid & (UINT32_C(1) << s)) != 0u &&
+                buckets[b].idx[s] == idx) {
+                *bk_out = b;
+                *slot_out = s;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void
+ko_init(void)
+{
+    memset(g_ko, 0, sizeof(g_ko));
+    mykeyonly_mrsw_init(&g_ko_head, g_ko_bk, NB_BK_KEYONLY_BASIC);
+    for (unsigned i = 0u; i < NB_KEYONLY_BASIC; i++) {
+        g_ko[i].key.hi = (u64)(i + 1u);
+        g_ko[i].key.lo = UINT64_C(0xC0DE000000000000) ^ (u64)i;
+        g_ko[i].value  = i + 1u;
+    }
+}
+
+static void
+test_keyonly_insert_find_remove(void)
+{
+    printf("[T] mrsw keyonly insert/find/remove\n");
+    ko_init();
+
+    for (unsigned i = 0u; i < NB_KEYONLY_BASIC; i++) {
+        struct mykeyonly_node *r =
+            mykeyonly_mrsw_insert(&g_ko_head, g_ko_bk, g_ko, &g_ko[i]);
+        if (r != NULL)
+            FAILF("keyonly insert[%u] failed", i);
+    }
+    if (atomic_load_explicit(&g_ko_head.rhh_nb, memory_order_relaxed)
+        != NB_KEYONLY_BASIC)
+        FAIL("keyonly rhh_nb mismatch");
+
+    for (unsigned i = 0u; i < NB_KEYONLY_BASIC; i++) {
+        struct mykeyonly_node *f = mykeyonly_mrsw_find(&g_ko_head, g_ko_bk,
+                                                       g_ko, &g_ko[i].key);
+        if (f != &g_ko[i])
+            FAILF("keyonly find[%u] mismatch", i);
+    }
+    for (unsigned i = 0u; i < NB_KEYONLY_BASIC; i += 3u) {
+        struct mykeyonly_node *r = mykeyonly_mrsw_remove(&g_ko_head, g_ko_bk,
+                                                         g_ko, &g_ko[i]);
+        if (r != &g_ko[i])
+            FAILF("keyonly remove[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < NB_KEYONLY_BASIC; i++) {
+        struct mykeyonly_node *f = mykeyonly_mrsw_find(&g_ko_head, g_ko_bk,
+                                                       g_ko, &g_ko[i].key);
+        if ((i % 3u) == 0u) {
+            if (f != NULL)
+                FAILF("keyonly removed[%u] still found", i);
+        } else if (f != &g_ko[i]) {
+            FAILF("keyonly remaining[%u] mismatch", i);
+        }
+    }
+}
+
+static void
+test_keyonly_duplicate(void)
+{
+    printf("[T] mrsw keyonly duplicate\n");
+    ko_init();
+
+    if (mykeyonly_mrsw_insert(&g_ko_head, g_ko_bk, g_ko, &g_ko[0]) != NULL)
+        FAIL("keyonly first insert returned non-NULL");
+    if (mykeyonly_mrsw_insert(&g_ko_head, g_ko_bk, g_ko, &g_ko[0])
+        != &g_ko[0])
+        FAIL("keyonly same-node duplicate did not return existing");
+
+    struct mykeyonly_node dup;
+    memset(&dup, 0, sizeof(dup));
+    dup.key = g_ko[0].key;
+    if (mykeyonly_mrsw_insert(&g_ko_head, g_ko_bk, g_ko, &dup) != &g_ko[0])
+        FAIL("keyonly same-key duplicate did not return existing");
+    if (atomic_load_explicit(&g_ko_head.rhh_nb, memory_order_relaxed) != 1u)
+        FAIL("keyonly duplicate changed count");
+}
+
+static void
+test_keyonly_staged_remove_at(void)
+{
+    printf("[T] mrsw keyonly staged/remove_at API\n");
+    ko_init();
+
+    for (unsigned i = 0u; i < NB_KEYONLY_BASIC; i++) {
+        if (mykeyonly_mrsw_insert(&g_ko_head, g_ko_bk, g_ko, &g_ko[i]) != NULL)
+            FAILF("keyonly staged setup insert[%u] failed", i);
+    }
+
+    struct rix_hash_mrsw_find_ctx_s ctx[4];
+    const struct mykey *keys[4] = {
+        &g_ko[1].key, &g_ko[7].key, &g_ko[11].key, &g_ko[13].key
+    };
+    struct mykeyonly_node *res[4];
+    RIX_HASH_MRSW_HASH_KEY_N_MASKED(mykeyonly_mrsw, ctx, 4u, &g_ko_head,
+                                    g_ko_bk, keys, g_ko_head.rhh_mask,
+                                    g_ko_head.rhh_mask);
+    RIX_HASH_MRSW_SCAN_BK_N(mykeyonly_mrsw, ctx, 4u, &g_ko_head, g_ko_bk);
+    RIX_HASH_MRSW_PREFETCH_NODE_N(mykeyonly_mrsw, ctx, 4u, g_ko);
+    RIX_HASH_MRSW_CMP_KEY_N(mykeyonly_mrsw, ctx, 4u, g_ko, res);
+    if (res[0] != &g_ko[1] || res[1] != &g_ko[7] ||
+        res[2] != &g_ko[11] || res[3] != &g_ko[13])
+        FAIL("keyonly staged N mismatch");
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_common(g_ko_bk, g_ko_head.rhh_mask, 8u, &bk, &slot))
+        FAIL("keyonly remove_at target not located");
+    if (RIX_HASH_MRSW_REMOVE_AT(mykeyonly_mrsw, &g_ko_head, g_ko_bk, bk, slot)
+        != 8u)
+        FAIL("keyonly remove_at returned wrong idx");
+    if (mykeyonly_mrsw_find(&g_ko_head, g_ko_bk, g_ko, &g_ko[7].key) != NULL)
+        FAIL("keyonly remove_at target still found");
+}
+
+static _Atomic int g_ko_stop;
+static _Atomic int g_ko_fail;
+
+static void *
+ko_stress_reader(void *arg)
+{
+    uintptr_t tid = (uintptr_t)arg;
+    u32 x = (u32)(0x9e3779b9u ^ (tid * 2654435761u));
+    while (!atomic_load_explicit(&g_ko_stop, memory_order_acquire)) {
+        x = x * 1664525u + 1013904223u;
+        unsigned i = x % NB_KEYONLY_BASIC;
+        struct mykeyonly_node *f = mykeyonly_mrsw_find(&g_ko_head, g_ko_bk,
+                                                       g_ko, &g_ko[i].key);
+        if (f != NULL && f != &g_ko[i]) {
+            atomic_store_explicit(&g_ko_fail, 1, memory_order_release);
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void
+test_keyonly_stress(void)
+{
+    printf("[T] mrsw keyonly reader/writer stress\n");
+    ko_init();
+    for (unsigned i = 0u; i < 200u; i++) {
+        if (mykeyonly_mrsw_insert(&g_ko_head, g_ko_bk, g_ko, &g_ko[i]) != NULL)
+            FAILF("keyonly stress setup insert[%u] failed", i);
+    }
+    atomic_store_explicit(&g_ko_stop, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_ko_fail, 0, memory_order_relaxed);
+    enum { NR = 4 };
+    pthread_t readers[NR];
+    for (uintptr_t i = 0u; i < NR; i++)
+        if (pthread_create(&readers[i], NULL, ko_stress_reader,
+                           (void *)(i + 1u)) != 0)
+            FAIL("pthread_create keyonly reader failed");
+
+    for (unsigned iter = 0u; iter < 50000u; iter++) {
+        unsigned i = 200u + (iter % 64u);
+        struct mykeyonly_node *r = mykeyonly_mrsw_find(&g_ko_head, g_ko_bk,
+                                                       g_ko, &g_ko[i].key);
+        if (r == NULL) {
+            if (mykeyonly_mrsw_insert(&g_ko_head, g_ko_bk, g_ko,
+                                      &g_ko[i]) != NULL)
+                FAILF("keyonly stress insert[%u] failed", i);
+        } else {
+            if (mykeyonly_mrsw_remove(&g_ko_head, g_ko_bk, g_ko,
+                                      &g_ko[i]) != &g_ko[i])
+                FAILF("keyonly stress remove[%u] failed", i);
+        }
+        if (atomic_load_explicit(&g_ko_fail, memory_order_acquire))
+            break;
+    }
+
+    atomic_store_explicit(&g_ko_stop, 1, memory_order_release);
+    for (unsigned i = 0u; i < NR; i++)
+        pthread_join(readers[i], NULL);
+    if (atomic_load_explicit(&g_ko_fail, memory_order_acquire))
+        FAIL("keyonly stress reader observed wrong node");
+}
+
 int
 main(void)
 {
@@ -1185,6 +1397,10 @@ main(void)
     test_slot_walk();
     test_slot_kickout_field_consistency();
     test_slot_stress();
+    test_keyonly_insert_find_remove();
+    test_keyonly_duplicate();
+    test_keyonly_staged_remove_at();
+    test_keyonly_stress();
 
     printf("OK\n");
     return 0;

@@ -356,6 +356,40 @@ rix_hash_mrsw_buckets_init(struct rix_hash_bucket_s *buckets,
                                          RIX_HASH_DEFAULT_HASH_FN_NAME(name), \
                                          RIX_UNUSED static)
 
+/* KEYONLY variant: no hash_field, no slot_field in the node.  Kickout re-    \
+ * hashes the victim's key to find its alternate bucket; remove re-hashes    \
+ * the element key and probes both candidate buckets.  Find/insert behave    \
+ * like the FP variant but with no node-side hash_field maintenance. */
+#  define RIX_HASH_MRSW_PROTOTYPE_KEYONLY(name, type, key_field, cmp_fn)      \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, /*hash_field*/_,  \
+                                     cmp_fn, )
+#  define RIX_HASH_MRSW_PROTOTYPE_KEYONLY_STATIC(name, type, key_field, cmp_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, /*hash_field*/_,  \
+                                     cmp_fn, RIX_UNUSED static)
+#  define RIX_HASH_MRSW_PROTOTYPE_KEYONLY_EX(name, type, key_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_KEYONLY(name, type, key_field, cmp_fn)
+#  define RIX_HASH_MRSW_PROTOTYPE_KEYONLY_STATIC_EX(name, type, key_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_PROTOTYPE_KEYONLY_STATIC(name, type, key_field, cmp_fn)
+
+#  define RIX_HASH_MRSW_GENERATE_KEYONLY_EX(name, type, key_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,    \
+                                            hash_fn, )
+
+#  define RIX_HASH_MRSW_GENERATE_KEYONLY_STATIC_EX(name, type, key_field, cmp_fn, hash_fn) \
+    RIX_HASH_MRSW_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,    \
+                                            hash_fn, RIX_UNUSED static)
+
+#  define RIX_HASH_MRSW_GENERATE_KEYONLY(name, type, key_field, cmp_fn)       \
+    RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                    \
+    RIX_HASH_MRSW_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,    \
+                                            RIX_HASH_DEFAULT_HASH_FN_NAME(name), )
+
+#  define RIX_HASH_MRSW_GENERATE_KEYONLY_STATIC(name, type, key_field, cmp_fn) \
+    RIX_HASH_DEFINE_DEFAULT_HASH_FN(name, type, key_field)                    \
+    RIX_HASH_MRSW_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn,    \
+                                            RIX_HASH_DEFAULT_HASH_FN_NAME(name), \
+                                            RIX_UNUSED static)
+
 #  ifndef RIX_HASH_MRSW_DEFINE_INDEXERS
 #    define RIX_HASH_MRSW_DEFINE_INDEXERS(name, type)                         \
 static RIX_UNUSED RIX_FORCE_INLINE unsigned                                   \
@@ -684,12 +718,42 @@ name##_walk(struct name *head,                                                \
  *      slot_set(elm, val, type, slot_field) writes elm->slot_field for SLOT *
  *      and is a no-op for FP.  remove_body(name, type, hash_field,          *
  *      slot_field, attr) expands to the variant-specific _remove body.      */
+/* ---- per-variant node-side write & alt-bucket helpers ---------------- *
+ * Three orthogonal slots specialize _RHM_OPS_INTERNAL per variant:        *
+ *   slot_set      : writes node->slot_field        (SLOT only)            *
+ *   node_hash_flip: nd->hash_field ^= fp on kickout (FP/SLOT, no-op KO)   *
+ *   node_hash_set : elm->hash_field = h.val32[N] on insert (FP/SLOT only) *
+ *   alt_bk_expr   : compute alt bucket index                              *
+ *                   FP/SLOT use the XOR trick on stored hash_field;       *
+ *                   KEYONLY re-hashes the node's key.                     *
+ */
 #  define _RHM_NO_SLOT_SET(elm, val, sf_type, sf)                             \
     ((void)(elm), (void)(val))
 #  define _RHM_DO_SLOT_SET(elm, val, sf_type, sf)                             \
     ((elm)->sf = (RIX_HASH_SLOT_TYPE(sf_type, sf))(unsigned)(val))
 
-#  define _RHM_REMOVE_FP(name, type, hash_field, slot_field_unused, attr)    \
+#  define _RHM_NO_HASH_FLIP(target, fp, hf)    ((void)(target), (void)(fp))
+#  define _RHM_DO_HASH_FLIP(target, fp, hf)    ((target)->hf ^= (fp))
+
+#  define _RHM_NO_HASH_SET(target, val, hf)    ((void)(target), (void)(val))
+#  define _RHM_DO_HASH_SET(target, val, hf)    ((target)->hf = (val))
+
+#  define _RHM_ALT_BK_HASHED(fp, nd, bk_idx, mask, type, key_field, hash_field, hash_fn) \
+    (((fp) ^ (nd)->hash_field) & (mask))
+
+#  define _RHM_ALT_BK_REHASH(fp, nd, bk_idx, mask, type, key_field, hash_field, hash_fn) \
+    (__extension__ ({                                                         \
+        union rix_hash_hash_u _ab_h = hash_fn(                                \
+            (const RIX_HASH_KEY_TYPE(type, key_field) *)&(nd)->key_field,     \
+            (mask));                                                          \
+        unsigned _ab_b0 = _ab_h.val32[0] & (mask);                            \
+        unsigned _ab_b1 = _ab_h.val32[1] & (mask);                            \
+        ((bk_idx) == _ab_b0) ? _ab_b1 : _ab_b0;                               \
+    }))
+
+/* remove body variants.  Signature is uniform; unused parameters are        \
+ * silently dropped by each macro. */
+#  define _RHM_REMOVE_FP(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
 attr struct type *                                                            \
 name##_remove(struct name *head,                                              \
               struct rix_hash_bucket_s *buckets,                              \
@@ -715,7 +779,7 @@ name##_remove(struct name *head,                                              \
     return ret;                                                               \
 }
 
-#  define _RHM_REMOVE_SLOT(name, type, hash_field, slot_field, attr)          \
+#  define _RHM_REMOVE_SLOT(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
 attr struct type *                                                            \
 name##_remove(struct name *head,                                              \
               struct rix_hash_bucket_s *buckets,                              \
@@ -736,7 +800,35 @@ name##_remove(struct name *head,                                              \
     return elm;                                                               \
 }
 
-#  define _RHM_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr, slot_set, remove_body) \
+/* KEYONLY: re-hash key, probe both candidate buckets. */
+#  define _RHM_REMOVE_KEYONLY(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
+attr struct type *                                                            \
+name##_remove(struct name *head,                                              \
+              struct rix_hash_bucket_s *buckets,                              \
+              struct type *base,                                              \
+              struct type *elm)                                               \
+{                                                                             \
+    unsigned node_idx = name##_hidx(base, elm);                               \
+    unsigned mask = head->rhh_mask;                                           \
+    union rix_hash_hash_u h = hash_fn(                                        \
+        (const RIX_HASH_KEY_TYPE(type, key_field) *)&elm->key_field, mask);   \
+    unsigned bks[2] = { h.val32[0] & mask, h.val32[1] & mask };               \
+    for (int i = 0; i < 2; i++) {                                             \
+        struct rix_hash_bucket_s *b = buckets + bks[i];                       \
+        u32 valid = rix_hash_mrsw_bucket_valid_load(b, memory_order_relaxed); \
+        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {       \
+            if ((valid & (UINT32_C(1) << s)) == 0u)                           \
+                continue;                                                     \
+            if (b->idx[s] == (u32)node_idx &&                                 \
+                name##_remove_at_inner(head, buckets, bks[i], s) !=           \
+                    (unsigned)RIX_NIL)                                        \
+                return elm;                                                   \
+        }                                                                     \
+    }                                                                         \
+    return NULL;                                                              \
+}
+
+#  define _RHM_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr, slot_set, hash_flip, hash_set, alt_bk_expr, remove_body) \
 static RIX_UNUSED RIX_NO_SANITIZE_THREAD int                                  \
 name##_flipflop(struct rix_hash_bucket_s *buckets,                            \
                 struct type *base,                                            \
@@ -750,13 +842,13 @@ name##_flipflop(struct rix_hash_bucket_s *buckets,                            \
     if (fp == 0u || idx == (u32)RIX_NIL)                                      \
         return -1;                                                            \
     struct type *nd = name##_hptr(base, idx);                                 \
-    u32 h = nd->hash_field;                                                   \
-    unsigned ab = (fp ^ h) & mask;                                            \
+    unsigned ab = alt_bk_expr(fp, nd, bk_idx, mask, type, key_field,          \
+                              hash_field, hash_fn);                           \
     int alt_slot = name##_find_empty(buckets, ab);                            \
     if (alt_slot < 0)                                                         \
         return -1;                                                            \
     struct rix_hash_bucket_s *alt = buckets + ab;                             \
-    nd->hash_field = fp ^ h;                                                  \
+    hash_flip(nd, fp, hash_field);                                            \
     slot_set(nd, alt_slot, type, slot_field);                                 \
     /* Publish-before-unpublish: alt is set, then bk is cleared.  Readers     \
      * may see the entry in both buckets transiently; reverse order would    \
@@ -798,8 +890,8 @@ name##_kickout(struct rix_hash_bucket_s *buckets,                             \
         if (si == (u32)RIX_NIL)                                               \
             continue;                                                         \
         struct type *sn = name##_hptr(base, si);                              \
-        u32 sh = sn->hash_field;                                              \
-        unsigned ab = (fp ^ sh) & mask;                                       \
+        unsigned ab = alt_bk_expr(fp, sn, bk_idx, mask, type, key_field,      \
+                                  hash_field, hash_fn);                       \
         if (name##_kickout(buckets, base, mask, ab, depth - 1) >= 0) {        \
             u32 now_fp = bk->hash[s];                                         \
             u32 now_idx = bk->idx[s];                                         \
@@ -833,7 +925,7 @@ name##_insert_hashed_idx(struct name *head,                                   \
     struct rix_hash_bucket_s *bks[2] = { buckets + bk0, buckets + bk1 };      \
     u32 fp_hits_v[2];                                                         \
     int empty_slot_v[2];                                                      \
-    elm->hash_field = h.val32[0];                                             \
+    hash_set(elm, h.val32[0], hash_field);                                    \
     for (int i = 0; i < 2; i++) {                                             \
         u32 valid = rix_hash_mrsw_bucket_valid_load(bks[i],                   \
                                                     memory_order_acquire);    \
@@ -860,7 +952,7 @@ name##_insert_hashed_idx(struct name *head,                                   \
             unsigned bki = (i == 0) ? bk0 : bk1;                              \
             struct rix_hash_bucket_s *bk = bks[i];                            \
             if (i == 1)                                                       \
-                elm->hash_field = h.val32[1];                                 \
+                hash_set(elm, h.val32[1], hash_field);                        \
             slot_set(elm, slot, type, slot_field);                            \
             bk->idx[slot] = elm_idx;                                          \
             RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets, bki,       \
@@ -885,7 +977,7 @@ name##_insert_hashed_idx(struct name *head,                                   \
             if (pos < 0)                                                      \
                 return elm_idx;                                               \
             bki = bk1;                                                        \
-            elm->hash_field = h.val32[1];                                     \
+            hash_set(elm, h.val32[1], hash_field);                            \
         }                                                                     \
         struct rix_hash_bucket_s *bk = buckets + bki;                         \
         slot_set(elm, pos, type, slot_field);                                 \
@@ -919,18 +1011,28 @@ name##_insert(struct name *head,                                              \
                 head->rhh_mask);                                              \
     return name##_insert_hashed(head, buckets, base, elm, h);                 \
 }                                                                             \
-remove_body(name, type, hash_field, slot_field, attr)
+remove_body(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr)
 
 #  define RIX_HASH_MRSW_GENERATE_FP_OPS_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
     _RHM_OPS_INTERNAL(name, type, key_field, hash_field,                      \
                       /* slot_field unused */ key_field,                      \
                       cmp_fn, hash_fn, attr,                                  \
-                      _RHM_NO_SLOT_SET, _RHM_REMOVE_FP)
+                      _RHM_NO_SLOT_SET, _RHM_DO_HASH_FLIP, _RHM_DO_HASH_SET,  \
+                      _RHM_ALT_BK_HASHED, _RHM_REMOVE_FP)
 
 #  define RIX_HASH_MRSW_GENERATE_SLOT_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
     _RHM_OPS_INTERNAL(name, type, key_field, hash_field, slot_field,          \
                       cmp_fn, hash_fn, attr,                                  \
-                      _RHM_DO_SLOT_SET, _RHM_REMOVE_SLOT)
+                      _RHM_DO_SLOT_SET, _RHM_DO_HASH_FLIP, _RHM_DO_HASH_SET,  \
+                      _RHM_ALT_BK_HASHED, _RHM_REMOVE_SLOT)
+
+#  define RIX_HASH_MRSW_GENERATE_KEYONLY_OPS_INTERNAL(name, type, key_field, cmp_fn, hash_fn, attr) \
+    _RHM_OPS_INTERNAL(name, type, key_field,                                  \
+                      /* hash_field unused */ key_field,                      \
+                      /* slot_field unused */ key_field,                      \
+                      cmp_fn, hash_fn, attr,                                  \
+                      _RHM_NO_SLOT_SET, _RHM_NO_HASH_FLIP, _RHM_NO_HASH_SET,  \
+                      _RHM_ALT_BK_REHASH, _RHM_REMOVE_KEYONLY)
 
 /* ---- public composed generators -------------------------------------- */
 #  define RIX_HASH_MRSW_GENERATE_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
@@ -947,6 +1049,13 @@ remove_body(name, type, hash_field, slot_field, attr)
     RIX_HASH_MRSW_GENERATE_SLOT_OPS_INTERNAL(name, type, key_field,           \
                                              hash_field, slot_field, cmp_fn,  \
                                              hash_fn, attr)
+
+#  define RIX_HASH_MRSW_GENERATE_KEYONLY_INTERNAL(name, type, key_field, cmp_fn, hash_fn, attr) \
+    RIX_HASH_MRSW_GENERATE_COMMON_PRE_INTERNAL(name, type, key_field,         \
+                                               /* hash_field */ key_field,    \
+                                               cmp_fn, hash_fn, attr)         \
+    RIX_HASH_MRSW_GENERATE_KEYONLY_OPS_INTERNAL(name, type, key_field,        \
+                                                cmp_fn, hash_fn, attr)
 
 /* ---- convenience macro API --------------------------------------------- */
 #  define RIX_HASH_MRSW_INIT(name, head, buckets, nb_bk)                     \
