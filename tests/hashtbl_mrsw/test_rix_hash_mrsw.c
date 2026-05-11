@@ -112,6 +112,15 @@ struct mykeyonly_node {
 RIX_HASH_MRSW_HEAD(mykeyonly_mrsw);
 RIX_HASH_MRSW_GENERATE_KEYONLY(mykeyonly_mrsw, mykeyonly_node, key, mykey_cmp)
 
+/* U32 variant test fixture (u32 key stored in bucket, no node aux). */
+struct myu32_node {
+    u32 key;
+    u32 value;
+};
+
+RIX_HASH_MRSW_HEAD(myu32_mrsw);
+RIX_HASH_MRSW_GENERATE_U32(myu32_mrsw, struct myu32_node, key)
+
 #define NB_BASIC    20u
 #define NB_BK_BASIC  4u
 
@@ -1372,6 +1381,186 @@ test_keyonly_stress(void)
         FAIL("keyonly stress reader observed wrong node");
 }
 
+/* ---- U32 variant tests ---------------------------------------------- */
+
+#define NB_U32_BASIC    300u
+#define NB_BK_U32_BASIC  32u
+
+static struct myu32_node g_u32[NB_U32_BASIC];
+static struct rix_hash_bucket_s g_u32_bk[NB_BK_U32_BASIC]
+    __attribute__((aligned(64)));
+static struct myu32_mrsw g_u32_head;
+
+static void
+u32_init(void)
+{
+    memset(g_u32, 0, sizeof(g_u32));
+    myu32_mrsw_init(&g_u32_head, g_u32_bk, NB_BK_U32_BASIC);
+    for (unsigned i = 0u; i < NB_U32_BASIC; i++) {
+        g_u32[i].key   = i + 1u;
+        g_u32[i].value = i + 1000u;
+    }
+}
+
+static void
+test_u32_insert_find_remove(void)
+{
+    printf("[T] mrsw u32 insert/find/remove\n");
+    u32_init();
+
+    for (unsigned i = 0u; i < NB_U32_BASIC; i++) {
+        struct myu32_node *r =
+            myu32_mrsw_insert(&g_u32_head, g_u32_bk, g_u32, &g_u32[i]);
+        if (r != NULL)
+            FAILF("u32 insert[%u] failed (ret=%p)", i, (void *)r);
+    }
+    for (unsigned i = 0u; i < NB_U32_BASIC; i++) {
+        struct myu32_node *f = myu32_mrsw_find(&g_u32_head, g_u32_bk,
+                                               g_u32, g_u32[i].key);
+        if (f != &g_u32[i])
+            FAILF("u32 find[%u] mismatch", i);
+    }
+    if (myu32_mrsw_find(&g_u32_head, g_u32_bk, g_u32, 99999u) != NULL)
+        FAIL("u32 find absent returned non-NULL");
+
+    for (unsigned i = 0u; i < NB_U32_BASIC; i += 3u) {
+        struct myu32_node *r = myu32_mrsw_remove(&g_u32_head, g_u32_bk,
+                                                 g_u32, &g_u32[i]);
+        if (r != &g_u32[i])
+            FAILF("u32 remove[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < NB_U32_BASIC; i++) {
+        struct myu32_node *f = myu32_mrsw_find(&g_u32_head, g_u32_bk,
+                                               g_u32, g_u32[i].key);
+        if ((i % 3u) == 0u) {
+            if (f != NULL)
+                FAILF("u32 removed[%u] still found", i);
+        } else if (f != &g_u32[i]) {
+            FAILF("u32 remaining[%u] mismatch", i);
+        }
+    }
+}
+
+static void
+test_u32_duplicate(void)
+{
+    printf("[T] mrsw u32 duplicate\n");
+    u32_init();
+
+    if (myu32_mrsw_insert(&g_u32_head, g_u32_bk, g_u32, &g_u32[0]) != NULL)
+        FAIL("u32 first insert returned non-NULL");
+    if (myu32_mrsw_insert(&g_u32_head, g_u32_bk, g_u32, &g_u32[0])
+        != &g_u32[0])
+        FAIL("u32 same-node duplicate did not return existing");
+
+    struct myu32_node dup;
+    memset(&dup, 0, sizeof(dup));
+    dup.key = g_u32[0].key;
+    if (myu32_mrsw_insert(&g_u32_head, g_u32_bk, g_u32, &dup) != &g_u32[0])
+        FAIL("u32 same-key duplicate did not return existing");
+    if (atomic_load_explicit(&g_u32_head.rhh_nb, memory_order_relaxed) != 1u)
+        FAIL("u32 duplicate changed count");
+}
+
+static void
+test_u32_staged_remove_at(void)
+{
+    printf("[T] mrsw u32 staged/remove_at API\n");
+    u32_init();
+
+    for (unsigned i = 0u; i < NB_U32_BASIC; i++) {
+        if (myu32_mrsw_insert(&g_u32_head, g_u32_bk, g_u32, &g_u32[i]) != NULL)
+            FAILF("u32 staged setup insert[%u] failed", i);
+    }
+
+    struct rix_hash_mrsw_u32_find_ctx_s ctx[4];
+    u32 keys[4] = {
+        g_u32[1].key, g_u32[7].key, 999999u, g_u32[13].key
+    };
+    struct myu32_node *res[4];
+    RIX_HASH_MRSW_HASH_KEY_N_MASKED(myu32_mrsw, ctx, 4u, &g_u32_head,
+                                    g_u32_bk, keys, g_u32_head.rhh_mask,
+                                    g_u32_head.rhh_mask);
+    RIX_HASH_MRSW_SCAN_BK_N(myu32_mrsw, ctx, 4u, &g_u32_head, g_u32_bk);
+    RIX_HASH_MRSW_PREFETCH_NODE_N(myu32_mrsw, ctx, 4u, g_u32);
+    RIX_HASH_MRSW_CMP_KEY_N(myu32_mrsw, ctx, 4u, g_u32, res);
+    if (res[0] != &g_u32[1] || res[1] != &g_u32[7] ||
+        res[2] != NULL || res[3] != &g_u32[13])
+        FAIL("u32 staged N mismatch");
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_common(g_u32_bk, g_u32_head.rhh_mask, 8u, &bk, &slot))
+        FAIL("u32 remove_at target not located");
+    if (RIX_HASH_MRSW_REMOVE_AT(myu32_mrsw, &g_u32_head, g_u32_bk, bk, slot)
+        != 8u)
+        FAIL("u32 remove_at returned wrong idx");
+    if (myu32_mrsw_find(&g_u32_head, g_u32_bk, g_u32, g_u32[7].key) != NULL)
+        FAIL("u32 remove_at target still found");
+}
+
+static _Atomic int g_u32_stop;
+static _Atomic int g_u32_fail;
+
+static void *
+u32_stress_reader(void *arg)
+{
+    uintptr_t tid = (uintptr_t)arg;
+    u32 x = (u32)(0x9e3779b9u ^ (tid * 2654435761u));
+    while (!atomic_load_explicit(&g_u32_stop, memory_order_acquire)) {
+        x = x * 1664525u + 1013904223u;
+        unsigned i = x % NB_U32_BASIC;
+        struct myu32_node *f = myu32_mrsw_find(&g_u32_head, g_u32_bk,
+                                               g_u32, g_u32[i].key);
+        if (f != NULL && f != &g_u32[i]) {
+            atomic_store_explicit(&g_u32_fail, 1, memory_order_release);
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void
+test_u32_stress(void)
+{
+    printf("[T] mrsw u32 reader/writer stress\n");
+    u32_init();
+    for (unsigned i = 0u; i < 200u; i++) {
+        if (myu32_mrsw_insert(&g_u32_head, g_u32_bk, g_u32, &g_u32[i]) != NULL)
+            FAILF("u32 stress setup insert[%u] failed", i);
+    }
+    atomic_store_explicit(&g_u32_stop, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_u32_fail, 0, memory_order_relaxed);
+    enum { NR = 4 };
+    pthread_t readers[NR];
+    for (uintptr_t i = 0u; i < NR; i++)
+        if (pthread_create(&readers[i], NULL, u32_stress_reader,
+                           (void *)(i + 1u)) != 0)
+            FAIL("pthread_create u32 reader failed");
+
+    for (unsigned iter = 0u; iter < 50000u; iter++) {
+        unsigned i = 200u + (iter % 64u);
+        struct myu32_node *r = myu32_mrsw_find(&g_u32_head, g_u32_bk,
+                                               g_u32, g_u32[i].key);
+        if (r == NULL) {
+            if (myu32_mrsw_insert(&g_u32_head, g_u32_bk, g_u32,
+                                  &g_u32[i]) != NULL)
+                FAILF("u32 stress insert[%u] failed", i);
+        } else {
+            if (myu32_mrsw_remove(&g_u32_head, g_u32_bk, g_u32,
+                                  &g_u32[i]) != &g_u32[i])
+                FAILF("u32 stress remove[%u] failed", i);
+        }
+        if (atomic_load_explicit(&g_u32_fail, memory_order_acquire))
+            break;
+    }
+    atomic_store_explicit(&g_u32_stop, 1, memory_order_release);
+    for (unsigned i = 0u; i < NR; i++)
+        pthread_join(readers[i], NULL);
+    if (atomic_load_explicit(&g_u32_fail, memory_order_acquire))
+        FAIL("u32 stress reader observed wrong node");
+}
+
 int
 main(void)
 {
@@ -1401,6 +1590,10 @@ main(void)
     test_keyonly_duplicate();
     test_keyonly_staged_remove_at();
     test_keyonly_stress();
+    test_u32_insert_find_remove();
+    test_u32_duplicate();
+    test_u32_staged_remove_at();
+    test_u32_stress();
 
     printf("OK\n");
     return 0;
