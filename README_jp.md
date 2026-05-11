@@ -83,8 +83,8 @@ include/
     rix_hash_slot.h    カッコーハッシュ -- スロット版 (hash_field + slot_field)
     rix_hash_keyonly.h カッコーハッシュ -- キーオンリー版 (補助フィールドなし)
     rix_hash.h      カッコーハッシュ傘ヘッダ (fp, slot, keyonly, hash32, hash64 を全てインクルード)
-    rix_hash_32.h    カッコーハッシュ -- u32 キー版
-    rix_hash_64.h    カッコーハッシュ -- u64 キー版
+    rix_hash_u32.h    カッコーハッシュ -- u32 キー版
+    rix_hash_u64.h    カッコーハッシュ -- u64 キー版
     rix_hash_key.h  カッコーハッシュ -- u32 / u64 キー版 (統合)
 flowtable/            フロー表サンプル (flowtable/README.md 参照)
 ```
@@ -104,8 +104,8 @@ flowtable/            フロー表サンプル (flowtable/README.md 参照)
 #include "rix/rix_ring.h"    /* u32 インデックス FIFO/LIFO ring       */
 #include "rix/rix_tree.h"    /* Red-Black ツリーのみ                  */
 #include "rix/rix_hash.h"    /* カッコーハッシュ (fp 版)              */
-#include "rix/rix_hash_32.h"  /* カッコーハッシュ (u32 キー版)         */
-#include "rix/rix_hash_64.h"  /* カッコーハッシュ (u64 キー版)         */
+#include "rix/rix_hash_u32.h"  /* カッコーハッシュ (u32 キー版)         */
+#include "rix/rix_hash_u64.h"  /* カッコーハッシュ (u64 キー版)         */
 #include "rix/rix_hash_key.h"/* カッコーハッシュ (u32 + u64 統合版)   */
 ```
 
@@ -480,26 +480,30 @@ RIX_RB_FOREACH_REVERSE(var, name, head, base)   /* 降順 */
 | slot    | `rix_hash_slot.h`    | フィンガープリント→バケット、フルキー→ノード | `hash_field` + `slot_field` | 128 B (2 CL) | 可変長キー、最速 remove |
 | slot_extra | `rix_hash_slot_extra.h` | フィンガープリント→バケット、フルキー→ノード | `hash_field` + `slot_field`; `extra[]` はバケット側 | 192 B (3 CL) | per-slot metadata 付き可変長キー |
 | keyonly | `rix_hash_keyonly.h` | フィンガープリント→バケット、フルキー→ノード | (なし)                      | 128 B (2 CL) | 可変長キー、最小ノード |
-| hash32  | `rix_hash_32.h`       | `u32` キーをバケットに直接格納          | (なし)                      | 128 B (2 CL) | 32 ビット整数キー |
-| hash64  | `rix_hash_64.h`       | `u64` キーをバケットに直接格納          | (なし)                      | 192 B (3 CL) | 64 ビット整数キー |
-| mrsw    | `rix_hash_mrsw.h`     | フィンガープリント→バケット、フルキー→ノード | `hash_field`; bucket ごとに `ctrl` | 128 B (2 CL)、15 slots | lockless reader + single writer |
+| hash32  | `rix_hash_u32.h`       | `u32` キーをバケットに直接格納          | (なし)                      | 128 B (2 CL) | 32 ビット整数キー |
+| hash64  | `rix_hash_u64.h`       | `u64` キーをバケットに直接格納          | (なし)                      | 192 B (3 CL) | 64 ビット整数キー |
+| mrsw    | `rix_hash_mrsw.h`      | fp/keyonly/u32/u64/slot_extra を generator で選択 | bucket ごとに `ctrl`; 必要に応じて `hash_field`/`slot_field` | 128 B または 192 B、15 slots | lockless reader + single writer |
 
 fp/slot/keyonly の 3 バリアントは同じバケットレイアウトと staged-find パイプラインを共有します。
-`rix_hash.h` は MRSW を含む extra 以外のバリアントをインクルードする傘ヘッダです。
+`rix_hash.h` は MRSW generator family を含む common variant をインクルードする傘ヘッダです。
 `slot_extra` は大きいバケットレイアウトを使うため、
 `rix_hash_slot_extra.h` から明示的に opt-in します。
 
 #### MRSW memory ordering
 
-`RIX_HASH_MRSW` は pure fp/slot/keyonly と **同じ** `struct rix_hash_bucket_s`
-を共有する fp 系 variant です。bucket は無名 union を使い、各 cache line の
-16 番目 (slot 15) の `u32` を MRSW では別名で参照する設計です:
+`RIX_HASH_MRSW` は multi-reader / single-writer 用 hash generator family です。
+fp/slot/keyonly/u32 の MRSW は pure fp/slot/keyonly/u32 と **同じ**
+`struct rix_hash_bucket_s` を共有します。bucket は無名 union を使い、各 cache
+line の 16 番目 (slot 15) の `u32` を MRSW では別名で参照する設計です:
 - `hash[15]` は `_Atomic u32 ctrl` の別名(packed seq/valid)
 - `idx[15]` は `u32 reserved` の別名
-MRSW は usable slot を 0..14 の 15 個に制限し、16 番目の位置を `bk->ctrl` /
-`bk->reserved` という名前付きフィールドとしてアクセスします。pure 側の
-fp/slot/keyonly 変種はこれらの別名を使わないので、従来通り 16 slot として
-hash[]/idx[] にアクセスできます。`ctrl` は bit 0..16 (17 bit) を seqcount、
+MRSW U64 は `struct rix_hash64_bucket_s`、MRSW SLOT_EXTRA は
+`struct rix_hash_bucket_extra_s` を再利用し、どちらも physical slot 15 に同じ
+`ctrl` / `reserved` alias を持ちます。MRSW は usable slot を 0..14 の 15 個に
+制限し、16 番目の位置を `bk->ctrl` / `bk->reserved` という名前付きフィールド
+としてアクセスします。pure 側の変種はこれらの別名を使わないので、従来通り
+16 slot として hash[]/idx[] にアクセスできます。`ctrl` は bit 0..16 (17 bit)
+を seqcount、
 bit 17..31 (15 bit) を valid bitmap として使います。`s < 15` の usable slot
 `s` に valid bit `s` が対応します。同じ bucket 数を
 指定した場合、16 slot variant より容量は 1/16 減るため、MRSW では
@@ -557,10 +561,15 @@ writer の plain store と重なる可能性がありますが、その観測結
 (`RIX_NO_SANITIZE_THREAD`) を付与しているので、ThreadSanitizer ビルドでも
 これらの想定内の race は警告されません。
 
-slot 追跡を行う SLOT バリエーション (`RIX_HASH_MRSW_GENERATE_SLOT*`) も
-同梱しています。pure 側 `rix_hash_slot.h` と同じ流儀で、insert/kickout 時に
-node の `slot_field` を更新するため、remove は 15 slot を走査せず O(1) で
-bucket slot を直接参照できます。
+MRSW header は pure variant に対応する generator family を持ちます:
+fp 用 `RIX_HASH_MRSW_GENERATE*`、slot 追跡用
+`RIX_HASH_MRSW_GENERATE_SLOT*`、keyonly 用
+`RIX_HASH_MRSW_GENERATE_KEYONLY*`、整数 key 用
+`RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*`、
+per-slot bucket metadata 用 `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` です。
+いずれも同じ ctrl seq/valid protocol を使います。slot 追跡版と slot_extra 版は
+insert/kickout 時に node の `slot_field` を更新するため、remove は 15 slot を
+走査せず O(1) で bucket slot を直接参照できます。
 
 #### Find 性能 (DRAM コールド、パイプライン、平均 cycles/op)
 
@@ -755,7 +764,7 @@ myht_cmp_key4 (ctx, pool, results);
 `scan_bk` が 32 ビット完全一致比較を行う。
 
 ```c
-#include "rix/rix_hash_32.h"
+#include "rix/rix_hash_u32.h"
 
 typedef struct entry32 entry32;
 struct entry32 {
@@ -803,7 +812,7 @@ RIX_HASH32 と同じインターフェースで `u64` キーに対応。
 バケットは 128 B ではなく 192 B (3 キャッシュライン)。
 
 ```c
-#include "rix/rix_hash_64.h"
+#include "rix/rix_hash_u64.h"
 
 typedef struct entry64 entry64;
 struct entry64 {

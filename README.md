@@ -105,8 +105,8 @@ include/
     rix_hash_slot.h    cuckoo hash -- slot variant (hash_field + slot_field)
     rix_hash_keyonly.h cuckoo hash -- key-only variant (no auxiliary fields)
     rix_hash.h      cuckoo hash umbrella (includes fp, slot, keyonly, hash32, hash64)
-    rix_hash_32.h    cuckoo hash -- u32 key variant
-    rix_hash_64.h    cuckoo hash -- u64 key variant
+    rix_hash_u32.h    cuckoo hash -- u32 key variant
+    rix_hash_u64.h    cuckoo hash -- u64 key variant
     rix_hash_key.h  cuckoo hash -- u32 and u64 variants combined
 flowtable/            flow table sample application (see flowtable/README.md)
 ```
@@ -126,8 +126,8 @@ Or include only what you need:
 #include "rix/rix_ring.h"    /* u32 index FIFO/LIFO ring           */
 #include "rix/rix_tree.h"    /* Red-Black tree only                */
 #include "rix/rix_hash.h"    /* cuckoo hash (fp)                   */
-#include "rix/rix_hash_32.h"  /* cuckoo hash (u32 key)              */
-#include "rix/rix_hash_64.h"  /* cuckoo hash (u64 key)              */
+#include "rix/rix_hash_u32.h"  /* cuckoo hash (u32 key)              */
+#include "rix/rix_hash_u64.h"  /* cuckoo hash (u64 key)              */
 #include "rix/rix_hash_key.h"/* cuckoo hash (u32 + u64, combined)  */
 ```
 
@@ -503,28 +503,32 @@ The ordinary non-MRSW variants share:
 | slot    | `rix_hash_slot.h`    | fingerprint in bucket, full key in node | `hash_field` + `slot_field` | 128 B (2 CL) | Variable-length keys, fastest remove |
 | slot_extra | `rix_hash_slot_extra.h` | fingerprint in bucket, full key in node | `hash_field` + `slot_field`; `extra[]` lives in bucket | 192 B (3 CL) | Variable-length keys with per-slot metadata |
 | keyonly | `rix_hash_keyonly.h` | fingerprint in bucket, full key in node | (none)                      | 128 B (2 CL) | Variable-length keys, smallest node |
-| hash32  | `rix_hash_32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
-| hash64  | `rix_hash_64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
-| mrsw    | `rix_hash_mrsw.h`     | fingerprint in bucket, full key in node | `hash_field`; per-bucket `ctrl` | 128 B (2 CL), 15 slots | Lockless readers with one writer |
+| hash32  | `rix_hash_u32.h`       | `u32` key in bucket                | (none)                      | 128 B (2 CL) | 32-bit integer keys |
+| hash64  | `rix_hash_u64.h`       | `u64` key in bucket                | (none)                      | 192 B (3 CL) | 64-bit integer keys |
+| mrsw    | `rix_hash_mrsw.h`      | fp/keyonly/u32/u64/slot_extra, selected by generator | per-bucket `ctrl`; optional `hash_field`/`slot_field` | 128 B or 192 B, 15 slots | Lockless readers with one writer |
 
 All fp/slot/keyonly variants share the same bucket layout and staged-find pipeline.
-`rix_hash.h` is the umbrella header that includes the non-extra variants,
-including MRSW.
+`rix_hash.h` is the umbrella header that includes the common variants,
+including the MRSW generator family.
 `slot_extra` is opt-in via `rix_hash_slot_extra.h` because it uses a larger
 bucket layout.
 
 #### MRSW memory ordering
 
-`RIX_HASH_MRSW` is an fp-style variant for multi-reader / single-writer use.
-It shares the same `struct rix_hash_bucket_s` definition as the pure
-fp/slot/keyonly variants.  The bucket type uses anonymous unions so that the
+`RIX_HASH_MRSW` is a family of multi-reader / single-writer hash generators.
+The fp/slot/keyonly/u32 variants share the same `struct rix_hash_bucket_s`
+definition as the pure fp/slot/keyonly/u32 variants.  The bucket type uses
+anonymous unions so that the
 16th word of each cache line aliases the MRSW control fields without
-disturbing the 16-slot view used by the pure variants:
+disturbing the 16-slot view used by the pure 128 B variants:
 - `hash[15]` aliases an `_Atomic u32 ctrl` (packed seq/valid).
 - `idx[15]`  aliases a `u32 reserved` word.
-MRSW therefore restricts itself to slots 0..14 (15 usable entries) and
-treats `bk->ctrl` / `bk->reserved` as named accessors for the 16th-word
-positions.  `ctrl` uses bits 0..16 (17 bits) for the seqcount and bits
+MRSW U64 reuses `struct rix_hash64_bucket_s`, and MRSW SLOT_EXTRA reuses
+`struct rix_hash_bucket_extra_s`; both layouts expose the same `ctrl` /
+`reserved` aliases at physical slot 15.  MRSW therefore restricts itself to
+slots 0..14 (15 usable entries) and treats `bk->ctrl` / `bk->reserved` as
+named accessors for the 16th-word positions.  `ctrl` uses bits 0..16 (17 bits)
+for the seqcount and bits
 17..31 (15 bits) for the valid bitmap; valid bit `s` corresponds to usable
 slot `s` for `s < 15`.  Use `rix_hash_mrsw_nb_bk_hint()`
 when sizing tables; with the same bucket count as the 16-slot variants,
@@ -588,10 +592,14 @@ If you need to model the table under TSan, build the application against
 the MRSW headers without redefining `RIX_NO_SANITIZE_THREAD`; readers will
 remain race-clean as far as observable behavior is concerned.
 
-The MRSW header also exposes a slot-tracking variant
-(`RIX_HASH_MRSW_GENERATE_SLOT*`) which mirrors the pure `rix_hash_slot.h`
-contract: insert/kickout maintains a `slot_field` in each node so that
-remove can address the bucket slot in O(1) without scanning all 15 entries.
+The MRSW header exposes generator families that mirror the pure variants:
+`RIX_HASH_MRSW_GENERATE*` for fp, `RIX_HASH_MRSW_GENERATE_SLOT*` for
+slot-tracking, `RIX_HASH_MRSW_GENERATE_KEYONLY*` for keyonly,
+`RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*` for integer-key
+buckets, and `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` for per-slot bucket metadata.
+All of them use the same ctrl seq/valid protocol.  The slot-tracking and
+slot_extra forms maintain a `slot_field` during insert/kickout so remove can
+address the bucket slot in O(1) without scanning all 15 entries.
 
 #### Find performance (DRAM-cold, pipelined, avg cycles/op)
 
@@ -786,7 +794,7 @@ No `hash_field` required in the node struct.  The key itself is stored in the
 bucket, so `scan_bk` performs exact 32-bit comparison.
 
 ```c
-#include "rix/rix_hash_32.h"
+#include "rix/rix_hash_u32.h"
 
 typedef struct entry32 entry32;
 struct entry32 {
@@ -834,7 +842,7 @@ Same interface as RIX_HASH32 with `u64` keys.  Bucket is 192 B (3 cache lines)
 instead of 128 B.
 
 ```c
-#include "rix/rix_hash_64.h"
+#include "rix/rix_hash_u64.h"
 
 typedef struct entry64 entry64;
 struct entry64 {

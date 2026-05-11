@@ -8,19 +8,23 @@
 /*
  * rix_hash.h - index-based cuckoo hash table, C11
  *
- * Umbrella header: includes the non-extra hash variants and provides the
+ * Umbrella header: includes the common hash variants and provides the
  * ordinary RIX_HASH convenience macro API.
  *
- * Ordinary variants share the same bucket layout and staged-find pipeline
- * (hash_key -> scan_bk -> prefetch_node -> cmp_key):
+ * Included variants:
  *
  *   rix_hash_fp.h      - fingerprint variant (hash_field in node)
  *   rix_hash_slot.h    - slot variant (hash_field + slot_field in node)
  *   rix_hash_keyonly.h  - key-only variant (no auxiliary fields in node)
- *   rix_hash_mrsw.h    - multi-reader/single-writer variant
+ *   rix_hash_u32.h     - u32 key stored directly in bucket
+ *   rix_hash_u64.h     - u64 key stored directly in bucket
+ *   rix_hash_mrsw.h    - multi-reader/single-writer generator family
+ *
+ * The variants provide staged-find helpers
+ * (hash_key -> scan_bk -> prefetch_node -> cmp_key) where applicable.
  *
  * Usage:
- *   #include <rix/rix_hash.h>            // all non-extra variants
+ *   #include <rix/rix_hash.h>            // common hash variants
  *   #include <rix/rix_hash_fp.h>         // fp only
  *   #include <rix/rix_hash_keyonly.h>    // keyonly only
  */
