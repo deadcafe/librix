@@ -31,8 +31,8 @@
 #  include "rix_hash_fp.h"
 #  include "rix_hash_slot.h"
 #  include "rix_hash_keyonly.h"
-#  include "rix_hash_32.h"
-#  include "rix_hash_64.h"
+#  include "rix_hash_u32.h"
+#  include "rix_hash_u64.h"
 #  include "rix_hash_mrsw.h"
 
 /*===========================================================================
