@@ -289,7 +289,13 @@ test_fuzz(unsigned seed, unsigned N, unsigned nb_bk, unsigned ops)
     printf("[T] fuzz seed=%u N=%u nb_bk=%u ops=%u\n", seed, N, nb_bk, ops);
 
     mynode_t                   *nodes   = calloc(N, sizeof(*nodes));
-    struct rix_hash64_bucket_s *buckets = calloc(nb_bk, sizeof(*buckets));
+    /* aligned_alloc honours the bucket struct's 64-byte alignment so that
+     * gcc-vectorized aligned stores in init/insert paths are safe. */
+    size_t bk_bytes = (size_t)nb_bk * sizeof(struct rix_hash64_bucket_s);
+    struct rix_hash64_bucket_s *buckets =
+        aligned_alloc(_Alignof(struct rix_hash64_bucket_s), bk_bytes);
+    if (buckets != NULL)
+        memset(buckets, 0, bk_bytes);
     int                        *in_tbl  = calloc(N, sizeof(int));
     if (!nodes || !buckets || !in_tbl) { perror("calloc"); abort(); }
 

@@ -121,6 +121,15 @@ struct myu32_node {
 RIX_HASH_MRSW_HEAD(myu32_mrsw);
 RIX_HASH_MRSW_GENERATE_U32(myu32_mrsw, struct myu32_node, key)
 
+/* U64 variant test fixture. */
+struct myu64_node {
+    u64 key;
+    u64 value;
+};
+
+RIX_HASH_MRSW_HEAD(myu64_mrsw);
+RIX_HASH_MRSW_GENERATE_U64(myu64_mrsw, struct myu64_node, key)
+
 #define NB_BASIC    20u
 #define NB_BK_BASIC  4u
 
@@ -1561,6 +1570,207 @@ test_u32_stress(void)
         FAIL("u32 stress reader observed wrong node");
 }
 
+/* ---- U64 variant tests ---------------------------------------------- */
+
+#define NB_U64_BASIC    300u
+#define NB_BK_U64_BASIC  32u
+
+static struct myu64_node g_u64[NB_U64_BASIC];
+static struct rix_hash64_bucket_s g_u64_bk[NB_BK_U64_BASIC]
+    __attribute__((aligned(64)));
+static struct myu64_mrsw g_u64_head;
+
+static int
+locate_idx_u64(struct rix_hash64_bucket_s *buckets, unsigned mask,
+               u32 idx, unsigned *bk_out, unsigned *slot_out)
+{
+    for (unsigned b = 0u; b <= mask; b++) {
+        u32 ctrl = atomic_load_explicit(&buckets[b].ctrl,
+                                        memory_order_acquire);
+        u32 valid = rix_hash_mrsw_ctrl_valid(ctrl);
+        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
+            if ((valid & (UINT32_C(1) << s)) != 0u &&
+                buckets[b].idx[s] == idx) {
+                *bk_out = b;
+                *slot_out = s;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void
+u64_init(void)
+{
+    memset(g_u64, 0, sizeof(g_u64));
+    myu64_mrsw_init(&g_u64_head, g_u64_bk, NB_BK_U64_BASIC);
+    for (unsigned i = 0u; i < NB_U64_BASIC; i++) {
+        g_u64[i].key   = UINT64_C(0xDEADBEEF00000000) | (u64)(i + 1u);
+        g_u64[i].value = i + 1000u;
+    }
+}
+
+static void
+test_u64_insert_find_remove(void)
+{
+    printf("[T] mrsw u64 insert/find/remove\n");
+    u64_init();
+
+    for (unsigned i = 0u; i < NB_U64_BASIC; i++) {
+        struct myu64_node *r =
+            myu64_mrsw_insert(&g_u64_head, g_u64_bk, g_u64, &g_u64[i]);
+        if (r != NULL)
+            FAILF("u64 insert[%u] failed (ret=%p)", i, (void *)r);
+    }
+    for (unsigned i = 0u; i < NB_U64_BASIC; i++) {
+        struct myu64_node *f = myu64_mrsw_find(&g_u64_head, g_u64_bk,
+                                               g_u64, g_u64[i].key);
+        if (f != &g_u64[i])
+            FAILF("u64 find[%u] mismatch", i);
+    }
+    if (myu64_mrsw_find(&g_u64_head, g_u64_bk, g_u64,
+                        UINT64_C(0xC0FFEE)) != NULL)
+        FAIL("u64 find absent returned non-NULL");
+
+    for (unsigned i = 0u; i < NB_U64_BASIC; i += 3u) {
+        struct myu64_node *r = myu64_mrsw_remove(&g_u64_head, g_u64_bk,
+                                                 g_u64, &g_u64[i]);
+        if (r != &g_u64[i])
+            FAILF("u64 remove[%u] failed", i);
+    }
+    for (unsigned i = 0u; i < NB_U64_BASIC; i++) {
+        struct myu64_node *f = myu64_mrsw_find(&g_u64_head, g_u64_bk,
+                                               g_u64, g_u64[i].key);
+        if ((i % 3u) == 0u) {
+            if (f != NULL)
+                FAILF("u64 removed[%u] still found", i);
+        } else if (f != &g_u64[i]) {
+            FAILF("u64 remaining[%u] mismatch", i);
+        }
+    }
+}
+
+static void
+test_u64_duplicate(void)
+{
+    printf("[T] mrsw u64 duplicate\n");
+    u64_init();
+
+    if (myu64_mrsw_insert(&g_u64_head, g_u64_bk, g_u64, &g_u64[0]) != NULL)
+        FAIL("u64 first insert returned non-NULL");
+    if (myu64_mrsw_insert(&g_u64_head, g_u64_bk, g_u64, &g_u64[0])
+        != &g_u64[0])
+        FAIL("u64 same-node duplicate did not return existing");
+
+    struct myu64_node dup;
+    memset(&dup, 0, sizeof(dup));
+    dup.key = g_u64[0].key;
+    if (myu64_mrsw_insert(&g_u64_head, g_u64_bk, g_u64, &dup) != &g_u64[0])
+        FAIL("u64 same-key duplicate did not return existing");
+    if (atomic_load_explicit(&g_u64_head.rhh_nb, memory_order_relaxed) != 1u)
+        FAIL("u64 duplicate changed count");
+}
+
+static void
+test_u64_staged_remove_at(void)
+{
+    printf("[T] mrsw u64 staged/remove_at API\n");
+    u64_init();
+
+    for (unsigned i = 0u; i < NB_U64_BASIC; i++) {
+        if (myu64_mrsw_insert(&g_u64_head, g_u64_bk, g_u64, &g_u64[i]) != NULL)
+            FAILF("u64 staged setup insert[%u] failed", i);
+    }
+
+    struct rix_hash_mrsw_u64_find_ctx_s ctx[4];
+    u64 keys[4] = {
+        g_u64[1].key, g_u64[7].key, UINT64_C(0xC0FFEE), g_u64[13].key
+    };
+    struct myu64_node *res[4];
+    RIX_HASH_MRSW_HASH_KEY_N_MASKED(myu64_mrsw, ctx, 4u, &g_u64_head,
+                                    g_u64_bk, keys, g_u64_head.rhh_mask,
+                                    g_u64_head.rhh_mask);
+    RIX_HASH_MRSW_SCAN_BK_N(myu64_mrsw, ctx, 4u, &g_u64_head, g_u64_bk);
+    RIX_HASH_MRSW_PREFETCH_NODE_N(myu64_mrsw, ctx, 4u, g_u64);
+    RIX_HASH_MRSW_CMP_KEY_N(myu64_mrsw, ctx, 4u, g_u64, res);
+    if (res[0] != &g_u64[1] || res[1] != &g_u64[7] ||
+        res[2] != NULL || res[3] != &g_u64[13])
+        FAIL("u64 staged N mismatch");
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_u64(g_u64_bk, g_u64_head.rhh_mask, 8u, &bk, &slot))
+        FAIL("u64 remove_at target not located");
+    if (RIX_HASH_MRSW_REMOVE_AT(myu64_mrsw, &g_u64_head, g_u64_bk, bk, slot)
+        != 8u)
+        FAIL("u64 remove_at returned wrong idx");
+    if (myu64_mrsw_find(&g_u64_head, g_u64_bk, g_u64, g_u64[7].key) != NULL)
+        FAIL("u64 remove_at target still found");
+}
+
+static _Atomic int g_u64_stop;
+static _Atomic int g_u64_fail;
+
+static void *
+u64_stress_reader(void *arg)
+{
+    uintptr_t tid = (uintptr_t)arg;
+    u32 x = (u32)(0x9e3779b9u ^ (tid * 2654435761u));
+    while (!atomic_load_explicit(&g_u64_stop, memory_order_acquire)) {
+        x = x * 1664525u + 1013904223u;
+        unsigned i = x % NB_U64_BASIC;
+        struct myu64_node *f = myu64_mrsw_find(&g_u64_head, g_u64_bk,
+                                               g_u64, g_u64[i].key);
+        if (f != NULL && f != &g_u64[i]) {
+            atomic_store_explicit(&g_u64_fail, 1, memory_order_release);
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void
+test_u64_stress(void)
+{
+    printf("[T] mrsw u64 reader/writer stress\n");
+    u64_init();
+    for (unsigned i = 0u; i < 200u; i++) {
+        if (myu64_mrsw_insert(&g_u64_head, g_u64_bk, g_u64, &g_u64[i]) != NULL)
+            FAILF("u64 stress setup insert[%u] failed", i);
+    }
+    atomic_store_explicit(&g_u64_stop, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_u64_fail, 0, memory_order_relaxed);
+    enum { NR = 4 };
+    pthread_t readers[NR];
+    for (uintptr_t i = 0u; i < NR; i++)
+        if (pthread_create(&readers[i], NULL, u64_stress_reader,
+                           (void *)(i + 1u)) != 0)
+            FAIL("pthread_create u64 reader failed");
+
+    for (unsigned iter = 0u; iter < 50000u; iter++) {
+        unsigned i = 200u + (iter % 64u);
+        struct myu64_node *r = myu64_mrsw_find(&g_u64_head, g_u64_bk,
+                                               g_u64, g_u64[i].key);
+        if (r == NULL) {
+            if (myu64_mrsw_insert(&g_u64_head, g_u64_bk, g_u64,
+                                  &g_u64[i]) != NULL)
+                FAILF("u64 stress insert[%u] failed", i);
+        } else {
+            if (myu64_mrsw_remove(&g_u64_head, g_u64_bk, g_u64,
+                                  &g_u64[i]) != &g_u64[i])
+                FAILF("u64 stress remove[%u] failed", i);
+        }
+        if (atomic_load_explicit(&g_u64_fail, memory_order_acquire))
+            break;
+    }
+    atomic_store_explicit(&g_u64_stop, 1, memory_order_release);
+    for (unsigned i = 0u; i < NR; i++)
+        pthread_join(readers[i], NULL);
+    if (atomic_load_explicit(&g_u64_fail, memory_order_acquire))
+        FAIL("u64 stress reader observed wrong node");
+}
+
 int
 main(void)
 {
@@ -1594,6 +1804,10 @@ main(void)
     test_u32_duplicate();
     test_u32_staged_remove_at();
     test_u32_stress();
+    test_u64_insert_find_remove();
+    test_u64_duplicate();
+    test_u64_staged_remove_at();
+    test_u64_stress();
 
     printf("OK\n");
     return 0;

@@ -82,17 +82,38 @@
 #  define RIX_HASH_U64_BUCKET_ENTRY_SZ 16
 
 /*===========================================================================
- * Bucket layout
+ * Bucket layout - unified for pure U64 and MRSW U64 variants.
+ *
  * 192 bytes = 3 x 64-byte cache lines, aligned to 64 bytes.
  *
- *   CL0+CL1  key[0..15] : 16 x u64  = 128 B  (SIMD key scan target)
- *   CL2      idx[0..15] : 16 x u32  =  64 B  (node indices, 1-origin)
+ *   CL0+CL1  key[0..15] : 16 x u64 = 128 B  (SIMD key scan target)
+ *   CL2      idx[0..15] : 16 x u32 =  64 B  (node indices, 1-origin)
  *
- * idx[16] is exactly u32[16] - find_u32x16 scans it directly in remove.
+ * For MRSW the 16th u64 slot of key[] aliases an _Atomic u32 ctrl followed
+ * by 4 spare bytes, and the 16th u32 slot of idx[] aliases a u32 reserved.
+ * MRSW thus offers 15 usable entries while pure U64 keeps the full 16.
+ *
+ * Allocators must honour the 64-byte alignment (static __attribute__((aligned
+ * (64))), aligned_alloc, or posix_memalign).  Plain malloc/calloc do not
+ * provide sufficient alignment for the vector stores gcc emits when the
+ * struct is reinterpreted via these unions.
  *===========================================================================*/
 struct rix_hash64_bucket_s {
-    u64 key[RIX_HASH_U64_BUCKET_ENTRY_SZ]; /* CL0+CL1: 64-bit keys        */
-    u32 idx[RIX_HASH_U64_BUCKET_ENTRY_SZ]; /* CL2: 1-origin node idx      */
+    union {
+        u64 key[RIX_HASH_U64_BUCKET_ENTRY_SZ];
+        struct {
+            u64         _key_lo[RIX_HASH_U64_BUCKET_ENTRY_SZ - 1];
+            _Atomic u32 ctrl;                  /* MRSW: ctrl @ byte 120 */
+            u32         _ctrl_pad;             /* MRSW: spare 4 B       */
+        };
+    };
+    union {
+        u32 idx[RIX_HASH_U64_BUCKET_ENTRY_SZ];
+        struct {
+            u32 _idx_lo[RIX_HASH_U64_BUCKET_ENTRY_SZ - 1];
+            u32 reserved;                      /* MRSW: byte 188..191   */
+        };
+    };
 } __attribute__((aligned(RIX_CACHE_LINE_SIZE)));
 
 RIX_STATIC_ASSERT(sizeof(struct rix_hash64_bucket_s) == 192u,
@@ -102,6 +123,10 @@ RIX_STATIC_ASSERT(_Alignof(struct rix_hash64_bucket_s) == RIX_CACHE_LINE_SIZE,
 RIX_STATIC_ASSERT(offsetof(struct rix_hash64_bucket_s, idx)
                   == (2u * RIX_CACHE_LINE_SIZE),
                   "rix_hash64_bucket_s.idx must start at cache line 2");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash64_bucket_s, ctrl) == 120u,
+                  "rix_hash64_bucket_s.ctrl must alias key[15] low 4 B");
+RIX_STATIC_ASSERT(offsetof(struct rix_hash64_bucket_s, reserved) == 188u,
+                  "rix_hash64_bucket_s.reserved must alias idx[15]");
 
 /*===========================================================================
  * Head struct
