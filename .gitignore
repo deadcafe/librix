@@ -77,6 +77,9 @@ tests/hashtbl32/hash32_test
 tests/hashtbl32/hash32_bench
 tests/hashtbl64/hash64_test
 tests/hashtbl64/hash64_bench
+tests/hashtbl_mrsw/hash_mrsw_test
+tests/hashtbl_mrsw/bench_pure_vs_mrsw
+tests/ring/ring_test
 samples/test/fc_test
 samples/test/fc_bench
 samples/test/fc_bench_ndebug
