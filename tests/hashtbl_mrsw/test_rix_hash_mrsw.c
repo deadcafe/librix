@@ -158,6 +158,10 @@ RIX_HASH_MRSW_HEAD(myextra_mrsw);
 RIX_HASH_MRSW_GENERATE_SLOT_EXTRA(myextra_mrsw, myextra_node, key, cur_hash,
                                    slot, mykey_cmp)
 
+RIX_HASH_MRMW_HEAD(myextra_mrmw);
+RIX_HASH_MRMW_GENERATE_SLOT_EXTRA(myextra_mrmw, myextra_node, key, cur_hash,
+                                   slot, mykey_cmp)
+
 #define NB_BASIC    20u
 #define NB_BK_BASIC  4u
 
@@ -2032,6 +2036,10 @@ static struct myu64_node g_mrmw_u64[MRMW_N];
 static struct rix_hash64_bucket_s g_mrmw_u64_bk[MRMW_NB_BK]
     __attribute__((aligned(64)));
 static struct myu64_mrmw g_mrmw_u64_head;
+static struct myextra_node g_mrmw_xn[MRMW_N];
+static struct rix_hash_bucket_extra_s g_mrmw_xn_bk[MRMW_NB_BK]
+    __attribute__((aligned(64)));
+static struct myextra_mrmw g_mrmw_xn_head;
 static _Atomic int g_mrmw_start;
 static _Atomic int g_mrmw_stop;
 static _Atomic int g_mrmw_fail;
@@ -2091,6 +2099,17 @@ mrmw_u64_init(void)
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw_u64[i].key = UINT64_C(0xDADA000000000000) | (u64)(i + 1u);
         g_mrmw_u64[i].value = i + 4000u;
+    }
+}
+
+static void
+mrmw_xn_init(void)
+{
+    memset(g_mrmw_xn, 0, sizeof(g_mrmw_xn));
+    myextra_mrmw_init(&g_mrmw_xn_head, g_mrmw_xn_bk, MRMW_NB_BK);
+    for (unsigned i = 0u; i < MRMW_N; i++) {
+        g_mrmw_xn[i].key.hi = UINT64_C(0xABC3000000000000) | (u64)i;
+        g_mrmw_xn[i].key.lo = UINT64_C(0x1237000000000000) ^ (u64)(i * 29u);
     }
 }
 
@@ -2402,6 +2421,64 @@ test_mrmw_u64_insert_find_remove(void)
         FAIL("mrmw u64 remove_at target still found");
 }
 
+static void
+test_mrmw_extra_insert_find_remove(void)
+{
+    printf("[T] mrmw slot_extra insert/find/remove\n");
+    mrmw_xn_init();
+
+    for (unsigned i = 0u; i < 64u; i++) {
+        u32 extra = 0xDAD00000u | i;
+        if (myextra_mrmw_insert(&g_mrmw_xn_head, g_mrmw_xn_bk,
+                                g_mrmw_xn, &g_mrmw_xn[i], extra) != NULL)
+            FAILF("mrmw extra insert[%u] failed", i);
+    }
+    if (myextra_mrmw_insert(&g_mrmw_xn_head, g_mrmw_xn_bk,
+                            g_mrmw_xn, &g_mrmw_xn[7], 0u)
+        != &g_mrmw_xn[7])
+        FAIL("mrmw extra duplicate did not return existing");
+
+    struct rix_hash_mrsw_extra_find_ctx_s ctx[4];
+    struct mykey bad = { UINT64_C(0xBAD), UINT64_C(0xBADBAD) };
+    const struct mykey *keys[4] = {
+        &g_mrmw_xn[1].key, &g_mrmw_xn[3].key, &bad, &g_mrmw_xn[7].key
+    };
+    struct myextra_node *res[4];
+    RIX_HASH_MRMW_HASH_KEY_N(myextra_mrmw, ctx, 4u, &g_mrmw_xn_head,
+                             g_mrmw_xn_bk, keys);
+    RIX_HASH_MRMW_SCAN_BK_N(myextra_mrmw, ctx, 4u, &g_mrmw_xn_head,
+                            g_mrmw_xn_bk);
+    RIX_HASH_MRMW_PREFETCH_NODE_N(myextra_mrmw, ctx, 4u, g_mrmw_xn);
+    RIX_HASH_MRMW_CMP_KEY_N(myextra_mrmw, ctx, 4u, g_mrmw_xn, res);
+    if (res[0] != &g_mrmw_xn[1] || res[1] != &g_mrmw_xn[3] ||
+        res[2] != NULL || res[3] != &g_mrmw_xn[7])
+        FAIL("mrmw extra staged result mismatch");
+
+    for (unsigned i = 0u; i < 64u; i++) {
+        struct myextra_node *f =
+            myextra_mrmw_find(&g_mrmw_xn_head, g_mrmw_xn_bk,
+                              g_mrmw_xn, &g_mrmw_xn[i].key);
+        if (f != &g_mrmw_xn[i])
+            FAILF("mrmw extra find[%u] failed", i);
+        unsigned bk = (unsigned)(f->cur_hash & g_mrmw_xn_head.rhh_mask);
+        unsigned slot = (unsigned)f->slot;
+        if (g_mrmw_xn_bk[bk].extra[slot] != (u32)(0xDAD00000u | i))
+            FAILF("mrmw extra value[%u] mismatch", i);
+    }
+
+    unsigned bk;
+    unsigned slot;
+    if (!locate_idx_extra(g_mrmw_xn_bk, g_mrmw_xn_head.rhh_mask, 8u,
+                          &bk, &slot))
+        FAIL("mrmw extra remove_at target not located");
+    if (RIX_HASH_MRMW_REMOVE_AT(myextra_mrmw, &g_mrmw_xn_head,
+                               g_mrmw_xn_bk, bk, slot) != 8u)
+        FAIL("mrmw extra remove_at returned wrong idx");
+    if (myextra_mrmw_find(&g_mrmw_xn_head, g_mrmw_xn_bk,
+                          g_mrmw_xn, &g_mrmw_xn[7].key) != NULL)
+        FAIL("mrmw extra remove_at target still found");
+}
+
 #define MRMW_DUP_THREADS 8u
 
 static struct mynode g_mrmw_dup[MRMW_DUP_THREADS];
@@ -2574,6 +2651,7 @@ main(void)
     test_mrmw_keyonly_insert_find_remove();
     test_mrmw_u32_insert_find_remove();
     test_mrmw_u64_insert_find_remove();
+    test_mrmw_extra_insert_find_remove();
     test_mrmw_duplicate_race();
     test_mrmw_multi_writer_stress();
 

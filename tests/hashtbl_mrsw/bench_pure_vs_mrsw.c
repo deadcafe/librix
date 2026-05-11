@@ -1,6 +1,6 @@
 /* bench_pure_vs_mrsw.c
  *  Compare pure cuckoo hash variants against their MRSW counterparts and,
- *  for the currently implemented fp/slot/keyonly/u32/u64 family, MRMW counterparts
+ *  for all multi-reader families, MRMW counterparts
  *  under identical single-threaded workloads.  This isolates the per-bucket
  *  ctrl protocol and MRMW writer-lock overhead rather than contention.
  *
@@ -144,6 +144,16 @@ struct n_mrsw_extra {
 };
 RIX_HASH_MRSW_HEAD(ht_mrsw_extra);
 RIX_HASH_MRSW_GENERATE_SLOT_EXTRA(ht_mrsw_extra, n_mrsw_extra, key, cur_hash,
+                                  slot, mykey_cmp)
+
+struct n_mrmw_extra {
+    u32 cur_hash;
+    u16 slot;
+    u16 pad;
+    struct mykey key;
+};
+RIX_HASH_MRMW_HEAD(ht_mrmw_extra);
+RIX_HASH_MRMW_GENERATE_SLOT_EXTRA(ht_mrmw_extra, n_mrmw_extra, key, cur_hash,
                                   slot, mykey_cmp)
 
 struct n_mrsw_u32 {
@@ -769,6 +779,14 @@ DEFINE_MRSW_PTR_BENCH("MRSW SLOT_EXTRA", ht_mrsw_extra, struct n_mrsw_extra,
                       ht_mrsw_extra_remove(&head, bk, nodes, &nodes[i]),
                       RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
+DEFINE_MRSW_PTR_BENCH("MRMW SLOT_EXTRA", ht_mrmw_extra, struct n_mrmw_extra,
+                      struct rix_hash_mrsw_extra_find_ctx_s,
+                      struct rix_hash_bucket_extra_s,
+                      ht_mrmw_extra_init(&head, bk, nb_bk),
+                      if (ht_mrmw_extra_insert(&head, bk, nodes, &nodes[i], (u32)i) != NULL) exit(2),
+                      ht_mrmw_extra_remove(&head, bk, nodes, &nodes[i]),
+                      RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
+
 DEFINE_U32_BENCH("MRSW U32", ht_mrsw_u32, struct n_mrsw_u32,
                  struct rix_hash_mrsw_u32_find_ctx_s,
                  struct rix_hash_bucket_s,
@@ -835,6 +853,7 @@ main(int argc, char **argv)
     bench_ht_mrmw_u64();
     bench_ht_pure_extra();
     bench_ht_mrsw_extra();
+    bench_ht_mrmw_extra();
 
     printf("\n# sink=%" PRIuPTR "\n", g_sink);
     munmap(g_probe_idx, (size_t)g_repeat * BENCH_N * sizeof(u64));
