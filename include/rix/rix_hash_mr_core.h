@@ -68,6 +68,12 @@
  *     use the same SIMD find_u32x16 dispatch as the normal hash table.
  *     Miss-side ctrl verify discards overlapped payload observations that
  *     could otherwise become a false negative.
+ *   - MRMW insert_slow is a writer-only relocation path.  It serializes
+ *     relocations with rhh_kickout_lock, locks bucket writer locks in a
+ *     deterministic order, finds an empty slot by BFS over the cuckoo graph,
+ *     and replays the path with the same publish-before-unpublish ordering as
+ *     MRSW kickout.  Readers remain lockless and may observe the intentional
+ *     transient duplicate created during a move.
  *
  * Bucket layout:
  *   MRSW keeps the classic 128 B / 2 cache-line bucket envelope by using
@@ -98,6 +104,7 @@
 #  include "rix_hash_common.h"
 
 #  include <stdatomic.h>
+#  include <stdlib.h>
 
 /*
  * Multi-reader variants reuse struct rix_hash_bucket_s defined in
@@ -152,7 +159,16 @@ rix_hash_mrsw_nb_bk_hint(unsigned max_entries)
         unsigned         rhh_mask;                                            \
         _Atomic unsigned rhh_nb;                                              \
         _Atomic u32      rhh_kickout_lock;                                    \
+        unsigned        *rhh_kickout_scratch;                                 \
     }
+
+/* Scratch buffer required by MRMW insert_slow.  The caller allocates it and
+ * passes it to name##_init; insert_slow uses it under rhh_kickout_lock so a
+ * single buffer per table is sufficient (no concurrent slow paths).  Element
+ * count is fixed at 3 * nb_bk: a BFS queue plus parent_bk / parent_slot back
+ * pointers. */
+#  define RIX_HASH_MRMW_KICKOUT_SCRATCH_NITEMS(nb_bk)                         \
+    (3u * (unsigned)(nb_bk))
 
 #  define RIX_HASH_MR_HEAD_INIT_MRSW(head)                                   \
     do {                                                                      \
@@ -160,7 +176,10 @@ rix_hash_mrsw_nb_bk_hint(unsigned max_entries)
     } while (0)
 
 #  define RIX_HASH_MR_HEAD_INIT_MRMW(head)                                   \
-    atomic_init(&(head)->rhh_kickout_lock, 0u)
+    do {                                                                      \
+        atomic_init(&(head)->rhh_kickout_lock, 0u);                           \
+        (head)->rhh_kickout_scratch = NULL;                                   \
+    } while (0)
 
 static RIX_FORCE_INLINE u32
 rix_hash_mrsw_ctrl_seq(u32 ctrl)
@@ -282,6 +301,29 @@ rix_hash_mrmw_unlock2(_Atomic u32 *a, _Atomic u32 *b)
     rix_hash_mrmw_lock2(&(a)->wlock, &(b)->wlock)
 #  define RIX_HASH_MR_BK_UNLOCK2_MRMW(a, b)                                  \
     rix_hash_mrmw_unlock2(&(a)->wlock, &(b)->wlock)
+
+#  define RIX_HASH_MR_KICKOUT_LOCK_MRMW(head)                                \
+    rix_hash_mrmw_lock(&(head)->rhh_kickout_lock)
+#  define RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head)                              \
+    rix_hash_mrmw_unlock(&(head)->rhh_kickout_lock)
+
+/* Conservative MRMW relocation lock set.  The slow path is rare and writer
+ * only: readers never observe these locks.  Taking all bucket writer locks
+ * gives a stable cuckoo graph for BFS relocation and keeps the slow algorithm
+ * independent from the fast-path duplicate/empty-slot code. */
+#  define RIX_HASH_MR_BK_LOCK_ALL_MRMW(buckets, nb_bk)                       \
+    do {                                                                      \
+        for (unsigned _rix_hash_mr_b = 0u; _rix_hash_mr_b < (nb_bk);          \
+             _rix_hash_mr_b++)                                                \
+            RIX_HASH_MR_BK_LOCK_MRMW(&(buckets)[_rix_hash_mr_b]);             \
+    } while (0)
+
+#  define RIX_HASH_MR_BK_UNLOCK_ALL_MRMW(buckets, nb_bk)                     \
+    do {                                                                      \
+        unsigned _rix_hash_mr_b = (nb_bk);                                    \
+        while (_rix_hash_mr_b-- > 0u)                                         \
+            RIX_HASH_MR_BK_UNLOCK_MRMW(&(buckets)[_rix_hash_mr_b]);           \
+    } while (0)
 
 static RIX_FORCE_INLINE u32
 rix_hash_mrsw_bucket_valid_load(struct rix_hash_bucket_s *bk,

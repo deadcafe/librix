@@ -89,9 +89,82 @@ ctl_hash_fn(const struct ctl_key *key, u32 mask)
     return h;
 }
 
+static union rix_hash_hash_u
+ctl_path_hash_fn(const struct ctl_key *key, u32 mask)
+{
+    union rix_hash_hash_u h;
+
+    (void)mask;
+    if (key->id <= 15u) {
+        h.val32[0] = 0u;
+        h.val32[1] = 2u;
+    } else if (key->id <= 30u) {
+        h.val32[0] = 1u;
+        h.val32[1] = 2u;
+    } else if (key->id <= 45u) {
+        h.val32[0] = 2u;
+        h.val32[1] = 3u;
+    } else {
+        h.val32[0] = 0u;
+        h.val32[1] = 1u;
+    }
+    return h;
+}
+
 RIX_HASH_MRSW_HEAD(ctlht);
 RIX_HASH_MRSW_GENERATE_EX(ctlht, ctl_node, key, cur_hash,
                           ctl_key_cmp, ctl_hash_fn)
+
+RIX_HASH_MRMW_HEAD(ctlht_mrmw);
+RIX_HASH_MRMW_GENERATE_EX(ctlht_mrmw, ctl_node, key, cur_hash,
+                          ctl_key_cmp, ctl_hash_fn)
+
+struct ctl_slot_node {
+    u32 cur_hash;
+    u8  slot;
+    u8  pad[3];
+    struct ctl_key key;
+};
+
+RIX_HASH_MRMW_HEAD(ctlslot_mrmw);
+RIX_HASH_MRMW_GENERATE_SLOT_EX(ctlslot_mrmw, ctl_slot_node, key, cur_hash,
+                               slot, ctl_key_cmp, ctl_hash_fn)
+
+struct ctl_keyonly_node {
+    struct ctl_key key;
+};
+
+RIX_HASH_MRMW_HEAD(ctlko_mrmw);
+RIX_HASH_MRMW_GENERATE_KEYONLY_EX(ctlko_mrmw, ctl_keyonly_node, key,
+                                  ctl_key_cmp, ctl_hash_fn)
+
+struct ctl_extra_node {
+    u32 cur_hash;
+    u8  slot;
+    u8  pad[3];
+    struct ctl_key key;
+};
+
+RIX_HASH_MRMW_HEAD(ctlextra_mrmw);
+RIX_HASH_MRMW_GENERATE_SLOT_EXTRA_EX(ctlextra_mrmw, ctl_extra_node, key,
+                                     cur_hash, slot, ctl_key_cmp, ctl_hash_fn)
+
+RIX_HASH_MRMW_HEAD(ctlpath_mrmw);
+RIX_HASH_MRMW_GENERATE_EX(ctlpath_mrmw, ctl_node, key, cur_hash,
+                          ctl_key_cmp, ctl_path_hash_fn)
+
+RIX_HASH_MRMW_HEAD(ctlpathslot_mrmw);
+RIX_HASH_MRMW_GENERATE_SLOT_EX(ctlpathslot_mrmw, ctl_slot_node, key, cur_hash,
+                               slot, ctl_key_cmp, ctl_path_hash_fn)
+
+RIX_HASH_MRMW_HEAD(ctlpathko_mrmw);
+RIX_HASH_MRMW_GENERATE_KEYONLY_EX(ctlpathko_mrmw, ctl_keyonly_node, key,
+                                  ctl_key_cmp, ctl_path_hash_fn)
+
+RIX_HASH_MRMW_HEAD(ctlpathextra_mrmw);
+RIX_HASH_MRMW_GENERATE_SLOT_EXTRA_EX(ctlpathextra_mrmw, ctl_extra_node, key,
+                                     cur_hash, slot, ctl_key_cmp,
+                                     ctl_path_hash_fn)
 
 /* SLOT variant test fixture (mirrors mynode but with slot_field). */
 struct myslot_node {
@@ -173,10 +246,33 @@ static struct myht_mrsw g_head;
 #define CTL_NODES 64u
 #define CTL_NB_BK  4u
 
+/* Shared MRMW kickout scratch buffer.  Sized for the largest MRMW table used
+ * in this file (1024 buckets); all MRMW tables attach this scratch after
+ * init.  Tests do not run concurrent slow paths on different tables. */
+#define MRMW_SCRATCH_MAX_NB 1024u
+static unsigned
+g_mrmw_scratch[RIX_HASH_MRMW_KICKOUT_SCRATCH_NITEMS(MRMW_SCRATCH_MAX_NB)];
+
 static struct ctl_node g_ctl[CTL_NODES];
 static struct rix_hash_bucket_s g_ctl_bk[CTL_NB_BK]
     __attribute__((aligned(64)));
 static struct ctlht g_ctl_head;
+static struct ctl_node g_ctl_mrmw[CTL_NODES];
+static struct rix_hash_bucket_s g_ctl_mrmw_bk[CTL_NB_BK]
+    __attribute__((aligned(64)));
+static struct ctlht_mrmw g_ctl_mrmw_head;
+static struct ctl_slot_node g_ctl_slot_mrmw[CTL_NODES];
+static struct rix_hash_bucket_s g_ctl_slot_mrmw_bk[CTL_NB_BK]
+    __attribute__((aligned(64)));
+static struct ctlslot_mrmw g_ctl_slot_mrmw_head;
+static struct ctl_keyonly_node g_ctl_ko_mrmw[CTL_NODES];
+static struct rix_hash_bucket_s g_ctl_ko_mrmw_bk[CTL_NB_BK]
+    __attribute__((aligned(64)));
+static struct ctlko_mrmw g_ctl_ko_mrmw_head;
+static struct ctl_extra_node g_ctl_extra_mrmw[CTL_NODES];
+static struct rix_hash_bucket_extra_s g_ctl_extra_mrmw_bk[CTL_NB_BK]
+    __attribute__((aligned(64)));
+static struct ctlextra_mrmw g_ctl_extra_mrmw_head;
 
 static _Atomic int g_hook_enabled;
 static _Atomic int g_hook_reached;
@@ -486,6 +582,7 @@ find_thread(void *arg)
 struct ctl_op_arg {
     struct ctl_node *node;
     struct ctl_node *ret;
+    _Atomic int done;
 };
 
 struct ctl_find_arg {
@@ -498,6 +595,17 @@ ctl_insert_thread(void *arg)
 {
     struct ctl_op_arg *a = (struct ctl_op_arg *)arg;
     a->ret = ctlht_insert(&g_ctl_head, g_ctl_bk, g_ctl, a->node);
+    atomic_store_explicit(&a->done, 1, memory_order_release);
+    return NULL;
+}
+
+static void *
+ctl_mrmw_insert_thread(void *arg)
+{
+    struct ctl_op_arg *a = (struct ctl_op_arg *)arg;
+    a->ret = ctlht_mrmw_insert(&g_ctl_mrmw_head, g_ctl_mrmw_bk,
+                               g_ctl_mrmw, a->node);
+    atomic_store_explicit(&a->done, 1, memory_order_release);
     return NULL;
 }
 
@@ -638,6 +746,36 @@ ctl_init(void)
         g_ctl[i].key.id = i + 1u;
 }
 
+static void
+ctl_mrmw_init(void)
+{
+    memset(g_ctl_mrmw, 0, sizeof(g_ctl_mrmw));
+    ctlht_mrmw_init(&g_ctl_mrmw_head, g_ctl_mrmw_bk, CTL_NB_BK);
+    ctlht_mrmw_attach_kickout_scratch(&g_ctl_mrmw_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < CTL_NODES; i++)
+        g_ctl_mrmw[i].key.id = i + 1u;
+
+    memset(g_ctl_slot_mrmw, 0, sizeof(g_ctl_slot_mrmw));
+    ctlslot_mrmw_init(&g_ctl_slot_mrmw_head, g_ctl_slot_mrmw_bk, CTL_NB_BK);
+    ctlslot_mrmw_attach_kickout_scratch(&g_ctl_slot_mrmw_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < CTL_NODES; i++)
+        g_ctl_slot_mrmw[i].key.id = i + 1u;
+
+    memset(g_ctl_ko_mrmw, 0, sizeof(g_ctl_ko_mrmw));
+    ctlko_mrmw_init(&g_ctl_ko_mrmw_head, g_ctl_ko_mrmw_bk, CTL_NB_BK);
+    ctlko_mrmw_attach_kickout_scratch(&g_ctl_ko_mrmw_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < CTL_NODES; i++)
+        g_ctl_ko_mrmw[i].key.id = i + 1u;
+
+    memset(g_ctl_extra_mrmw, 0, sizeof(g_ctl_extra_mrmw));
+    ctlextra_mrmw_init(&g_ctl_extra_mrmw_head, g_ctl_extra_mrmw_bk,
+                       CTL_NB_BK);
+    ctlextra_mrmw_attach_kickout_scratch(&g_ctl_extra_mrmw_head,
+                                         g_mrmw_scratch);
+    for (unsigned i = 0u; i < CTL_NODES; i++)
+        g_ctl_extra_mrmw[i].key.id = i + 1u;
+}
+
 static unsigned
 ctl_count_idx_in_bucket(unsigned bk, u32 idx)
 {
@@ -648,6 +786,22 @@ ctl_count_idx_in_bucket(unsigned bk, u32 idx)
                                         memory_order_acquire);
         u32 valid = rix_hash_mrsw_ctrl_valid(ctrl);
         u32 si = g_ctl_bk[bk].idx[s];
+        if ((valid & (UINT32_C(1) << s)) != 0u && si == idx)
+            count++;
+    }
+    return count;
+}
+
+static unsigned
+count_idx_common(struct rix_hash_bucket_s *buckets, unsigned bk, u32 idx)
+{
+    unsigned count = 0u;
+
+    for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
+        u32 ctrl = atomic_load_explicit(&buckets[bk].ctrl,
+                                        memory_order_acquire);
+        u32 valid = rix_hash_mrsw_ctrl_valid(ctrl);
+        u32 si = buckets[bk].idx[s];
         if ((valid & (UINT32_C(1) << s)) != 0u && si == idx)
             count++;
     }
@@ -730,7 +884,7 @@ test_forced_kickout_publish_before_unpublish(void)
     }
 
     hook_arm("move_before_old_clear");
-    struct ctl_op_arg wa = { &g_ctl[30], NULL };
+    struct ctl_op_arg wa = { &g_ctl[30], NULL, ATOMIC_VAR_INIT(0) };
     pthread_t wt;
     if (pthread_create(&wt, NULL, ctl_insert_thread, &wa) != 0)
         FAIL("pthread_create ctl writer failed");
@@ -2040,15 +2194,45 @@ static struct myextra_node g_mrmw_xn[MRMW_N];
 static struct rix_hash_bucket_extra_s g_mrmw_xn_bk[MRMW_NB_BK]
     __attribute__((aligned(64)));
 static struct myextra_mrmw g_mrmw_xn_head;
+RIX_STATIC_ASSERT(MRMW_NB_BK <= MRMW_SCRATCH_MAX_NB,
+                  "MRMW_NB_BK must not exceed shared scratch capacity");
 static _Atomic int g_mrmw_start;
 static _Atomic int g_mrmw_stop;
 static _Atomic int g_mrmw_fail;
+
+/* Concurrent insert+remove churn.  Each writer repeats { insert my keys,
+ * remove my keys }.  Multiple writers running in parallel keep the table at
+ * a high fill level so insert_slow runs often, and a slow-path move from one
+ * writer may relocate another writer's entries between its insert and remove.
+ * If remove uses stale hash_field/slot_field to locate the entry, remove
+ * fails and the test trips g_mrmw_fail. */
+#define MRMW_CHURN_NB_BK    16u
+#define MRMW_CHURN_PER      50u
+#define MRMW_CHURN_WRITERS  4u
+#define MRMW_CHURN_N       (MRMW_CHURN_PER * MRMW_CHURN_WRITERS)
+#define MRMW_CHURN_ITERS    128u
+
+static struct mynode g_mrmw_churn[MRMW_CHURN_N];
+static struct rix_hash_bucket_s g_mrmw_churn_bk[MRMW_CHURN_NB_BK]
+    __attribute__((aligned(64)));
+static struct myht_mrmw g_mrmw_churn_head;
+
+static struct myslot_node g_mrmw_churn_slot[MRMW_CHURN_N];
+static struct rix_hash_bucket_s g_mrmw_churn_slot_bk[MRMW_CHURN_NB_BK]
+    __attribute__((aligned(64)));
+static struct myslot_mrmw g_mrmw_churn_slot_head;
+
+static struct myextra_node g_mrmw_churn_xn[MRMW_CHURN_N];
+static struct rix_hash_bucket_extra_s g_mrmw_churn_xn_bk[MRMW_CHURN_NB_BK]
+    __attribute__((aligned(64)));
+static struct myextra_mrmw g_mrmw_churn_xn_head;
 
 static void
 mrmw_init(void)
 {
     memset(g_mrmw, 0, sizeof(g_mrmw));
     myht_mrmw_init(&g_mrmw_head, g_mrmw_bk, MRMW_NB_BK);
+    myht_mrmw_attach_kickout_scratch(&g_mrmw_head, g_mrmw_scratch);
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw[i].key.hi = UINT64_C(0xABC0000000000000) | (u64)i;
         g_mrmw[i].key.lo = UINT64_C(0x1234000000000000) ^ (u64)(i * 17u);
@@ -2061,6 +2245,7 @@ mrmw_slot_init(void)
 {
     memset(g_mrmw_slot, 0, sizeof(g_mrmw_slot));
     myslot_mrmw_init(&g_mrmw_slot_head, g_mrmw_slot_bk, MRMW_NB_BK);
+    myslot_mrmw_attach_kickout_scratch(&g_mrmw_slot_head, g_mrmw_scratch);
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw_slot[i].key.hi = UINT64_C(0xABC1000000000000) | (u64)i;
         g_mrmw_slot[i].key.lo = UINT64_C(0x1235000000000000) ^ (u64)(i * 19u);
@@ -2073,6 +2258,7 @@ mrmw_ko_init(void)
 {
     memset(g_mrmw_ko, 0, sizeof(g_mrmw_ko));
     mykeyonly_mrmw_init(&g_mrmw_ko_head, g_mrmw_ko_bk, MRMW_NB_BK);
+    mykeyonly_mrmw_attach_kickout_scratch(&g_mrmw_ko_head, g_mrmw_scratch);
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw_ko[i].key.hi = UINT64_C(0xABC2000000000000) | (u64)i;
         g_mrmw_ko[i].key.lo = UINT64_C(0x1236000000000000) ^ (u64)(i * 23u);
@@ -2085,6 +2271,7 @@ mrmw_u32_init(void)
 {
     memset(g_mrmw_u32, 0, sizeof(g_mrmw_u32));
     myu32_mrmw_init(&g_mrmw_u32_head, g_mrmw_u32_bk, MRMW_NB_BK);
+    myu32_mrmw_attach_kickout_scratch(&g_mrmw_u32_head, g_mrmw_scratch);
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw_u32[i].key = i + 1u;
         g_mrmw_u32[i].value = i + 3000u;
@@ -2096,6 +2283,7 @@ mrmw_u64_init(void)
 {
     memset(g_mrmw_u64, 0, sizeof(g_mrmw_u64));
     myu64_mrmw_init(&g_mrmw_u64_head, g_mrmw_u64_bk, MRMW_NB_BK);
+    myu64_mrmw_attach_kickout_scratch(&g_mrmw_u64_head, g_mrmw_scratch);
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw_u64[i].key = UINT64_C(0xDADA000000000000) | (u64)(i + 1u);
         g_mrmw_u64[i].value = i + 4000u;
@@ -2107,6 +2295,7 @@ mrmw_xn_init(void)
 {
     memset(g_mrmw_xn, 0, sizeof(g_mrmw_xn));
     myextra_mrmw_init(&g_mrmw_xn_head, g_mrmw_xn_bk, MRMW_NB_BK);
+    myextra_mrmw_attach_kickout_scratch(&g_mrmw_xn_head, g_mrmw_scratch);
     for (unsigned i = 0u; i < MRMW_N; i++) {
         g_mrmw_xn[i].key.hi = UINT64_C(0xABC3000000000000) | (u64)i;
         g_mrmw_xn[i].key.lo = UINT64_C(0x1237000000000000) ^ (u64)(i * 29u);
@@ -2479,6 +2668,422 @@ test_mrmw_extra_insert_find_remove(void)
         FAIL("mrmw extra remove_at target still found");
 }
 
+static void
+test_mrmw_insert_slow_controlled_variants(void)
+{
+    printf("[T] mrmw controlled insert_slow variants\n");
+    ctl_mrmw_init();
+
+    for (unsigned i = 0u; i < 30u; i++) {
+        if (ctlht_mrmw_insert(&g_ctl_mrmw_head, g_ctl_mrmw_bk,
+                              g_ctl_mrmw, &g_ctl_mrmw[i]) != NULL)
+            FAILF("mrmw fp slow setup insert[%u] failed", i);
+        if (ctlslot_mrmw_insert(&g_ctl_slot_mrmw_head, g_ctl_slot_mrmw_bk,
+                                g_ctl_slot_mrmw, &g_ctl_slot_mrmw[i]) != NULL)
+            FAILF("mrmw slot slow setup insert[%u] failed", i);
+        if (ctlko_mrmw_insert(&g_ctl_ko_mrmw_head, g_ctl_ko_mrmw_bk,
+                              g_ctl_ko_mrmw, &g_ctl_ko_mrmw[i]) != NULL)
+            FAILF("mrmw keyonly slow setup insert[%u] failed", i);
+        if (ctlextra_mrmw_insert(&g_ctl_extra_mrmw_head,
+                                 g_ctl_extra_mrmw_bk, g_ctl_extra_mrmw,
+                                 &g_ctl_extra_mrmw[i], 0x51070000u | i)
+            != NULL)
+            FAILF("mrmw extra slow setup insert[%u] failed", i);
+    }
+
+    if (ctlht_mrmw_insert(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                          &g_ctl_mrmw[30]) != NULL)
+        FAIL("mrmw fp insert_slow failed");
+    if (ctlslot_mrmw_insert(&g_ctl_slot_mrmw_head, g_ctl_slot_mrmw_bk,
+                            g_ctl_slot_mrmw, &g_ctl_slot_mrmw[30]) != NULL)
+        FAIL("mrmw slot insert_slow failed");
+    if (ctlko_mrmw_insert(&g_ctl_ko_mrmw_head, g_ctl_ko_mrmw_bk,
+                          g_ctl_ko_mrmw, &g_ctl_ko_mrmw[30]) != NULL)
+        FAIL("mrmw keyonly insert_slow failed");
+    if (ctlextra_mrmw_insert(&g_ctl_extra_mrmw_head, g_ctl_extra_mrmw_bk,
+                             g_ctl_extra_mrmw, &g_ctl_extra_mrmw[30],
+                             0x5107001eu) != NULL)
+        FAIL("mrmw extra insert_slow failed");
+
+    for (unsigned i = 0u; i <= 30u; i++) {
+        if (ctlht_mrmw_find(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                            &g_ctl_mrmw[i].key) != &g_ctl_mrmw[i])
+            FAILF("mrmw fp slow find[%u] failed", i);
+        if (ctlslot_mrmw_find(&g_ctl_slot_mrmw_head, g_ctl_slot_mrmw_bk,
+                              g_ctl_slot_mrmw, &g_ctl_slot_mrmw[i].key)
+            != &g_ctl_slot_mrmw[i])
+            FAILF("mrmw slot slow find[%u] failed", i);
+        unsigned bk = (unsigned)(g_ctl_slot_mrmw[i].cur_hash &
+                                 g_ctl_slot_mrmw_head.rhh_mask);
+        unsigned slot = (unsigned)g_ctl_slot_mrmw[i].slot;
+        if (g_ctl_slot_mrmw_bk[bk].idx[slot] != i + 1u)
+            FAILF("mrmw slot slow slot[%u] mismatch", i);
+        if (ctlko_mrmw_find(&g_ctl_ko_mrmw_head, g_ctl_ko_mrmw_bk,
+                            g_ctl_ko_mrmw, &g_ctl_ko_mrmw[i].key)
+            != &g_ctl_ko_mrmw[i])
+            FAILF("mrmw keyonly slow find[%u] failed", i);
+        if (ctlextra_mrmw_find(&g_ctl_extra_mrmw_head, g_ctl_extra_mrmw_bk,
+                               g_ctl_extra_mrmw, &g_ctl_extra_mrmw[i].key)
+            != &g_ctl_extra_mrmw[i])
+            FAILF("mrmw extra slow find[%u] failed", i);
+        bk = (unsigned)(g_ctl_extra_mrmw[i].cur_hash &
+                        g_ctl_extra_mrmw_head.rhh_mask);
+        slot = (unsigned)g_ctl_extra_mrmw[i].slot;
+        if (g_ctl_extra_mrmw_bk[bk].idx[slot] != i + 1u)
+            FAILF("mrmw extra slow slot[%u] mismatch", i);
+        if (g_ctl_extra_mrmw_bk[bk].extra[slot] != (0x51070000u | i))
+            FAILF("mrmw extra slow extra[%u] mismatch", i);
+    }
+}
+
+static void
+test_mrmw_insert_slow_publish_before_unpublish(void)
+{
+    printf("[T] mrmw insert_slow publish-before-unpublish\n");
+    ctl_mrmw_init();
+
+    for (unsigned i = 0u; i < 30u; i++) {
+        if (ctlht_mrmw_insert(&g_ctl_mrmw_head, g_ctl_mrmw_bk,
+                              g_ctl_mrmw, &g_ctl_mrmw[i]) != NULL)
+            FAILF("mrmw handoff setup insert[%u] failed", i);
+    }
+
+    hook_arm("move_before_old_clear");
+    struct ctl_op_arg wa = { &g_ctl_mrmw[30], NULL, ATOMIC_VAR_INIT(0) };
+    pthread_t wt;
+    if (pthread_create(&wt, NULL, ctl_mrmw_insert_thread, &wa) != 0)
+        FAIL("pthread_create mrmw handoff writer failed");
+    wait_reached();
+
+    if (count_idx_common(g_ctl_mrmw_bk, 0u, 1u) != 1u)
+        FAIL("mrmw slow victim disappeared from old bucket before clear");
+    if (count_idx_common(g_ctl_mrmw_bk, 2u, 1u) != 1u)
+        FAIL("mrmw slow victim was not visible in alternate before clear");
+    if (ctlht_mrmw_find(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                        &g_ctl_mrmw[0].key) != &g_ctl_mrmw[0])
+        FAIL("mrmw slow victim find failed during handoff");
+
+    hook_release();
+    pthread_join(wt, NULL);
+    hook_disarm();
+
+    if (wa.ret != NULL)
+        FAIL("mrmw slow handoff insert returned non-NULL");
+    if (ctlht_mrmw_find(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                        &g_ctl_mrmw[30].key) != &g_ctl_mrmw[30])
+        FAIL("mrmw slow inserted node not found after handoff");
+}
+
+static void
+test_mrmw_insert_slow_duplicate_recheck_race(void)
+{
+    printf("[T] mrmw insert_slow duplicate recheck race\n");
+    ctl_mrmw_init();
+
+    for (unsigned i = 0u; i < 30u; i++) {
+        if (ctlht_mrmw_insert(&g_ctl_mrmw_head, g_ctl_mrmw_bk,
+                              g_ctl_mrmw, &g_ctl_mrmw[i]) != NULL)
+            FAILF("mrmw duplicate recheck setup insert[%u] failed", i);
+    }
+    g_ctl_mrmw[31].key = g_ctl_mrmw[30].key;
+
+    hook_arm("insert_slow_before_lock");
+    struct ctl_op_arg wa = { &g_ctl_mrmw[30], NULL, ATOMIC_VAR_INIT(0) };
+    pthread_t wt;
+    if (pthread_create(&wt, NULL, ctl_mrmw_insert_thread, &wa) != 0)
+        FAIL("pthread_create mrmw duplicate recheck writer failed");
+    wait_reached();
+
+    atomic_store_explicit(&g_hook_enabled, 0, memory_order_release);
+    if (ctlht_mrmw_insert(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                          &g_ctl_mrmw[31]) != NULL)
+        FAIL("mrmw duplicate recheck competing insert failed");
+
+    hook_release();
+    pthread_join(wt, NULL);
+    hook_disarm();
+
+    if (wa.ret != &g_ctl_mrmw[31])
+        FAIL("mrmw slow insert did not return duplicate inserted by racer");
+    if (atomic_load_explicit(&g_ctl_mrmw_head.rhh_nb, memory_order_relaxed)
+        != 31u)
+        FAIL("mrmw duplicate recheck changed entry count");
+    if (ctlht_mrmw_find(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                        &g_ctl_mrmw[30].key) != &g_ctl_mrmw[31])
+        FAIL("mrmw duplicate recheck find returned wrong node");
+}
+
+static void
+test_mrmw_insert_slow_writer_serialization(void)
+{
+    printf("[T] mrmw insert_slow writer serialization\n");
+    ctl_mrmw_init();
+
+    for (unsigned i = 0u; i < 30u; i++) {
+        if (ctlht_mrmw_insert(&g_ctl_mrmw_head, g_ctl_mrmw_bk,
+                              g_ctl_mrmw, &g_ctl_mrmw[i]) != NULL)
+            FAILF("mrmw serialization setup insert[%u] failed", i);
+    }
+
+    hook_arm("move_before_old_clear");
+    struct ctl_op_arg a0 = { &g_ctl_mrmw[30], NULL, ATOMIC_VAR_INIT(0) };
+    struct ctl_op_arg a1 = { &g_ctl_mrmw[31], NULL, ATOMIC_VAR_INIT(0) };
+    pthread_t t0;
+    pthread_t t1;
+    if (pthread_create(&t0, NULL, ctl_mrmw_insert_thread, &a0) != 0)
+        FAIL("pthread_create mrmw first slow writer failed");
+    wait_reached();
+    if (pthread_create(&t1, NULL, ctl_mrmw_insert_thread, &a1) != 0)
+        FAIL("pthread_create mrmw second slow writer failed");
+
+    for (unsigned i = 0u; i < 100000u; i++) {
+        if (atomic_load_explicit(&a1.done, memory_order_acquire))
+            FAIL("second mrmw slow writer completed while first held locks");
+        sched_yield();
+    }
+
+    hook_release();
+    pthread_join(t0, NULL);
+    pthread_join(t1, NULL);
+    hook_disarm();
+
+    if (a0.ret != NULL || a1.ret != NULL)
+        FAIL("mrmw serialized slow insert returned non-NULL");
+    if (ctlht_mrmw_find(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                        &g_ctl_mrmw[30].key) != &g_ctl_mrmw[30])
+        FAIL("first serialized slow insert not found");
+    if (ctlht_mrmw_find(&g_ctl_mrmw_head, g_ctl_mrmw_bk, g_ctl_mrmw,
+                        &g_ctl_mrmw[31].key) != &g_ctl_mrmw[31])
+        FAIL("second serialized slow insert not found");
+}
+
+static void
+test_mrmw_insert_slow_multihop_variants(void)
+{
+    printf("[T] mrmw insert_slow multi-hop variants\n");
+    struct ctl_node fp[46];
+    struct ctl_slot_node slot_nodes[46];
+    struct ctl_keyonly_node ko[46];
+    struct ctl_extra_node extra_nodes[46];
+    struct rix_hash_bucket_s fp_bk[4] __attribute__((aligned(64)));
+    struct rix_hash_bucket_s slot_bk[4] __attribute__((aligned(64)));
+    struct rix_hash_bucket_s ko_bk[4] __attribute__((aligned(64)));
+    struct rix_hash_bucket_extra_s extra_bk[4] __attribute__((aligned(64)));
+    struct ctlpath_mrmw fp_head;
+    struct ctlpathslot_mrmw slot_head;
+    struct ctlpathko_mrmw ko_head;
+    struct ctlpathextra_mrmw extra_head;
+
+    memset(fp, 0, sizeof(fp));
+    memset(slot_nodes, 0, sizeof(slot_nodes));
+    memset(ko, 0, sizeof(ko));
+    memset(extra_nodes, 0, sizeof(extra_nodes));
+    ctlpath_mrmw_init(&fp_head, fp_bk, 4u);
+    ctlpath_mrmw_attach_kickout_scratch(&fp_head, g_mrmw_scratch);
+    ctlpathslot_mrmw_init(&slot_head, slot_bk, 4u);
+    ctlpathslot_mrmw_attach_kickout_scratch(&slot_head, g_mrmw_scratch);
+    ctlpathko_mrmw_init(&ko_head, ko_bk, 4u);
+    ctlpathko_mrmw_attach_kickout_scratch(&ko_head, g_mrmw_scratch);
+    ctlpathextra_mrmw_init(&extra_head, extra_bk, 4u);
+    ctlpathextra_mrmw_attach_kickout_scratch(&extra_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < 46u; i++) {
+        fp[i].key.id = i + 1u;
+        slot_nodes[i].key.id = i + 1u;
+        ko[i].key.id = i + 1u;
+        extra_nodes[i].key.id = i + 1u;
+    }
+
+    for (unsigned i = 0u; i < 45u; i++) {
+        if (ctlpath_mrmw_insert(&fp_head, fp_bk, fp, &fp[i]) != NULL)
+            FAILF("mrmw fp multihop setup insert[%u] failed", i);
+        if (ctlpathslot_mrmw_insert(&slot_head, slot_bk, slot_nodes,
+                                    &slot_nodes[i]) != NULL)
+            FAILF("mrmw slot multihop setup insert[%u] failed", i);
+        if (ctlpathko_mrmw_insert(&ko_head, ko_bk, ko, &ko[i]) != NULL)
+            FAILF("mrmw keyonly multihop setup insert[%u] failed", i);
+        if (ctlpathextra_mrmw_insert(&extra_head, extra_bk, extra_nodes,
+                                     &extra_nodes[i], 0x4d480000u | i) != NULL)
+            FAILF("mrmw extra multihop setup insert[%u] failed", i);
+    }
+
+    if (ctlpath_mrmw_insert(&fp_head, fp_bk, fp, &fp[45]) != NULL)
+        FAIL("mrmw fp multihop insert_slow failed");
+    if (ctlpathslot_mrmw_insert(&slot_head, slot_bk, slot_nodes,
+                                &slot_nodes[45]) != NULL)
+        FAIL("mrmw slot multihop insert_slow failed");
+    if (ctlpathko_mrmw_insert(&ko_head, ko_bk, ko, &ko[45]) != NULL)
+        FAIL("mrmw keyonly multihop insert_slow failed");
+    if (ctlpathextra_mrmw_insert(&extra_head, extra_bk, extra_nodes,
+                                 &extra_nodes[45], 0x4d48002du) != NULL)
+        FAIL("mrmw extra multihop insert_slow failed");
+
+    for (unsigned i = 0u; i < 46u; i++) {
+        if (ctlpath_mrmw_find(&fp_head, fp_bk, fp, &fp[i].key) != &fp[i])
+            FAILF("mrmw fp multihop find[%u] failed", i);
+        if (ctlpathslot_mrmw_find(&slot_head, slot_bk, slot_nodes,
+                                  &slot_nodes[i].key) != &slot_nodes[i])
+            FAILF("mrmw slot multihop find[%u] failed", i);
+        unsigned bk = (unsigned)(slot_nodes[i].cur_hash & slot_head.rhh_mask);
+        unsigned sl = (unsigned)slot_nodes[i].slot;
+        if (slot_bk[bk].idx[sl] != i + 1u)
+            FAILF("mrmw slot multihop slot[%u] mismatch", i);
+        if (ctlpathko_mrmw_find(&ko_head, ko_bk, ko, &ko[i].key) != &ko[i])
+            FAILF("mrmw keyonly multihop find[%u] failed", i);
+        if (ctlpathextra_mrmw_find(&extra_head, extra_bk, extra_nodes,
+                                   &extra_nodes[i].key) != &extra_nodes[i])
+            FAILF("mrmw extra multihop find[%u] failed", i);
+        bk = (unsigned)(extra_nodes[i].cur_hash & extra_head.rhh_mask);
+        sl = (unsigned)extra_nodes[i].slot;
+        if (extra_bk[bk].idx[sl] != i + 1u)
+            FAILF("mrmw extra multihop slot[%u] mismatch", i);
+        if (extra_bk[bk].extra[sl] != (0x4d480000u | i))
+            FAILF("mrmw extra multihop extra[%u] mismatch", i);
+    }
+}
+
+static u32
+find_u32_pair_key(unsigned b0, unsigned b1, const u32 *used, unsigned nused)
+{
+    for (u32 k = 1u; k != 0u; k++) {
+        union rix_hash_hash_u h = rix_hash_arch->hash_u32(k, 3u);
+        if ((h.val32[0] & 3u) != b0 || (h.val32[1] & 3u) != b1)
+            continue;
+        int seen = 0;
+        for (unsigned i = 0u; i < nused; i++) {
+            if (used[i] == k) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen)
+            return k;
+    }
+    FAIL("could not find u32 pair key");
+    return 0u;
+}
+
+static u64
+find_u64_pair_key(unsigned b0, unsigned b1, const u64 *used, unsigned nused)
+{
+    for (u64 k = 1u; k != 0u; k++) {
+        union rix_hash_hash_u h = rix_hash_arch->hash_u64(k, 3u);
+        if ((h.val32[0] & 3u) != b0 || (h.val32[1] & 3u) != b1)
+            continue;
+        int seen = 0;
+        for (unsigned i = 0u; i < nused; i++) {
+            if (used[i] == k) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen)
+            return k;
+    }
+    FAIL("could not find u64 pair key");
+    return 0u;
+}
+
+static void
+test_mrmw_insert_slow_u32_u64(void)
+{
+    printf("[T] mrmw u32/u64 insert_slow multi-hop\n");
+    struct myu32_node n32[46];
+    struct myu64_node n64[46];
+    struct rix_hash_bucket_s b32[4] __attribute__((aligned(64)));
+    struct rix_hash64_bucket_s b64[4] __attribute__((aligned(64)));
+    struct myu32_mrmw h32;
+    struct myu64_mrmw h64;
+    u32 used32[46];
+    u64 used64[46];
+
+    memset(n32, 0, sizeof(n32));
+    memset(n64, 0, sizeof(n64));
+    myu32_mrmw_init(&h32, b32, 4u);
+    myu32_mrmw_attach_kickout_scratch(&h32, g_mrmw_scratch);
+    myu64_mrmw_init(&h64, b64, 4u);
+    myu64_mrmw_attach_kickout_scratch(&h64, g_mrmw_scratch);
+
+    for (unsigned i = 0u; i < 15u; i++) {
+        used32[i] = find_u32_pair_key(0u, 2u, used32, i);
+        n32[i].key = used32[i];
+        used64[i] = find_u64_pair_key(0u, 2u, used64, i);
+        n64[i].key = used64[i];
+    }
+    for (unsigned i = 15u; i < 30u; i++) {
+        used32[i] = find_u32_pair_key(1u, 2u, used32, i);
+        n32[i].key = used32[i];
+        used64[i] = find_u64_pair_key(1u, 2u, used64, i);
+        n64[i].key = used64[i];
+    }
+    for (unsigned i = 30u; i < 45u; i++) {
+        used32[i] = find_u32_pair_key(2u, 3u, used32, i);
+        n32[i].key = used32[i];
+        used64[i] = find_u64_pair_key(2u, 3u, used64, i);
+        n64[i].key = used64[i];
+    }
+    used32[45] = find_u32_pair_key(0u, 1u, used32, 45u);
+    n32[45].key = used32[45];
+    used64[45] = find_u64_pair_key(0u, 1u, used64, 45u);
+    n64[45].key = used64[45];
+
+    for (unsigned i = 0u; i < 45u; i++) {
+        if (myu32_mrmw_insert(&h32, b32, n32, &n32[i]) != NULL)
+            FAILF("mrmw u32 slow setup insert[%u] failed", i);
+        if (myu64_mrmw_insert(&h64, b64, n64, &n64[i]) != NULL)
+            FAILF("mrmw u64 slow setup insert[%u] failed", i);
+    }
+    if (myu32_mrmw_insert(&h32, b32, n32, &n32[45]) != NULL)
+        FAIL("mrmw u32 insert_slow failed");
+    if (myu64_mrmw_insert(&h64, b64, n64, &n64[45]) != NULL)
+        FAIL("mrmw u64 insert_slow failed");
+
+    for (unsigned i = 0u; i < 46u; i++) {
+        if (myu32_mrmw_find(&h32, b32, n32, n32[i].key) != &n32[i])
+            FAILF("mrmw u32 slow find[%u] failed", i);
+        if (myu64_mrmw_find(&h64, b64, n64, n64[i].key) != &n64[i])
+            FAILF("mrmw u64 slow find[%u] failed", i);
+    }
+}
+
+static void
+test_mrmw_insert_slow_full_failure(void)
+{
+    printf("[T] mrmw u32 insert_slow full failure\n");
+    struct myu32_node nodes[61];
+    struct rix_hash_bucket_s buckets[4] __attribute__((aligned(64)));
+    struct myu32_mrmw head;
+    u32 used[61];
+
+    memset(nodes, 0, sizeof(nodes));
+    myu32_mrmw_init(&head, buckets, 4u);
+    myu32_mrmw_attach_kickout_scratch(&head, g_mrmw_scratch);
+
+    for (unsigned i = 0u; i < 15u; i++)
+        nodes[i].key = used[i] = find_u32_pair_key(0u, 1u, used, i);
+    for (unsigned i = 15u; i < 30u; i++)
+        nodes[i].key = used[i] = find_u32_pair_key(1u, 2u, used, i);
+    for (unsigned i = 30u; i < 45u; i++)
+        nodes[i].key = used[i] = find_u32_pair_key(2u, 3u, used, i);
+    for (unsigned i = 45u; i < 60u; i++)
+        nodes[i].key = used[i] = find_u32_pair_key(3u, 0u, used, i);
+    nodes[60].key = used[60] = find_u32_pair_key(0u, 2u, used, 60u);
+
+    for (unsigned i = 0u; i < 60u; i++) {
+        if (myu32_mrmw_insert(&head, buckets, nodes, &nodes[i]) != NULL)
+            FAILF("mrmw full setup insert[%u] failed", i);
+    }
+    if (atomic_load_explicit(&head.rhh_nb, memory_order_relaxed) != 60u)
+        FAIL("mrmw full setup count mismatch");
+    if (myu32_mrmw_insert(&head, buckets, nodes, &nodes[60]) != &nodes[60])
+        FAIL("mrmw full insert did not fail with input node");
+    if (atomic_load_explicit(&head.rhh_nb, memory_order_relaxed) != 60u)
+        FAIL("mrmw full failure changed count");
+    for (unsigned i = 0u; i < 60u; i++) {
+        if (myu32_mrmw_find(&head, buckets, nodes, nodes[i].key) != &nodes[i])
+            FAILF("mrmw full failure lost entry[%u]", i);
+    }
+}
+
 #define MRMW_DUP_THREADS 8u
 
 static struct mynode g_mrmw_dup[MRMW_DUP_THREADS];
@@ -2511,6 +3116,7 @@ test_mrmw_duplicate_race(void)
     printf("[T] mrmw duplicate insert race\n");
     memset(g_mrmw_dup, 0, sizeof(g_mrmw_dup));
     myht_mrmw_init(&g_mrmw_dup_head, g_mrmw_dup_bk, 16u);
+    myht_mrmw_attach_kickout_scratch(&g_mrmw_dup_head, g_mrmw_scratch);
     for (unsigned i = 0u; i < MRMW_DUP_THREADS; i++) {
         g_mrmw_dup[i].key.hi = UINT64_C(0xD00D000000000000);
         g_mrmw_dup[i].key.lo = UINT64_C(0xCAFE000000000000);
@@ -2540,6 +3146,162 @@ test_mrmw_duplicate_race(void)
     if (myht_mrmw_find(&g_mrmw_dup_head, g_mrmw_dup_bk, g_mrmw_dup,
                        &g_mrmw_dup[0].key) == NULL)
         FAIL("mrmw duplicate race entry not found");
+}
+
+static void *
+mrmw_churn_fp_worker(void *arg)
+{
+    struct mrmw_worker_arg *a = (struct mrmw_worker_arg *)arg;
+
+    mrmw_wait_start();
+    for (unsigned iter = 0u; iter < MRMW_CHURN_ITERS; iter++) {
+        unsigned hi = a->begin;
+        for (unsigned i = a->begin; i < a->end; i++) {
+            struct mynode *ins = myht_mrmw_insert(
+                &g_mrmw_churn_head, g_mrmw_churn_bk, g_mrmw_churn,
+                &g_mrmw_churn[i]);
+            if (ins != NULL)
+                break;
+            hi = i + 1u;
+        }
+        for (unsigned i = a->begin; i < hi; i++) {
+            struct mynode *rem = myht_mrmw_remove(
+                &g_mrmw_churn_head, g_mrmw_churn_bk, g_mrmw_churn,
+                &g_mrmw_churn[i]);
+            if (rem != &g_mrmw_churn[i]) {
+                atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+                return NULL;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void *
+mrmw_churn_slot_worker(void *arg)
+{
+    struct mrmw_worker_arg *a = (struct mrmw_worker_arg *)arg;
+
+    mrmw_wait_start();
+    for (unsigned iter = 0u; iter < MRMW_CHURN_ITERS; iter++) {
+        unsigned hi = a->begin;
+        for (unsigned i = a->begin; i < a->end; i++) {
+            struct myslot_node *ins = myslot_mrmw_insert(
+                &g_mrmw_churn_slot_head, g_mrmw_churn_slot_bk,
+                g_mrmw_churn_slot, &g_mrmw_churn_slot[i]);
+            if (ins != NULL)
+                break;
+            hi = i + 1u;
+        }
+        for (unsigned i = a->begin; i < hi; i++) {
+            struct myslot_node *rem = myslot_mrmw_remove(
+                &g_mrmw_churn_slot_head, g_mrmw_churn_slot_bk,
+                g_mrmw_churn_slot, &g_mrmw_churn_slot[i]);
+            if (rem != &g_mrmw_churn_slot[i]) {
+                atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+                return NULL;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void *
+mrmw_churn_extra_worker(void *arg)
+{
+    struct mrmw_worker_arg *a = (struct mrmw_worker_arg *)arg;
+
+    mrmw_wait_start();
+    for (unsigned iter = 0u; iter < MRMW_CHURN_ITERS; iter++) {
+        unsigned hi = a->begin;
+        for (unsigned i = a->begin; i < a->end; i++) {
+            struct myextra_node *ins = myextra_mrmw_insert(
+                &g_mrmw_churn_xn_head, g_mrmw_churn_xn_bk,
+                g_mrmw_churn_xn, &g_mrmw_churn_xn[i], (u32)(i + 1u));
+            if (ins != NULL)
+                break;
+            hi = i + 1u;
+        }
+        for (unsigned i = a->begin; i < hi; i++) {
+            struct myextra_node *rem = myextra_mrmw_remove(
+                &g_mrmw_churn_xn_head, g_mrmw_churn_xn_bk,
+                g_mrmw_churn_xn, &g_mrmw_churn_xn[i]);
+            if (rem != &g_mrmw_churn_xn[i]) {
+                atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+                return NULL;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void
+test_mrmw_churn_run(const char *label, void *(*worker)(void *),
+                    unsigned final_nb)
+{
+    printf("[T] mrmw churn insert+remove %s\n", label);
+    atomic_store_explicit(&g_mrmw_start, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_mrmw_fail, 0, memory_order_relaxed);
+    pthread_t writers[MRMW_CHURN_WRITERS];
+    struct mrmw_worker_arg args[MRMW_CHURN_WRITERS];
+    for (unsigned i = 0u; i < MRMW_CHURN_WRITERS; i++) {
+        args[i].begin = i * MRMW_CHURN_PER;
+        args[i].end = (i + 1u) * MRMW_CHURN_PER;
+        if (pthread_create(&writers[i], NULL, worker, &args[i]) != 0)
+            FAIL("pthread_create mrmw churn writer failed");
+    }
+    atomic_store_explicit(&g_mrmw_start, 1, memory_order_release);
+    for (unsigned i = 0u; i < MRMW_CHURN_WRITERS; i++)
+        pthread_join(writers[i], NULL);
+    if (atomic_load_explicit(&g_mrmw_fail, memory_order_acquire))
+        FAILF("mrmw churn %s detected remove failure", label);
+    (void)final_nb;
+}
+
+static void
+test_mrmw_churn_insert_remove(void)
+{
+    memset(g_mrmw_churn, 0, sizeof(g_mrmw_churn));
+    myht_mrmw_init(&g_mrmw_churn_head, g_mrmw_churn_bk, MRMW_CHURN_NB_BK);
+    myht_mrmw_attach_kickout_scratch(&g_mrmw_churn_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < MRMW_CHURN_N; i++) {
+        g_mrmw_churn[i].key.hi = UINT64_C(0xCEE1000000000000) | (u64)i;
+        g_mrmw_churn[i].key.lo = UINT64_C(0x9999000000000000) ^ (u64)(i * 31u);
+        g_mrmw_churn[i].value = i;
+    }
+    test_mrmw_churn_run("fp", mrmw_churn_fp_worker, 0u);
+    if (atomic_load_explicit(&g_mrmw_churn_head.rhh_nb, memory_order_relaxed)
+        != 0u)
+        FAIL("mrmw churn fp final count must be zero");
+
+    memset(g_mrmw_churn_slot, 0, sizeof(g_mrmw_churn_slot));
+    myslot_mrmw_init(&g_mrmw_churn_slot_head, g_mrmw_churn_slot_bk,
+                     MRMW_CHURN_NB_BK);
+    myslot_mrmw_attach_kickout_scratch(&g_mrmw_churn_slot_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < MRMW_CHURN_N; i++) {
+        g_mrmw_churn_slot[i].key.hi = UINT64_C(0xCEE2000000000000) | (u64)i;
+        g_mrmw_churn_slot[i].key.lo = UINT64_C(0x9999000000000000)
+                                    ^ (u64)(i * 37u);
+        g_mrmw_churn_slot[i].value = i;
+    }
+    test_mrmw_churn_run("slot", mrmw_churn_slot_worker, 0u);
+    if (atomic_load_explicit(&g_mrmw_churn_slot_head.rhh_nb,
+                             memory_order_relaxed) != 0u)
+        FAIL("mrmw churn slot final count must be zero");
+
+    memset(g_mrmw_churn_xn, 0, sizeof(g_mrmw_churn_xn));
+    myextra_mrmw_init(&g_mrmw_churn_xn_head, g_mrmw_churn_xn_bk,
+                      MRMW_CHURN_NB_BK);
+    myextra_mrmw_attach_kickout_scratch(&g_mrmw_churn_xn_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < MRMW_CHURN_N; i++) {
+        g_mrmw_churn_xn[i].key.hi = UINT64_C(0xCEE3000000000000) | (u64)i;
+        g_mrmw_churn_xn[i].key.lo = UINT64_C(0x9999000000000000)
+                                  ^ (u64)(i * 41u);
+    }
+    test_mrmw_churn_run("extra", mrmw_churn_extra_worker, 0u);
+    if (atomic_load_explicit(&g_mrmw_churn_xn_head.rhh_nb,
+                             memory_order_relaxed) != 0u)
+        FAIL("mrmw churn extra final count must be zero");
 }
 
 static void
@@ -2652,7 +3414,15 @@ main(void)
     test_mrmw_u32_insert_find_remove();
     test_mrmw_u64_insert_find_remove();
     test_mrmw_extra_insert_find_remove();
+    test_mrmw_insert_slow_controlled_variants();
+    test_mrmw_insert_slow_publish_before_unpublish();
+    test_mrmw_insert_slow_duplicate_recheck_race();
+    test_mrmw_insert_slow_writer_serialization();
+    test_mrmw_insert_slow_multihop_variants();
+    test_mrmw_insert_slow_u32_u64();
+    test_mrmw_insert_slow_full_failure();
     test_mrmw_duplicate_race();
+    test_mrmw_churn_insert_remove();
     test_mrmw_multi_writer_stress();
 
     printf("OK\n");
