@@ -546,126 +546,10 @@ name##_remove(struct name *head, struct rix_hash64_bucket_s *buckets,         \
     return NULL;                                                              \
 }
 
-/* U64 MRMW insert_slow body macros.  See rix_hash_fp_mr.h for the algorithm
- * description; this is the U64 specialization (bk->key[] holds the full u64
- * key, alt bucket comes from a rehash). */
-#  define _RHM_MRMW_U64_INSERT_SLOW_ALLLOCK(name, type, key_field, attr)      \
-static RIX_UNUSED type *                                                      \
-name##_insert_slow(struct name *head,                                         \
-                   struct rix_hash64_bucket_s *buckets,                       \
-                   type *base, type *elm, u64 key,                            \
-                   unsigned bk0, unsigned bk1)                                \
-{                                                                             \
-    unsigned mask = head->rhh_mask;                                           \
-    unsigned nb_bk = mask + 1u;                                               \
-    unsigned nil = nb_bk;                                                     \
-    u32 elm_idx = name##_hidx(base, elm);                                     \
-    type *ret = elm;                                                          \
-    unsigned *mem = head->rhh_kickout_scratch;                                \
-    if (mem == NULL)                                                          \
-        return ret;                                                           \
-    unsigned *queue = mem;                                                    \
-    unsigned *parent_bk = mem + nb_bk;                                        \
-    unsigned *parent_slot = mem + nb_bk * 2u;                                 \
-    RIX_HASH_MRSW_HOOK(#name, "insert_slow_before_lock", head, buckets,       \
-                       bk0, bk1);                                             \
-    RIX_HASH_MR_KICKOUT_LOCK_MRMW(head);                                      \
-    RIX_HASH_MR_BK_LOCK_ALL_MRMW(buckets, nb_bk);                             \
-    struct rix_hash64_bucket_s *start_bks[2] = { buckets + bk0, buckets + bk1 };\
-    for (int i = 0; i < 2; i++) {                                             \
-        struct rix_hash64_bucket_s *bk = start_bks[i];                        \
-        u32 valid = rix_hash_mrsw_u64_bucket_valid_load(bk,                   \
-                                                        memory_order_acquire);\
-        u32 hits = name##_scan_bucket_keys(bk, key, valid);                   \
-        while (hits) {                                                        \
-            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
-            hits &= hits - 1u;                                                \
-            u32 idx = bk->idx[bit];                                           \
-            if (idx == (u32)RIX_NIL)                                          \
-                continue;                                                     \
-            ret = name##_hptr(base, idx);                                     \
-            goto out;                                                         \
-        }                                                                     \
-        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
-        if (empty) {                                                          \
-            unsigned slot = (unsigned)__builtin_ctz(empty);                   \
-            bk->idx[slot] = elm_idx;                                          \
-            bk->key[slot] = key;                                              \
-            rix_hash_mrsw_u64_bucket_valid_set(bk, slot);                     \
-            atomic_fetch_add_explicit(&head->rhh_nb, 1u,                      \
-                                      memory_order_relaxed);                  \
-            ret = NULL;                                                       \
-            goto out;                                                         \
-        }                                                                     \
-    }                                                                         \
-    for (unsigned i = 0u; i < nb_bk; i++) {                                   \
-        parent_bk[i] = nil;                                                   \
-        parent_slot[i] = nil;                                                 \
-    }                                                                         \
-    unsigned qh = 0u, qt = 0u;                                                \
-    parent_bk[bk0] = bk0;                                                     \
-    parent_slot[bk0] = nil;                                                   \
-    queue[qt++] = bk0;                                                        \
-    if (bk1 != bk0) {                                                         \
-        parent_bk[bk1] = bk1;                                                 \
-        parent_slot[bk1] = nil;                                               \
-        queue[qt++] = bk1;                                                    \
-    }                                                                         \
-    unsigned free_bk = nil, free_slot = nil;                                  \
-    while (qh < qt && free_bk == nil) {                                       \
-        unsigned cur_bk = queue[qh++];                                        \
-        struct rix_hash64_bucket_s *bk = buckets + cur_bk;                    \
-        u32 valid = rix_hash_mrsw_u64_bucket_valid_load(bk,                   \
-                                                        memory_order_relaxed);\
-        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
-        if (empty) {                                                          \
-            free_bk = cur_bk;                                                 \
-            free_slot = (unsigned)__builtin_ctz(empty);                       \
-            break;                                                            \
-        }                                                                     \
-        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {       \
-            if ((valid & (UINT32_C(1) << s)) == 0u)                           \
-                continue;                                                     \
-            u64 move_key = bk->key[s];                                        \
-            union rix_hash_hash_u mh = rix_hash_arch->hash_u64(move_key, mask);\
-            unsigned mb0 = mh.val32[0] & mask;                                \
-            unsigned mb1 = mh.val32[1] & mask;                                \
-            unsigned ab = (cur_bk == mb0) ? mb1 : mb0;                        \
-            if (parent_bk[ab] != nil)                                         \
-                continue;                                                     \
-            parent_bk[ab] = cur_bk;                                           \
-            parent_slot[ab] = s;                                              \
-            queue[qt++] = ab;                                                 \
-        }                                                                     \
-    }                                                                         \
-    if (free_bk == nil)                                                       \
-        goto out;                                                             \
-    while (parent_slot[free_bk] != nil) {                                     \
-        unsigned src_bk = parent_bk[free_bk];                                 \
-        unsigned src_slot = parent_slot[free_bk];                             \
-        struct rix_hash64_bucket_s *src = buckets + src_bk;                   \
-        struct rix_hash64_bucket_s *dst = buckets + free_bk;                  \
-        u32 move_idx = src->idx[src_slot];                                    \
-        u64 move_key = src->key[src_slot];                                    \
-        dst->idx[free_slot] = move_idx;                                       \
-        dst->key[free_slot] = move_key;                                       \
-        rix_hash_mrsw_u64_bucket_valid_set(dst, free_slot);                   \
-        rix_hash_mrsw_u64_bucket_valid_clear(src, src_slot);                  \
-        free_bk = src_bk;                                                     \
-        free_slot = src_slot;                                                 \
-    }                                                                         \
-    buckets[free_bk].idx[free_slot] = elm_idx;                                \
-    buckets[free_bk].key[free_slot] = key;                                    \
-    rix_hash_mrsw_u64_bucket_valid_set(&buckets[free_bk], free_slot);         \
-    atomic_fetch_add_explicit(&head->rhh_nb, 1u, memory_order_relaxed);       \
-    ret = NULL;                                                               \
-out:                                                                          \
-    RIX_HASH_MR_BK_UNLOCK_ALL_MRMW(buckets, nb_bk);                           \
-    RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head);                                    \
-    return ret;                                                               \
-}
-
-#  define _RHM_MRMW_U64_INSERT_SLOW_VISITED(name, type, key_field, attr)      \
+/* U64 MRMW insert_slow.  See rix_hash_fp_mr.h for the algorithm description;
+ * this is the U64 specialization (bk->key[] holds the full u64 key, alt
+ * bucket comes from a rehash). */
+#  define _RHM_MRMW_U64_INSERT_SLOW(name, type, key_field, attr)               \
 static RIX_UNUSED type *                                                      \
 name##_insert_slow(struct name *head,                                         \
                    struct rix_hash64_bucket_s *buckets,                       \
@@ -813,12 +697,6 @@ v_unlock:                                                                     \
     RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head);                                    \
     return ret;                                                               \
 }
-
-#  ifdef RIX_HASH_MRMW_FP_ALLLOCK
-#    define _RHM_MRMW_U64_INSERT_SLOW _RHM_MRMW_U64_INSERT_SLOW_ALLLOCK
-#  else
-#    define _RHM_MRMW_U64_INSERT_SLOW _RHM_MRMW_U64_INSERT_SLOW_VISITED
-#  endif
 
 #  define RIX_HASH_MRMW_GENERATE_U64_INTERNAL(name, type, key_field, attr)    \
 attr void                                                                     \

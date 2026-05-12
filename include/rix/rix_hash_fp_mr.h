@@ -966,241 +966,13 @@ name##_insert(struct name *head,                                              \
 }                                                                             \
 remove_body(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr)
 
-#  define _RHM_MRMW_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr, slot_set, hash_flip, hash_set, alt_bk_expr, remove_body) \
-static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD u32                 \
-name##_insert_slow(struct name *head,                                         \
-                   struct rix_hash_bucket_s *buckets,                         \
-                   struct type *base,                                         \
-                   struct type *elm,                                          \
-                   union rix_hash_hash_u h,                                   \
-                   u32 fp, unsigned bk0, unsigned bk1)                        \
-{                                                                             \
-    unsigned mask = head->rhh_mask;                                           \
-    unsigned nb_bk = mask + 1u;                                               \
-    unsigned nil = nb_bk;                                                     \
-    u32 elm_idx = name##_hidx(base, elm);                                     \
-    u32 ret = elm_idx;                                                        \
-    unsigned *mem = head->rhh_kickout_scratch;                                \
-    if (mem == NULL)                                                          \
-        return ret;                                                           \
-    unsigned *queue = mem;                                                    \
-    unsigned *parent_bk = mem + nb_bk;                                        \
-    unsigned *parent_slot = mem + nb_bk * 2u;                                 \
-    RIX_HASH_MRSW_HOOK(#name, "insert_slow_before_lock", head, buckets,       \
-                       bk0, bk1);                                             \
-    RIX_HASH_MR_KICKOUT_LOCK_MRMW(head);                                      \
-    RIX_HASH_MR_BK_LOCK_ALL_MRMW(buckets, nb_bk);                             \
-    struct rix_hash_bucket_s *start_bks[2] = { buckets + bk0, buckets + bk1 };\
-    unsigned start_idx[2] = { bk0, bk1 };                                     \
-    for (int i = 0; i < 2; i++) {                                             \
-        struct rix_hash_bucket_s *bk = start_bks[i];                          \
-        u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_acquire);\
-        u32 hits = name##_scan_bucket_hashes(bk, fp, valid);                  \
-        while (hits) {                                                        \
-            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
-            hits &= hits - 1u;                                                \
-            u32 node_idx = bk->idx[bit];                                      \
-            if (node_idx == (u32)RIX_NIL)                                     \
-                continue;                                                     \
-            struct type *node = name##_hptr(base, node_idx);                  \
-            if (cmp_fn(&elm->key_field, &node->key_field) == 0) {             \
-                ret = node_idx;                                               \
-                goto out;                                                     \
-            }                                                                 \
-        }                                                                     \
-        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
-        if (empty) {                                                          \
-            unsigned slot = (unsigned)__builtin_ctz(empty);                   \
-            if (i == 1)                                                       \
-                hash_set(elm, h.val32[1], hash_field);                        \
-            slot_set(elm, slot, type, slot_field);                            \
-            bk->idx[slot] = elm_idx;                                          \
-            RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets,           \
-                               start_idx[i], slot);                           \
-            bk->hash[slot] = fp;                                              \
-            rix_hash_mrsw_bucket_valid_set(bk, slot);                         \
-            atomic_fetch_add_explicit(&head->rhh_nb, 1u,                      \
-                                      memory_order_relaxed);                  \
-            ret = 0u;                                                         \
-            goto out;                                                         \
-        }                                                                     \
-    }                                                                         \
-    for (unsigned i = 0u; i < nb_bk; i++) {                                   \
-        parent_bk[i] = nil;                                                   \
-        parent_slot[i] = nil;                                                 \
-    }                                                                         \
-    unsigned qh = 0u, qt = 0u;                                                \
-    parent_bk[bk0] = bk0;                                                     \
-    parent_slot[bk0] = nil;                                                   \
-    queue[qt++] = bk0;                                                        \
-    if (bk1 != bk0) {                                                         \
-        parent_bk[bk1] = bk1;                                                 \
-        parent_slot[bk1] = nil;                                               \
-        queue[qt++] = bk1;                                                    \
-    }                                                                         \
-    unsigned free_bk = nil, free_slot = nil;                                  \
-    while (qh < qt && free_bk == nil) {                                       \
-        unsigned cur_bk = queue[qh++];                                        \
-        struct rix_hash_bucket_s *bk = buckets + cur_bk;                      \
-        u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_relaxed);\
-        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
-        if (empty) {                                                          \
-            free_bk = cur_bk;                                                 \
-            free_slot = (unsigned)__builtin_ctz(empty);                       \
-            break;                                                            \
-        }                                                                     \
-        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {       \
-            if ((valid & (UINT32_C(1) << s)) == 0u)                           \
-                continue;                                                     \
-            u32 idx = bk->idx[s];                                             \
-            if (idx == (u32)RIX_NIL)                                          \
-                continue;                                                     \
-            u32 move_fp = bk->hash[s];                                        \
-            (void)move_fp;                                                    \
-            struct type *node = name##_hptr(base, idx);                       \
-            unsigned ab = alt_bk_expr(move_fp, node, cur_bk, mask, type,      \
-                                      key_field, hash_field, hash_fn);        \
-            if (parent_bk[ab] != nil)                                         \
-                continue;                                                     \
-            parent_bk[ab] = cur_bk;                                           \
-            parent_slot[ab] = s;                                              \
-            queue[qt++] = ab;                                                 \
-        }                                                                     \
-    }                                                                         \
-    if (free_bk == nil)                                                       \
-        goto out;                                                             \
-    while (parent_slot[free_bk] != nil) {                                     \
-        unsigned src_bk = parent_bk[free_bk];                                 \
-        unsigned src_slot = parent_slot[free_bk];                             \
-        struct rix_hash_bucket_s *src = buckets + src_bk;                     \
-        struct rix_hash_bucket_s *dst = buckets + free_bk;                    \
-        u32 move_fp = src->hash[src_slot];                                    \
-        u32 move_idx = src->idx[src_slot];                                    \
-        struct type *node = name##_hptr(base, move_idx);                      \
-        hash_flip(node, move_fp, hash_field);                                 \
-        slot_set(node, free_slot, type, slot_field);                          \
-        dst->idx[free_slot] = move_idx;                                       \
-        RIX_HASH_MRSW_HOOK(#name, "move_idx", head, buckets, free_bk,        \
-                           free_slot);                                        \
-        dst->hash[free_slot] = move_fp;                                       \
-        rix_hash_mrsw_bucket_valid_set(dst, free_slot);                       \
-        RIX_HASH_MRSW_HOOK(#name, "move_before_old_clear", head, buckets,    \
-                           src_bk, src_slot);                                 \
-        rix_hash_mrsw_bucket_valid_clear(src, src_slot);                      \
-        free_bk = src_bk;                                                     \
-        free_slot = src_slot;                                                 \
-    }                                                                         \
-    if (free_bk == bk1)                                                       \
-        hash_set(elm, h.val32[1], hash_field);                                \
-    else                                                                      \
-        hash_set(elm, h.val32[0], hash_field);                                \
-    slot_set(elm, free_slot, type, slot_field);                               \
-    buckets[free_bk].idx[free_slot] = elm_idx;                                \
-    RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets, free_bk,          \
-                       free_slot);                                            \
-    buckets[free_bk].hash[free_slot] = fp;                                    \
-    rix_hash_mrsw_bucket_valid_set(&buckets[free_bk], free_slot);             \
-    atomic_fetch_add_explicit(&head->rhh_nb, 1u, memory_order_relaxed);       \
-    ret = 0u;                                                                 \
-out:                                                                         \
-    RIX_HASH_MR_BK_UNLOCK_ALL_MRMW(buckets, nb_bk);                           \
-    RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head);                                    \
-    return ret;                                                               \
-}                                                                             \
-static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD u32                 \
-name##_insert_hashed_idx(struct name *head,                                   \
-                         struct rix_hash_bucket_s *buckets,                   \
-                         struct type *base,                                   \
-                         struct type *elm,                                    \
-                         union rix_hash_hash_u h)                             \
-{                                                                             \
-    unsigned mask = head->rhh_mask;                                           \
-    unsigned bk0, bk1;                                                        \
-    u32 elm_idx = name##_hidx(base, elm);                                     \
-    u32 fp = rix_hash_fp(h, mask, &bk0, &bk1);                                \
-    struct rix_hash_bucket_s *b0 = buckets + bk0;                             \
-    struct rix_hash_bucket_s *b1 = buckets + bk1;                             \
-    struct rix_hash_bucket_s *bks[2] = { b0, b1 };                            \
-    u32 fp_hits_v[2];                                                         \
-    int empty_slot_v[2];                                                      \
-    hash_set(elm, h.val32[0], hash_field);                                    \
-    RIX_HASH_MR_BK_LOCK2_MRMW(b0, b1);                                        \
-    for (int i = 0; i < 2; i++) {                                             \
-        u32 valid = rix_hash_mrsw_bucket_valid_load(bks[i],                   \
-                                                    memory_order_acquire);    \
-        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
-        fp_hits_v[i] = name##_scan_bucket_hashes(bks[i], fp, valid);          \
-        empty_slot_v[i] = empty ? (int)__builtin_ctz(empty) : -1;             \
-    }                                                                         \
-    for (int i = 0; i < 2; i++) {                                             \
-        u32 hits = fp_hits_v[i];                                              \
-        while (hits) {                                                        \
-            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
-            hits &= hits - 1u;                                                \
-            u32 node_idx = bks[i]->idx[bit];                                  \
-            if (node_idx == (u32)RIX_NIL)                                     \
-                continue;                                                     \
-            struct type *node = name##_hptr(base, node_idx);                  \
-            if (cmp_fn(&elm->key_field, &node->key_field) == 0) {             \
-                RIX_HASH_MR_BK_UNLOCK2_MRMW(b0, b1);                          \
-                return node_idx;                                              \
-            }                                                                 \
-        }                                                                     \
-    }                                                                         \
-    for (int i = 0; i < 2; i++) {                                             \
-        int slot = empty_slot_v[i];                                           \
-        if (slot >= 0) {                                                      \
-            unsigned bki = (i == 0) ? bk0 : bk1;                              \
-            struct rix_hash_bucket_s *bk = bks[i];                            \
-            if (i == 1)                                                       \
-                hash_set(elm, h.val32[1], hash_field);                        \
-            slot_set(elm, slot, type, slot_field);                            \
-            bk->idx[slot] = elm_idx;                                          \
-            RIX_HASH_MRSW_HOOK(#name, "insert_idx", head, buckets, bki,       \
-                               (unsigned)slot);                               \
-            bk->hash[slot] = fp;                                              \
-            rix_hash_mrsw_bucket_valid_set(bk, (unsigned)slot);               \
-            atomic_fetch_add_explicit(&head->rhh_nb, 1u,                      \
-                                      memory_order_relaxed);                  \
-            RIX_HASH_MR_BK_UNLOCK2_MRMW(b0, b1);                              \
-            return 0u;                                                        \
-        }                                                                     \
-    }                                                                         \
-    RIX_HASH_MR_BK_UNLOCK2_MRMW(b0, b1);                                      \
-    return name##_insert_slow(head, buckets, base, elm, h, fp, bk0, bk1);     \
-}                                                                             \
-static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_insert_hashed(struct name *head,                                       \
-                     struct rix_hash_bucket_s *buckets,                       \
-                     struct type *base,                                       \
-                     struct type *elm,                                        \
-                     union rix_hash_hash_u h)                                 \
-{                                                                             \
-    u32 ret_idx = name##_insert_hashed_idx(head, buckets, base, elm, h);      \
-    return (ret_idx == 0u) ? NULL : name##_hptr(base, ret_idx);               \
-}                                                                             \
-attr struct type *                                                            \
-name##_insert(struct name *head,                                              \
-              struct rix_hash_bucket_s *buckets,                              \
-              struct type *base,                                              \
-              struct type *elm)                                               \
-{                                                                             \
-    union rix_hash_hash_u h =                                                 \
-        hash_fn((const RIX_HASH_KEY_TYPE(type, key_field) *)&elm->key_field,  \
-                head->rhh_mask);                                              \
-    return name##_insert_hashed(head, buckets, base, elm, h);                 \
-}                                                                             \
-attr void                                                                     \
-name##_attach_kickout_scratch(struct name *head, unsigned *scratch)           \
-{                                                                             \
-    head->rhh_kickout_scratch = scratch;                                      \
-}                                                                             \
-remove_body(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr)
 
-/* PoC: visited-only-lock slow path.  Identical reader/fast-path API to
- * _RHM_MRMW_OPS_INTERNAL; only insert_slow differs.  See rix_hash_mr_core.h
- * for the algorithm comment (scout + sorted-lock + ctrl-validation). */
-#  define _RHM_MRMW_OPS_VISITED_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr, slot_set, hash_flip, hash_set, alt_bk_expr, remove_body) \
+/* MRMW writer ops.  insert_slow uses the visited-set algorithm: scout the
+ * cuckoo graph locklessly under rhh_kickout_lock, lock the visited buckets in
+ * ascending index order, validate the scout via per-bucket ctrl seqcounts,
+ * and replay the path with the same publish-before-unpublish ordering as the
+ * MRSW kickout.  See rix_hash_mr_core.h for the full protocol description. */
+#  define _RHM_MRMW_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr, slot_set, hash_flip, hash_set, alt_bk_expr, remove_body) \
 static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD u32                 \
 name##_insert_slow(struct name *head,                                         \
                    struct rix_hash_bucket_s *buckets,                         \
@@ -1480,36 +1252,22 @@ remove_body(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr
                       _RHM_NO_SLOT_SET, _RHM_NO_HASH_FLIP, _RHM_NO_HASH_SET,  \
                       _RHM_ALT_BK_REHASH, _RHM_REMOVE_KEYONLY)
 
-/* FP MRMW slow path defaults to the visited-only-lock algorithm.  Define
- * RIX_HASH_MRMW_FP_ALLLOCK to fall back to the conservative all-bucket-lock
- * algorithm (used by SLOT/KEYONLY/U32/U64/EXTRA today).  This is intended
- * for A/B benchmarking only. */
-#  ifdef RIX_HASH_MRMW_FP_ALLLOCK
-#    define RIX_HASH_MRMW_GENERATE_FP_OPS_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
+#  define RIX_HASH_MRMW_GENERATE_FP_OPS_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
     _RHM_MRMW_OPS_INTERNAL(name, type, key_field, hash_field,                 \
                            /* slot_field unused */ key_field,                 \
                            cmp_fn, hash_fn, attr,                             \
                            _RHM_NO_SLOT_SET, _RHM_DO_HASH_FLIP,               \
                            _RHM_DO_HASH_SET, _RHM_ALT_BK_HASHED,              \
                            _RHM_MRMW_REMOVE_FP)
-#  else
-#    define RIX_HASH_MRMW_GENERATE_FP_OPS_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
-    _RHM_MRMW_OPS_VISITED_INTERNAL(name, type, key_field, hash_field,         \
-                           /* slot_field unused */ key_field,                 \
-                           cmp_fn, hash_fn, attr,                             \
-                           _RHM_NO_SLOT_SET, _RHM_DO_HASH_FLIP,               \
-                           _RHM_DO_HASH_SET, _RHM_ALT_BK_HASHED,              \
-                           _RHM_MRMW_REMOVE_FP)
-#  endif
 
-#  ifdef RIX_HASH_MRMW_FP_ALLLOCK
-#    define RIX_HASH_MRMW_GENERATE_SLOT_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
-    _RHM_MRMW_OPS_INTERNAL(name, type, key_field, hash_field, slot_field,     \
-                           cmp_fn, hash_fn, attr,                             \
+#  define RIX_HASH_MRMW_GENERATE_SLOT_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
+    _RHM_MRMW_OPS_INTERNAL(name, type, key_field, hash_field,                 \
+                           slot_field, cmp_fn, hash_fn, attr,                 \
                            _RHM_DO_SLOT_SET, _RHM_DO_HASH_FLIP,               \
                            _RHM_DO_HASH_SET, _RHM_ALT_BK_HASHED,              \
                            _RHM_MRMW_REMOVE_SLOT)
-#    define RIX_HASH_MRMW_GENERATE_KEYONLY_OPS_INTERNAL(name, type, key_field, cmp_fn, hash_fn, attr) \
+
+#  define RIX_HASH_MRMW_GENERATE_KEYONLY_OPS_INTERNAL(name, type, key_field, cmp_fn, hash_fn, attr) \
     _RHM_MRMW_OPS_INTERNAL(name, type, key_field,                             \
                            /* hash_field unused */ key_field,                 \
                            /* slot_field unused */ key_field,                 \
@@ -1517,22 +1275,6 @@ remove_body(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr
                            _RHM_NO_SLOT_SET, _RHM_NO_HASH_FLIP,               \
                            _RHM_NO_HASH_SET, _RHM_ALT_BK_REHASH,              \
                            _RHM_MRMW_REMOVE_KEYONLY)
-#  else
-#    define RIX_HASH_MRMW_GENERATE_SLOT_OPS_INTERNAL(name, type, key_field, hash_field, slot_field, cmp_fn, hash_fn, attr) \
-    _RHM_MRMW_OPS_VISITED_INTERNAL(name, type, key_field, hash_field,         \
-                           slot_field, cmp_fn, hash_fn, attr,                 \
-                           _RHM_DO_SLOT_SET, _RHM_DO_HASH_FLIP,               \
-                           _RHM_DO_HASH_SET, _RHM_ALT_BK_HASHED,              \
-                           _RHM_MRMW_REMOVE_SLOT)
-#    define RIX_HASH_MRMW_GENERATE_KEYONLY_OPS_INTERNAL(name, type, key_field, cmp_fn, hash_fn, attr) \
-    _RHM_MRMW_OPS_VISITED_INTERNAL(name, type, key_field,                     \
-                           /* hash_field unused */ key_field,                 \
-                           /* slot_field unused */ key_field,                 \
-                           cmp_fn, hash_fn, attr,                             \
-                           _RHM_NO_SLOT_SET, _RHM_NO_HASH_FLIP,               \
-                           _RHM_NO_HASH_SET, _RHM_ALT_BK_REHASH,              \
-                           _RHM_MRMW_REMOVE_KEYONLY)
-#  endif
 
 #  define RIX_HASH_MRSW_GENERATE_COMMON_PRE_INTERNAL(name, type, key_field, hash_field, cmp_fn, hash_fn, attr) \
     RIX_HASH_MR_GENERATE_COMMON_PRE_INTERNAL(name, type, key_field,           \
