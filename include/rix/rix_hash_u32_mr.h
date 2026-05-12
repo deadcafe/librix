@@ -503,6 +503,278 @@ name##_remove(struct name *head, struct rix_hash_bucket_s *buckets,           \
     return NULL;                                                              \
 }
 
+/* U32 MRMW insert_slow body macros.  See rix_hash_fp_mr.h for the algorithm
+ * description; this is the U32 specialization (no fingerprint - bk->hash[]
+ * stores the full u32 key, alt bucket comes from a rehash). */
+#  define _RHM_MRMW_U32_INSERT_SLOW_ALLLOCK(name, type, key_field, attr)      \
+static RIX_UNUSED type *                                                      \
+name##_insert_slow(struct name *head,                                         \
+                   struct rix_hash_bucket_s *buckets,                         \
+                   type *base, type *elm, u32 key,                            \
+                   unsigned bk0, unsigned bk1)                                \
+{                                                                             \
+    unsigned mask = head->rhh_mask;                                           \
+    unsigned nb_bk = mask + 1u;                                               \
+    unsigned nil = nb_bk;                                                     \
+    u32 elm_idx = name##_hidx(base, elm);                                     \
+    type *ret = elm;                                                          \
+    unsigned *mem = head->rhh_kickout_scratch;                                \
+    if (mem == NULL)                                                          \
+        return ret;                                                           \
+    unsigned *queue = mem;                                                    \
+    unsigned *parent_bk = mem + nb_bk;                                        \
+    unsigned *parent_slot = mem + nb_bk * 2u;                                 \
+    RIX_HASH_MRSW_HOOK(#name, "insert_slow_before_lock", head, buckets,       \
+                       bk0, bk1);                                             \
+    RIX_HASH_MR_KICKOUT_LOCK_MRMW(head);                                      \
+    RIX_HASH_MR_BK_LOCK_ALL_MRMW(buckets, nb_bk);                             \
+    struct rix_hash_bucket_s *start_bks[2] = { buckets + bk0, buckets + bk1 };\
+    for (int i = 0; i < 2; i++) {                                             \
+        struct rix_hash_bucket_s *bk = start_bks[i];                          \
+        u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_acquire);\
+        u32 hits = name##_scan_bucket_keys(bk, key, valid);                   \
+        while (hits) {                                                        \
+            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
+            hits &= hits - 1u;                                                \
+            u32 idx = bk->idx[bit];                                           \
+            if (idx == (u32)RIX_NIL)                                          \
+                continue;                                                     \
+            ret = name##_hptr(base, idx);                                     \
+            goto out;                                                         \
+        }                                                                     \
+        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
+        if (empty) {                                                          \
+            unsigned slot = (unsigned)__builtin_ctz(empty);                   \
+            bk->idx[slot] = elm_idx;                                          \
+            bk->hash[slot] = key;                                             \
+            rix_hash_mrsw_bucket_valid_set(bk, slot);                         \
+            atomic_fetch_add_explicit(&head->rhh_nb, 1u,                      \
+                                      memory_order_relaxed);                  \
+            ret = NULL;                                                       \
+            goto out;                                                         \
+        }                                                                     \
+    }                                                                         \
+    for (unsigned i = 0u; i < nb_bk; i++) {                                   \
+        parent_bk[i] = nil;                                                   \
+        parent_slot[i] = nil;                                                 \
+    }                                                                         \
+    unsigned qh = 0u, qt = 0u;                                                \
+    parent_bk[bk0] = bk0;                                                     \
+    parent_slot[bk0] = nil;                                                   \
+    queue[qt++] = bk0;                                                        \
+    if (bk1 != bk0) {                                                         \
+        parent_bk[bk1] = bk1;                                                 \
+        parent_slot[bk1] = nil;                                               \
+        queue[qt++] = bk1;                                                    \
+    }                                                                         \
+    unsigned free_bk = nil, free_slot = nil;                                  \
+    while (qh < qt && free_bk == nil) {                                       \
+        unsigned cur_bk = queue[qh++];                                        \
+        struct rix_hash_bucket_s *bk = buckets + cur_bk;                      \
+        u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_relaxed);\
+        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
+        if (empty) {                                                          \
+            free_bk = cur_bk;                                                 \
+            free_slot = (unsigned)__builtin_ctz(empty);                       \
+            break;                                                            \
+        }                                                                     \
+        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {       \
+            if ((valid & (UINT32_C(1) << s)) == 0u)                           \
+                continue;                                                     \
+            u32 move_key = bk->hash[s];                                       \
+            union rix_hash_hash_u mh = rix_hash_arch->hash_u32(move_key, mask);\
+            unsigned mb0 = mh.val32[0] & mask;                                \
+            unsigned mb1 = mh.val32[1] & mask;                                \
+            unsigned ab = (cur_bk == mb0) ? mb1 : mb0;                        \
+            if (parent_bk[ab] != nil)                                         \
+                continue;                                                     \
+            parent_bk[ab] = cur_bk;                                           \
+            parent_slot[ab] = s;                                              \
+            queue[qt++] = ab;                                                 \
+        }                                                                     \
+    }                                                                         \
+    if (free_bk == nil)                                                       \
+        goto out;                                                             \
+    while (parent_slot[free_bk] != nil) {                                     \
+        unsigned src_bk = parent_bk[free_bk];                                 \
+        unsigned src_slot = parent_slot[free_bk];                             \
+        struct rix_hash_bucket_s *src = buckets + src_bk;                     \
+        struct rix_hash_bucket_s *dst = buckets + free_bk;                    \
+        u32 move_idx = src->idx[src_slot];                                    \
+        u32 move_key = src->hash[src_slot];                                   \
+        dst->idx[free_slot] = move_idx;                                       \
+        dst->hash[free_slot] = move_key;                                      \
+        rix_hash_mrsw_bucket_valid_set(dst, free_slot);                       \
+        rix_hash_mrsw_bucket_valid_clear(src, src_slot);                      \
+        free_bk = src_bk;                                                     \
+        free_slot = src_slot;                                                 \
+    }                                                                         \
+    buckets[free_bk].idx[free_slot] = elm_idx;                                \
+    buckets[free_bk].hash[free_slot] = key;                                   \
+    rix_hash_mrsw_bucket_valid_set(&buckets[free_bk], free_slot);             \
+    atomic_fetch_add_explicit(&head->rhh_nb, 1u, memory_order_relaxed);       \
+    ret = NULL;                                                               \
+out:                                                                          \
+    RIX_HASH_MR_BK_UNLOCK_ALL_MRMW(buckets, nb_bk);                           \
+    RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head);                                    \
+    return ret;                                                               \
+}
+
+#  define _RHM_MRMW_U32_INSERT_SLOW_VISITED(name, type, key_field, attr)      \
+static RIX_UNUSED type *                                                      \
+name##_insert_slow(struct name *head,                                         \
+                   struct rix_hash_bucket_s *buckets,                         \
+                   type *base, type *elm, u32 key,                            \
+                   unsigned bk0, unsigned bk1)                                \
+{                                                                             \
+    unsigned mask = head->rhh_mask;                                           \
+    unsigned nb_bk = mask + 1u;                                               \
+    unsigned nil = nb_bk;                                                     \
+    u32 elm_idx = name##_hidx(base, elm);                                     \
+    type *ret = elm;                                                          \
+    unsigned *mem = head->rhh_kickout_scratch;                                \
+    if (mem == NULL)                                                          \
+        return ret;                                                           \
+    unsigned *queue       = mem;                                              \
+    unsigned *parent_bk   = mem + nb_bk;                                      \
+    unsigned *parent_slot = mem + nb_bk * 2u;                                 \
+    unsigned *visit_set   = mem + nb_bk * 3u;                                 \
+    unsigned *ctrl_snap   = mem + nb_bk * 4u;                                 \
+    RIX_HASH_MRSW_HOOK(#name, "insert_slow_before_lock", head, buckets,       \
+                       bk0, bk1);                                             \
+    RIX_HASH_MR_KICKOUT_LOCK_MRMW(head);                                      \
+    for (unsigned attempt = 0u; attempt < 3u; attempt++) {                    \
+        for (unsigned i = 0u; i < nb_bk; i++) {                               \
+            parent_bk[i] = nil;                                               \
+            parent_slot[i] = nil;                                             \
+        }                                                                     \
+        unsigned qh = 0u, qt = 0u;                                            \
+        unsigned nv = 0u;                                                     \
+        parent_bk[bk0] = bk0;                                                 \
+        visit_set[nv++] = bk0;                                                \
+        ctrl_snap[bk0] = atomic_load_explicit(&buckets[bk0].ctrl,             \
+                                              memory_order_acquire);          \
+        queue[qt++] = bk0;                                                    \
+        if (bk1 != bk0) {                                                     \
+            parent_bk[bk1] = bk1;                                             \
+            visit_set[nv++] = bk1;                                            \
+            ctrl_snap[bk1] = atomic_load_explicit(&buckets[bk1].ctrl,         \
+                                                  memory_order_acquire);      \
+            queue[qt++] = bk1;                                                \
+        }                                                                     \
+        type *dup_ret = NULL;                                                 \
+        unsigned free_bk = nil, free_slot = nil;                              \
+        for (int si = 0; si < (int)qt; si++) {                                \
+            unsigned scan_bk = queue[si];                                     \
+            u32 sv = rix_hash_mrsw_ctrl_valid(ctrl_snap[scan_bk]);            \
+            u32 hits = name##_scan_bucket_keys(buckets + scan_bk, key, sv);   \
+            while (hits) {                                                    \
+                unsigned bit = (unsigned)__builtin_ctz(hits);                 \
+                hits &= hits - 1u;                                            \
+                u32 idx = buckets[scan_bk].idx[bit];                          \
+                if (idx == (u32)RIX_NIL) continue;                            \
+                dup_ret = name##_hptr(base, idx);                             \
+                break;                                                        \
+            }                                                                 \
+            if (dup_ret != NULL) break;                                       \
+        }                                                                     \
+        if (dup_ret == NULL) {                                                \
+            while (qh < qt && free_bk == nil) {                               \
+                unsigned cur_bk = queue[qh++];                                \
+                u32 valid = rix_hash_mrsw_ctrl_valid(ctrl_snap[cur_bk]);      \
+                u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;              \
+                if (empty) {                                                  \
+                    free_bk = cur_bk;                                         \
+                    free_slot = (unsigned)__builtin_ctz(empty);               \
+                    break;                                                    \
+                }                                                             \
+                struct rix_hash_bucket_s *bk = buckets + cur_bk;              \
+                for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ;      \
+                     s++) {                                                   \
+                    if ((valid & (UINT32_C(1) << s)) == 0u) continue;         \
+                    u32 mk = bk->hash[s];                                     \
+                    union rix_hash_hash_u mh =                                \
+                        rix_hash_arch->hash_u32(mk, mask);                    \
+                    unsigned mb0 = mh.val32[0] & mask;                        \
+                    unsigned mb1 = mh.val32[1] & mask;                        \
+                    unsigned ab = (cur_bk == mb0) ? mb1 : mb0;                \
+                    if (parent_bk[ab] != nil) continue;                       \
+                    parent_bk[ab] = cur_bk;                                   \
+                    parent_slot[ab] = s;                                      \
+                    visit_set[nv++] = ab;                                     \
+                    ctrl_snap[ab] = atomic_load_explicit(                     \
+                        &buckets[ab].ctrl, memory_order_acquire);             \
+                    queue[qt++] = ab;                                         \
+                }                                                             \
+            }                                                                 \
+        }                                                                     \
+        for (unsigned i = 1u; i < nv; i++) {                                  \
+            unsigned x = visit_set[i];                                        \
+            unsigned j = i;                                                   \
+            while (j > 0u && visit_set[j - 1u] > x) {                         \
+                visit_set[j] = visit_set[j - 1u];                             \
+                j--;                                                          \
+            }                                                                 \
+            visit_set[j] = x;                                                 \
+        }                                                                     \
+        for (unsigned i = 0u; i < nv; i++)                                    \
+            rix_hash_mrmw_lock(&buckets[visit_set[i]].wlock);                 \
+        unsigned valid_scout = 1u;                                            \
+        for (unsigned i = 0u; i < nv; i++) {                                  \
+            unsigned bk_i = visit_set[i];                                     \
+            u32 now = atomic_load_explicit(&buckets[bk_i].ctrl,               \
+                                           memory_order_acquire);             \
+            if (now != ctrl_snap[bk_i]) {                                     \
+                valid_scout = 0u;                                             \
+                break;                                                        \
+            }                                                                 \
+        }                                                                     \
+        if (!valid_scout) {                                                   \
+            for (unsigned i = nv; i > 0u; i--)                                \
+                rix_hash_mrmw_unlock(&buckets[visit_set[i - 1u]].wlock);      \
+            continue;                                                         \
+        }                                                                     \
+        if (dup_ret != NULL) {                                                \
+            ret = dup_ret;                                                    \
+            goto v_unlock;                                                    \
+        }                                                                     \
+        if (free_bk == nil)                                                   \
+            goto v_unlock;                                                    \
+        while (parent_slot[free_bk] != nil) {                                 \
+            unsigned src_bk = parent_bk[free_bk];                             \
+            unsigned src_slot = parent_slot[free_bk];                         \
+            struct rix_hash_bucket_s *src = buckets + src_bk;                 \
+            struct rix_hash_bucket_s *dst = buckets + free_bk;                \
+            u32 move_idx = src->idx[src_slot];                                \
+            u32 move_key = src->hash[src_slot];                               \
+            dst->idx[free_slot] = move_idx;                                   \
+            dst->hash[free_slot] = move_key;                                  \
+            rix_hash_mrsw_bucket_valid_set(dst, free_slot);                   \
+            rix_hash_mrsw_bucket_valid_clear(src, src_slot);                  \
+            free_bk = src_bk;                                                 \
+            free_slot = src_slot;                                             \
+        }                                                                     \
+        buckets[free_bk].idx[free_slot] = elm_idx;                            \
+        buckets[free_bk].hash[free_slot] = key;                               \
+        rix_hash_mrsw_bucket_valid_set(&buckets[free_bk], free_slot);         \
+        atomic_fetch_add_explicit(&head->rhh_nb, 1u, memory_order_relaxed);   \
+        ret = NULL;                                                           \
+v_unlock:                                                                     \
+        for (unsigned i = nv; i > 0u; i--)                                    \
+            rix_hash_mrmw_unlock(&buckets[visit_set[i - 1u]].wlock);          \
+        RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head);                                \
+        return ret;                                                           \
+    }                                                                         \
+    RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head);                                    \
+    return ret;                                                               \
+}
+
+#  ifdef RIX_HASH_MRMW_FP_ALLLOCK
+#    define _RHM_MRMW_U32_INSERT_SLOW _RHM_MRMW_U32_INSERT_SLOW_ALLLOCK
+#  else
+#    define _RHM_MRMW_U32_INSERT_SLOW _RHM_MRMW_U32_INSERT_SLOW_VISITED
+#  endif
+
 #  define RIX_HASH_MRMW_GENERATE_U32_INTERNAL(name, type, key_field, attr)    \
 attr void                                                                     \
 name##_init(struct name *head, struct rix_hash_bucket_s *buckets,             \
@@ -741,118 +1013,7 @@ name##_walk(struct name *head, struct rix_hash_bucket_s *buckets,             \
     }                                                                         \
     return 0;                                                                 \
 }                                                                             \
-static RIX_UNUSED type *                                                      \
-name##_insert_slow(struct name *head,                                         \
-                   struct rix_hash_bucket_s *buckets,                         \
-                   type *base, type *elm, u32 key,                            \
-                   unsigned bk0, unsigned bk1)                                \
-{                                                                             \
-    unsigned mask = head->rhh_mask;                                           \
-    unsigned nb_bk = mask + 1u;                                               \
-    unsigned nil = nb_bk;                                                     \
-    u32 elm_idx = name##_hidx(base, elm);                                     \
-    type *ret = elm;                                                          \
-    unsigned *mem = head->rhh_kickout_scratch;                                \
-    if (mem == NULL)                                                          \
-        return ret;                                                           \
-    unsigned *queue = mem;                                                    \
-    unsigned *parent_bk = mem + nb_bk;                                        \
-    unsigned *parent_slot = mem + nb_bk * 2u;                                 \
-    RIX_HASH_MRSW_HOOK(#name, "insert_slow_before_lock", head, buckets,       \
-                       bk0, bk1);                                             \
-    RIX_HASH_MR_KICKOUT_LOCK_MRMW(head);                                      \
-    RIX_HASH_MR_BK_LOCK_ALL_MRMW(buckets, nb_bk);                             \
-    struct rix_hash_bucket_s *start_bks[2] = { buckets + bk0, buckets + bk1 };\
-    for (int i = 0; i < 2; i++) {                                             \
-        struct rix_hash_bucket_s *bk = start_bks[i];                          \
-        u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_acquire);\
-        u32 hits = name##_scan_bucket_keys(bk, key, valid);                   \
-        while (hits) {                                                        \
-            unsigned bit = (unsigned)__builtin_ctz(hits);                     \
-            hits &= hits - 1u;                                                \
-            u32 idx = bk->idx[bit];                                           \
-            if (idx == (u32)RIX_NIL)                                          \
-                continue;                                                     \
-            ret = name##_hptr(base, idx);                                     \
-            goto out;                                                         \
-        }                                                                     \
-        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
-        if (empty) {                                                          \
-            unsigned slot = (unsigned)__builtin_ctz(empty);                   \
-            bk->idx[slot] = elm_idx;                                          \
-            bk->hash[slot] = key;                                             \
-            rix_hash_mrsw_bucket_valid_set(bk, slot);                         \
-            atomic_fetch_add_explicit(&head->rhh_nb, 1u,                      \
-                                      memory_order_relaxed);                  \
-            ret = NULL;                                                       \
-            goto out;                                                         \
-        }                                                                     \
-    }                                                                         \
-    for (unsigned i = 0u; i < nb_bk; i++) {                                   \
-        parent_bk[i] = nil;                                                   \
-        parent_slot[i] = nil;                                                 \
-    }                                                                         \
-    unsigned qh = 0u, qt = 0u;                                                \
-    parent_bk[bk0] = bk0;                                                     \
-    parent_slot[bk0] = nil;                                                   \
-    queue[qt++] = bk0;                                                        \
-    if (bk1 != bk0) {                                                         \
-        parent_bk[bk1] = bk1;                                                 \
-        parent_slot[bk1] = nil;                                               \
-        queue[qt++] = bk1;                                                    \
-    }                                                                         \
-    unsigned free_bk = nil, free_slot = nil;                                  \
-    while (qh < qt && free_bk == nil) {                                       \
-        unsigned cur_bk = queue[qh++];                                        \
-        struct rix_hash_bucket_s *bk = buckets + cur_bk;                      \
-        u32 valid = rix_hash_mrsw_bucket_valid_load(bk, memory_order_relaxed);\
-        u32 empty = (~valid) & RIX_HASH_MRSW_VALID_MASK;                      \
-        if (empty) {                                                          \
-            free_bk = cur_bk;                                                 \
-            free_slot = (unsigned)__builtin_ctz(empty);                       \
-            break;                                                            \
-        }                                                                     \
-        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {       \
-            if ((valid & (UINT32_C(1) << s)) == 0u)                           \
-                continue;                                                     \
-            u32 move_key = bk->hash[s];                                       \
-            union rix_hash_hash_u mh = rix_hash_arch->hash_u32(move_key, mask);\
-            unsigned mb0 = mh.val32[0] & mask;                               \
-            unsigned mb1 = mh.val32[1] & mask;                               \
-            unsigned ab = (cur_bk == mb0) ? mb1 : mb0;                        \
-            if (parent_bk[ab] != nil)                                         \
-                continue;                                                     \
-            parent_bk[ab] = cur_bk;                                           \
-            parent_slot[ab] = s;                                              \
-            queue[qt++] = ab;                                                 \
-        }                                                                     \
-    }                                                                         \
-    if (free_bk == nil)                                                       \
-        goto out;                                                             \
-    while (parent_slot[free_bk] != nil) {                                     \
-        unsigned src_bk = parent_bk[free_bk];                                 \
-        unsigned src_slot = parent_slot[free_bk];                             \
-        struct rix_hash_bucket_s *src = buckets + src_bk;                     \
-        struct rix_hash_bucket_s *dst = buckets + free_bk;                    \
-        u32 move_idx = src->idx[src_slot];                                    \
-        u32 move_key = src->hash[src_slot];                                   \
-        dst->idx[free_slot] = move_idx;                                       \
-        dst->hash[free_slot] = move_key;                                      \
-        rix_hash_mrsw_bucket_valid_set(dst, free_slot);                       \
-        rix_hash_mrsw_bucket_valid_clear(src, src_slot);                      \
-        free_bk = src_bk;                                                     \
-        free_slot = src_slot;                                                 \
-    }                                                                         \
-    buckets[free_bk].idx[free_slot] = elm_idx;                                \
-    buckets[free_bk].hash[free_slot] = key;                                   \
-    rix_hash_mrsw_bucket_valid_set(&buckets[free_bk], free_slot);             \
-    atomic_fetch_add_explicit(&head->rhh_nb, 1u, memory_order_relaxed);       \
-    ret = NULL;                                                               \
-out:                                                                         \
-    RIX_HASH_MR_BK_UNLOCK_ALL_MRMW(buckets, nb_bk);                           \
-    RIX_HASH_MR_KICKOUT_UNLOCK_MRMW(head);                                    \
-    return ret;                                                               \
-}                                                                             \
+_RHM_MRMW_U32_INSERT_SLOW(name, type, key_field, attr)                        \
 attr void                                                                     \
 name##_attach_kickout_scratch(struct name *head, unsigned *scratch)           \
 {                                                                             \
