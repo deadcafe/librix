@@ -608,18 +608,44 @@ generator families mirror the pure variants: `RIX_HASH_MRSW_GENERATE*` for fp,
 `RIX_HASH_MRSW_GENERATE_KEYONLY*` for keyonly,
 `RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*` for integer-key
 buckets, and `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` for per-slot bucket metadata.
-The fp/slot/keyonly/u32/u64/slot_extra headers also expose initial MRMW generators
+The fp/slot/keyonly/u32/u64/slot_extra headers also expose MRMW generators
 (`RIX_HASH_MRMW_GENERATE*`, `RIX_HASH_MRMW_GENERATE_SLOT*`, and
 `RIX_HASH_MRMW_GENERATE_KEYONLY*`, `RIX_HASH_MRMW_GENERATE_U32*`,
 `RIX_HASH_MRMW_GENERATE_U64*`, `RIX_HASH_MRMW_GENERATE_SLOT_EXTRA*`) plus matching `RIX_HASH_MRMW_*` convenience
-macros for init/find/insert/remove/remove_at and staged lookup.  This initial
-MRMW implementation covers the no-kickout fast path where one of the two
-candidate buckets has an empty slot.  MRMW kickout is isolated behind an
-`insert_slow` path so the slow-path algorithm can be added or replaced
-independently.
-All of them use the same ctrl seq/valid protocol.  The slot-tracking and
-slot_extra forms maintain a `slot_field` during insert/kickout so remove can
-address the bucket slot in O(1) without scanning all 15 entries.
+macros for init/find/insert/remove/remove_at and staged lookup.  The
+MRMW fast path locks the two candidate buckets in address order via a
+per-bucket ticket lock, checks duplicates, and publishes into an empty
+candidate slot when one is available.  Remove also locks both candidate
+buckets (re-hashing the key) so a concurrent slow-path relocation cannot make
+remove miss the entry.  If both candidate buckets are full, insert falls into
+`insert_slow`.  The slow path uses a *visited-set-lock* algorithm:
+
+1. Take a global relocation ticket lock that serializes only with other slow
+   paths; fast-path writers in unrelated buckets continue concurrently.
+2. Locklessly BFS the cuckoo alternate-bucket graph from the two candidate
+   buckets, recording the visited set, the cuckoo path, and a per-bucket
+   `ctrl` seqcount snapshot.
+3. Sort the visited bucket indices and acquire each bucket's writer lock in
+   ascending order (the same ordering the fast path uses, so deadlock-free).
+4. Re-read each visited bucket's `ctrl` and compare to the snapshot.  If any
+   bucket changed, a concurrent fast-path insert or remove touched it during
+   the scan; release locks and retry (up to three attempts).
+5. Replay the cuckoo path with the same publish-before-unpublish ordering as
+   the MRSW kickout: publish the moved entry into the empty destination, set
+   the destination `ctrl`, then clear the source `ctrl`.  Readers may briefly
+   observe a duplicate but never a false negative caused by move ordering.
+
+Slow path scratch memory is caller-allocated and bound to the table via
+`name##_attach_kickout_scratch(head, scratch)` after `_init`.  The helper
+`RIX_HASH_MRMW_KICKOUT_SCRATCH_NITEMS(nb_bk)` reports the required `unsigned`
+element count.  Removing the per-call `malloc/free` keeps slow-path latency
+bounded and predictable under the relocation lock.
+
+The slot-tracking and slot_extra forms maintain a `slot_field` during
+insert/kickout so remove can address the bucket slot in O(1) without scanning
+all 15 entries.  All MRMW variants share the same ctrl seq/valid protocol on
+the reader side; readers remain lockless and never observe the per-bucket
+writer lock.
 
 #### Find performance (DRAM-cold, pipelined, avg cycles/op)
 

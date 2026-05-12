@@ -578,17 +578,45 @@ fp 用 `RIX_HASH_MRSW_GENERATE*`、slot 追跡用
 `RIX_HASH_MRSW_GENERATE_KEYONLY*`、整数 key 用
 `RIX_HASH_MRSW_GENERATE_U32*` / `RIX_HASH_MRSW_GENERATE_U64*`、
 per-slot bucket metadata 用 `RIX_HASH_MRSW_GENERATE_SLOT_EXTRA*` です。
-fp/slot/keyonly/u32/u64/slot_extra header は初期 MRMW generator
+fp/slot/keyonly/u32/u64/slot_extra header は MRMW generator
 (`RIX_HASH_MRMW_GENERATE*`、`RIX_HASH_MRMW_GENERATE_SLOT*`、
 `RIX_HASH_MRMW_GENERATE_KEYONLY*`、`RIX_HASH_MRMW_GENERATE_U32*`、
-`RIX_HASH_MRMW_GENERATE_U64*`、`RIX_HASH_MRMW_GENERATE_SLOT_EXTRA*`) と、init/find/insert/remove/remove_at および
-staged lookup 用の `RIX_HASH_MRMW_*` convenience macro も提供します。今回の
-初期 MRMW 実装は、候補 2 bucket のいずれかに空き slot がある no-kickout fast
-path を対象にします。MRMW kickout は `insert_slow` に隔離しており、slow path
-algorithm を後から独立して追加または差し替え可能です。
-いずれも同じ ctrl seq/valid protocol を使います。slot 追跡版と slot_extra 版は
-insert/kickout 時に node の `slot_field` を更新するため、remove は 15 slot を
-走査せず O(1) で bucket slot を直接参照できます。
+`RIX_HASH_MRMW_GENERATE_U64*`、`RIX_HASH_MRMW_GENERATE_SLOT_EXTRA*`) と、
+init/find/insert/remove/remove_at および staged lookup 用の `RIX_HASH_MRMW_*`
+convenience macro も提供します。fast path は per-bucket ticket lock で候補 2
+bucket を address 順に lock し、duplicate を確認、どちらかに空き slot があれ
+ばその slot に publish します。remove は key を再 hash して候補 2 bucket を
+lock するため、並走する slow-path relocation で entry が片方の bucket に移って
+いてもミスしません。候補 2 bucket が両方とも full の場合だけ `insert_slow` に
+入ります。
+
+slow path は *visited-set-lock* algorithm を使います:
+
+1. 他の slow path とだけ排他する relocation ticket lock を取得します。fast-path
+   writer は無関係な bucket では並走を継続します。
+2. 候補 2 bucket から cuckoo alternate-bucket graph を **lockless で** BFS し、
+   visit した bucket 集合、cuckoo path、各 bucket の `ctrl` seqcount snapshot
+   を scratch buffer に記録します。
+3. visit 集合を index 昇順に sort し、各 bucket の writer lock を順に取得しま
+   す (fast path と同じ ordering なので deadlock-free)。
+4. visit した各 bucket の `ctrl` を再読みして snapshot と比較します。差異があ
+   れば scan 中に並走 writer が触れたことを意味するので、lock を release して
+   retry します (最大 3 回)。
+5. cuckoo path を逆順に replay します。移動先 slot に entry を publish し、
+   destination `ctrl` を release-update してから、source `ctrl` を clear し
+   ます。reader は一時的な duplicate を見ても、move ordering による false
+   negative は決して生じません。
+
+slow path 用 scratch memory は caller が確保し、`_init` 後に
+`name##_attach_kickout_scratch(head, scratch)` で table に結びつけます。サイ
+ジングは `RIX_HASH_MRMW_KICKOUT_SCRATCH_NITEMS(nb_bk)` (単位: `unsigned`)。
+per-call `malloc/free` を排除したことで relocation lock 下での latency が予測
+可能になります。
+
+いずれも同じ ctrl seq/valid protocol を使います。slot 追跡版と slot_extra 版
+は insert/kickout 時に node の `slot_field` を更新するため、remove は 15 slot
+を走査せず O(1) で bucket slot を直接参照できます。reader は引き続き lockless
+で、bucket の writer lock を観測することはありません。
 
 #### Find 性能 (DRAM コールド、パイプライン、平均 cycles/op)
 
