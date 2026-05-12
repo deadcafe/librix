@@ -163,12 +163,18 @@ rix_hash_mrsw_nb_bk_hint(unsigned max_entries)
     }
 
 /* Scratch buffer required by MRMW insert_slow.  The caller allocates it and
- * passes it to name##_init; insert_slow uses it under rhh_kickout_lock so a
- * single buffer per table is sufficient (no concurrent slow paths).  Element
- * count is fixed at 3 * nb_bk: a BFS queue plus parent_bk / parent_slot back
- * pointers. */
+ * passes it to name##_attach_kickout_scratch; insert_slow uses it under
+ * rhh_kickout_lock so a single buffer per table is sufficient (no concurrent
+ * slow paths).  Layout (each cell is one unsigned):
+ *   [0       .. nb_bk)     BFS queue
+ *   [nb_bk   .. 2*nb_bk)   parent_bk[]   (also doubles as "visited" sentinel)
+ *   [2*nb_bk .. 3*nb_bk)   parent_slot[]
+ *   [3*nb_bk .. 4*nb_bk)   visit_set[]   (visited bucket indices, sortable)
+ *   [4*nb_bk .. 5*nb_bk)   ctrl_snapshot[] (per-bucket ctrl at scout time)
+ * The all-lock slow path uses the first 3 arrays; the visited-set slow path
+ * uses all 5.  Sized so either algorithm can run without reallocation. */
 #  define RIX_HASH_MRMW_KICKOUT_SCRATCH_NITEMS(nb_bk)                         \
-    (3u * (unsigned)(nb_bk))
+    (5u * (unsigned)(nb_bk))
 
 #  define RIX_HASH_MR_HEAD_INIT_MRSW(head)                                   \
     do {                                                                      \

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static void mrsw_test_hook(const char *name, const char *event,
                            void *head, void *buckets,
@@ -247,9 +248,9 @@ static struct myht_mrsw g_head;
 #define CTL_NB_BK  4u
 
 /* Shared MRMW kickout scratch buffer.  Sized for the largest MRMW table used
- * in this file (1024 buckets); all MRMW tables attach this scratch after
- * init.  Tests do not run concurrent slow paths on different tables. */
-#define MRMW_SCRATCH_MAX_NB 1024u
+ * in this file; all MRMW tables attach this scratch after init.  Tests do not
+ * run concurrent slow paths on different tables. */
+#define MRMW_SCRATCH_MAX_NB 16384u
 static unsigned
 g_mrmw_scratch[RIX_HASH_MRMW_KICKOUT_SCRATCH_NITEMS(MRMW_SCRATCH_MAX_NB)];
 
@@ -2206,11 +2207,11 @@ static _Atomic int g_mrmw_fail;
  * writer may relocate another writer's entries between its insert and remove.
  * If remove uses stale hash_field/slot_field to locate the entry, remove
  * fails and the test trips g_mrmw_fail. */
-#define MRMW_CHURN_NB_BK    16u
-#define MRMW_CHURN_PER      50u
+#define MRMW_CHURN_NB_BK    16384u
+#define MRMW_CHURN_PER      49152u
 #define MRMW_CHURN_WRITERS  4u
 #define MRMW_CHURN_N       (MRMW_CHURN_PER * MRMW_CHURN_WRITERS)
-#define MRMW_CHURN_ITERS    128u
+#define MRMW_CHURN_ITERS    4u
 
 static struct mynode g_mrmw_churn[MRMW_CHURN_N];
 static struct rix_hash_bucket_s g_mrmw_churn_bk[MRMW_CHURN_NB_BK]
@@ -3250,11 +3251,20 @@ test_mrmw_churn_run(const char *label, void *(*worker)(void *),
         if (pthread_create(&writers[i], NULL, worker, &args[i]) != 0)
             FAIL("pthread_create mrmw churn writer failed");
     }
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
     atomic_store_explicit(&g_mrmw_start, 1, memory_order_release);
     for (unsigned i = 0u; i < MRMW_CHURN_WRITERS; i++)
         pthread_join(writers[i], NULL);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     if (atomic_load_explicit(&g_mrmw_fail, memory_order_acquire))
         FAILF("mrmw churn %s detected remove failure", label);
+    double ns = (double)(t1.tv_sec - t0.tv_sec) * 1.0e9
+              + (double)(t1.tv_nsec - t0.tv_nsec);
+    double total_ops = (double)MRMW_CHURN_WRITERS * (double)MRMW_CHURN_PER
+                     * (double)MRMW_CHURN_ITERS * 2.0;
+    printf("    %s: %.3f ms (%.1f ns/op, %.2f Mops/s)\n",
+           label, ns / 1.0e6, ns / total_ops, total_ops * 1.0e3 / ns);
     (void)final_nb;
 }
 
