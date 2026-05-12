@@ -2233,6 +2233,11 @@ static struct rix_hash_bucket_s g_mrmw_churn_u32_bk[MRMW_CHURN_NB_BK]
     __attribute__((aligned(64)));
 static struct myu32_mrmw g_mrmw_churn_u32_head;
 
+static struct myu64_node g_mrmw_churn_u64[MRMW_CHURN_N];
+static struct rix_hash64_bucket_s g_mrmw_churn_u64_bk[MRMW_CHURN_NB_BK]
+    __attribute__((aligned(64)));
+static struct myu64_mrmw g_mrmw_churn_u64_head;
+
 static void
 mrmw_init(void)
 {
@@ -3242,6 +3247,35 @@ mrmw_churn_u32_worker(void *arg)
 }
 
 static void *
+mrmw_churn_u64_worker(void *arg)
+{
+    struct mrmw_worker_arg *a = (struct mrmw_worker_arg *)arg;
+
+    mrmw_wait_start();
+    for (unsigned iter = 0u; iter < MRMW_CHURN_ITERS; iter++) {
+        unsigned hi = a->begin;
+        for (unsigned i = a->begin; i < a->end; i++) {
+            struct myu64_node *ins = myu64_mrmw_insert(
+                &g_mrmw_churn_u64_head, g_mrmw_churn_u64_bk,
+                g_mrmw_churn_u64, &g_mrmw_churn_u64[i]);
+            if (ins != NULL)
+                break;
+            hi = i + 1u;
+        }
+        for (unsigned i = a->begin; i < hi; i++) {
+            struct myu64_node *rem = myu64_mrmw_remove(
+                &g_mrmw_churn_u64_head, g_mrmw_churn_u64_bk,
+                g_mrmw_churn_u64, &g_mrmw_churn_u64[i]);
+            if (rem != &g_mrmw_churn_u64[i]) {
+                atomic_store_explicit(&g_mrmw_fail, 1, memory_order_release);
+                return NULL;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void *
 mrmw_churn_extra_worker(void *arg)
 {
     struct mrmw_worker_arg *a = (struct mrmw_worker_arg *)arg;
@@ -3343,6 +3377,17 @@ test_mrmw_churn_insert_remove(void)
     if (atomic_load_explicit(&g_mrmw_churn_u32_head.rhh_nb,
                              memory_order_relaxed) != 0u)
         FAIL("mrmw churn u32 final count must be zero");
+
+    memset(g_mrmw_churn_u64, 0, sizeof(g_mrmw_churn_u64));
+    myu64_mrmw_init(&g_mrmw_churn_u64_head, g_mrmw_churn_u64_bk,
+                    MRMW_CHURN_NB_BK);
+    myu64_mrmw_attach_kickout_scratch(&g_mrmw_churn_u64_head, g_mrmw_scratch);
+    for (unsigned i = 0u; i < MRMW_CHURN_N; i++)
+        g_mrmw_churn_u64[i].key = UINT64_C(0xC0DE000000000000) | (u64)(i + 1u);
+    test_mrmw_churn_run("u64", mrmw_churn_u64_worker, 0u);
+    if (atomic_load_explicit(&g_mrmw_churn_u64_head.rhh_nb,
+                             memory_order_relaxed) != 0u)
+        FAIL("mrmw churn u64 final count must be zero");
 
     memset(g_mrmw_churn_xn, 0, sizeof(g_mrmw_churn_xn));
     myextra_mrmw_init(&g_mrmw_churn_xn_head, g_mrmw_churn_xn_bk,
