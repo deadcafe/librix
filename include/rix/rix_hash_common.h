@@ -105,10 +105,20 @@ RIX_STATIC_ASSERT(offsetof(struct rix_hash_bucket_s, reserved)
 
 /*===========================================================================
  * Find context (staged pipeline)
+ *
+ * Shared by FP / SLOT / KEYONLY (which access bk[2]) and SLOT_EXTRA
+ * (which accesses bk_ex[2]).  bk and bk_ex alias the same storage; only
+ * the pointee type differs (rix_hash_bucket_s for the pure variants vs.
+ * rix_hash_bucket_extra_s for the slot_extra variant).
  *===========================================================================*/
+struct rix_hash_bucket_extra_s;     /* fwd decl: see rix_hash_slot_extra.h */
+
 struct rix_hash_find_ctx_s {
     union rix_hash_hash_u     hash;       /*  8B  offset  0 */
-    struct rix_hash_bucket_s *bk[2];      /* 16B  offset  8 */
+    union {
+        struct rix_hash_bucket_s        *bk[2];     /* FP / SLOT / KEYONLY */
+        struct rix_hash_bucket_extra_s  *bk_ex[2];  /* SLOT_EXTRA          */
+    };                                    /* 16B  offset  8 */
     const void               *key;        /*  8B  offset 24 */
     u32                  fp;              /*  4B  offset 32 */
     u32                  fp_hits[2];      /*  8B  offset 36 */

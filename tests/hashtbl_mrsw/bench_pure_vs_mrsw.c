@@ -700,7 +700,7 @@ DEFINE_PTR_BENCH("pure KEYONLY", ht_pure_keyonly, struct n_pure_keyonly,
                  RIX_HASH_BUCKET_ENTRY_SZ)
 
 DEFINE_PTR_BENCH("pure SLOT_EXTRA", ht_pure_extra, struct n_pure_extra,
-                 struct rix_hash_find_ctx_extra_s,
+                 struct rix_hash_find_ctx_s,
                  struct rix_hash_bucket_extra_s,
                  ht_pure_extra_init(&head, nb_bk),
                  if (ht_pure_extra_insert(&head, bk, nodes, &nodes[i], (u32)i) != NULL) exit(2),
@@ -781,7 +781,7 @@ DEFINE_MRSW_PTR_BENCH("MRMW KEYONLY", ht_mrmw_keyonly,
                       RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
 DEFINE_MRSW_PTR_BENCH("MRSW SLOT_EXTRA", ht_mrsw_extra, struct n_mrsw_extra,
-                      struct rix_hash_mrsw_extra_find_ctx_s,
+                      struct rix_hash_mrsw_find_ctx_s,
                       struct rix_hash_bucket_extra_s,
                       ht_mrsw_extra_init(&head, bk, nb_bk),
                       if (ht_mrsw_extra_insert(&head, bk, nodes, &nodes[i], (u32)i) != NULL) exit(2),
@@ -789,7 +789,7 @@ DEFINE_MRSW_PTR_BENCH("MRSW SLOT_EXTRA", ht_mrsw_extra, struct n_mrsw_extra,
                       RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
 DEFINE_MRSW_PTR_BENCH("MRMW SLOT_EXTRA", ht_mrmw_extra, struct n_mrmw_extra,
-                      struct rix_hash_mrsw_extra_find_ctx_s,
+                      struct rix_hash_mrsw_find_ctx_s,
                       struct rix_hash_bucket_extra_s,
                       (ht_mrmw_extra_init(&head, bk, nb_bk),
                        ht_mrmw_extra_attach_kickout_scratch(&head,

@@ -186,7 +186,7 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
     u64 hit_count = 0u;                                                       \
     u64 miss_count = 0u;                                                      \
     if (nb_keys > 1u && nb_keys < 4u) {                                       \
-        struct rix_hash_find_ctx_extra_s ctx[3];                              \
+        struct rix_hash_find_ctx_s ctx[3];                              \
         for (unsigned i = 0u; i < nb_keys; i++)                               \
             rix_hash_prefetch_key(&keys[i]);                                  \
         for (unsigned i = 0u; i < nb_keys; i++)                               \
@@ -210,7 +210,7 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
                  */                                                           \
                 if ((now) != 0u) {                                            \
                     int _ts_rc = rix_hash_slot_extra_touch_2bk(               \
-                        ctx[i].bk[0], ctx[i].bk[1],                           \
+                        ctx[i].bk_ex[0], ctx[i].bk_ex[1],                           \
                         (unsigned)entry->meta.slot, entry_idx,                \
                         flow_extra_timestamp_encode((now), ft->ts_shift));    \
                     RIX_ASSERT(_ts_rc == 0);                                  \
@@ -231,7 +231,7 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
         return;                                                               \
     }                                                                         \
     for (unsigned i = 0u; i < nb_keys; i++) {                                 \
-        struct rix_hash_find_ctx_extra_s ctx;                                 \
+        struct rix_hash_find_ctx_s ctx;                                 \
         _FTG_ENTRY_T(p) *entry;                                               \
         _FTG_HT_EXTRA(ht, hash_key_2bk_masked)(&ctx, ft->buckets, &keys[i],   \
                                         hash_mask, ft->ht_head.rhh_mask);     \
@@ -245,7 +245,7 @@ _FTG_INT(p, find_small_)(_FTG_TABLE_T(p) *ft,                                 \
              */                                                               \
             if ((now) != 0u) {                                                \
                 int _ts_rc = rix_hash_slot_extra_touch_2bk(                   \
-                    ctx.bk[0], ctx.bk[1],                                     \
+                    ctx.bk_ex[0], ctx.bk_ex[1],                                     \
                     (unsigned)entry->meta.slot, entry_idx,                    \
                     flow_extra_timestamp_encode((now), ft->ts_shift));        \
                 RIX_ASSERT(_ts_rc == 0);                                      \

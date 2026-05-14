@@ -2077,7 +2077,7 @@ test_extra_staged_remove_at(void)
             FAILF("extra staged setup insert[%u] failed", i);
     }
 
-    struct rix_hash_mrsw_extra_find_ctx_s ctx[4];
+    struct rix_hash_mrsw_find_ctx_s ctx[4];
     struct mykey bad = { 999999u, UINT64_C(0xEEEEDEAD00000000) };
     const struct mykey *keys[4] = {
         &g_xn[1].key, &g_xn[7].key, &bad, &g_xn[13].key
@@ -2638,7 +2638,7 @@ test_mrmw_extra_insert_find_remove(void)
         != &g_mrmw_xn[7])
         FAIL("mrmw extra duplicate did not return existing");
 
-    struct rix_hash_mrsw_extra_find_ctx_s ctx[4];
+    struct rix_hash_mrsw_find_ctx_s ctx[4];
     struct mykey bad = { UINT64_C(0xBAD), UINT64_C(0xBADBAD) };
     const struct mykey *keys[4] = {
         &g_mrmw_xn[1].key, &g_mrmw_xn[3].key, &bad, &g_mrmw_xn[7].key

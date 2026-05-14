@@ -249,7 +249,7 @@ _FCORE_EXTRA_INT(p, find_key_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
     _FCORE_EXTRA_ENTRY_T(p) *hash_base =                                      \
         FCORE_EXTRA_LAYOUT_HASH_BASE(owner);                                  \
     const u32 hash_mask = FCORE_EXTRA_HASH_MASK(owner, ht);                   \
-    struct rix_hash_find_ctx_extra_s ctx[_FCORE_EXTRA_FIND_CTX_COUNT];        \
+    struct rix_hash_find_ctx_s ctx[_FCORE_EXTRA_FIND_CTX_COUNT];        \
     u64 hit_count = 0u;                                                       \
     u64 miss_count = 0u;                                                      \
     const unsigned ctx_mask = _FCORE_EXTRA_FIND_CTX_COUNT - 1u;               \
@@ -282,7 +282,7 @@ _FCORE_EXTRA_INT(p, find_key_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
             unsigned n = (base + step <= nb_keys) ? step                      \
                                                   : (nb_keys - base);         \
             for (unsigned j = 0; j < n; j++) {                                \
-                struct rix_hash_find_ctx_extra_s *ctxp =                      \
+                struct rix_hash_find_ctx_s *ctxp =                      \
                     &ctx[(base + j) & ctx_mask];                              \
                 _FCORE_EXTRA_HT(ht, scan_bk)(ctxp, head, buckets);            \
                 _FCORE_EXTRA_HT(ht, prefetch_node)(ctxp, hash_base);          \
@@ -303,8 +303,8 @@ _FCORE_EXTRA_INT(p, find_key_bulk_)(_FCORE_EXTRA_OT(ot) *owner,               \
                     /* scan_bk has proven eidx lives in bk[0]/bk[1]. */       \
                     if ((now) != 0u) {                                        \
                         int _ts_rc = rix_hash_slot_extra_touch_2bk(           \
-                            ctx[idx & ctx_mask].bk[0],                        \
-                            ctx[idx & ctx_mask].bk[1],                        \
+                            ctx[idx & ctx_mask].bk_ex[0],                     \
+                            ctx[idx & ctx_mask].bk_ex[1],                     \
                             (unsigned)entry->meta.slot, eidx,                 \
                             flow_extra_timestamp_encode(                      \
                                 (now),                                        \
@@ -356,7 +356,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
     unsigned free_count = 0u;                                                 \
     for (unsigned idx = 0; idx < nb_keys; idx++) {                            \
         u32 eidx = entry_idxv[idx];                                           \
-        struct rix_hash_find_ctx_extra_s ctx;                                 \
+        struct rix_hash_find_ctx_s ctx;                                 \
         _FCORE_EXTRA_ENTRY_T(p) *entry;                                       \
         u32 ret_idx = (u32)RIX_NIL;                                           \
         RIX_ASSERT(eidx <= owner->max_entries);                               \
@@ -365,20 +365,20 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
         rix_hash_prefetch_key(&entry->key);                                   \
         _FCORE_EXTRA_HT(ht, hash_key_2bk_masked)(&ctx, buckets, &entry->key,  \
                                                   hash_mask, head->rhh_mask); \
-        rix_hash_prefetch_extra_bucket_extras_of(ctx.bk[0]);                  \
-        rix_hash_prefetch_extra_bucket_extras_of(ctx.bk[1]);                  \
+        rix_hash_prefetch_extra_bucket_extras_of(ctx.bk_ex[0]);                  \
+        rix_hash_prefetch_extra_bucket_extras_of(ctx.bk_ex[1]);                  \
         _FCORE_EXTRA_HT(ht, scan_bk_empties)(&ctx, 0u);                       \
         _FCORE_EXTRA_HT(ht, scan_bk_empties)(&ctx, 1u);                       \
         if (RIX_UNLIKELY(ctx.fp_hits[0] != 0u)) {                             \
             unsigned bit = (unsigned)__builtin_ctz(ctx.fp_hits[0]);           \
-            u32 nidx = ctx.bk[0]->idx[bit];                                   \
+            u32 nidx = ctx.bk_ex[0]->idx[bit];                                   \
             if (RIX_LIKELY(nidx != (u32)RIX_NIL))                             \
                 rix_hash_prefetch_entry_of(                                   \
                     FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, nidx));               \
         }                                                                     \
         if (RIX_UNLIKELY(ctx.fp_hits[1] != 0u)) {                             \
             unsigned bit = (unsigned)__builtin_ctz(ctx.fp_hits[1]);           \
-            u32 nidx = ctx.bk[1]->idx[bit];                                   \
+            u32 nidx = ctx.bk_ex[1]->idx[bit];                                   \
             if (RIX_LIKELY(nidx != (u32)RIX_NIL))                             \
                 rix_hash_prefetch_entry_of(                                   \
                     FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, nidx));               \
@@ -387,7 +387,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
             u32 hits = ctx.fp_hits[0];                                        \
             while (RIX_UNLIKELY(hits != 0u)) {                                \
                 unsigned bit = (unsigned)__builtin_ctz(hits);                 \
-                u32 nidx = ctx.bk[0]->idx[bit];                               \
+                u32 nidx = ctx.bk_ex[0]->idx[bit];                               \
                 _FCORE_EXTRA_ENTRY_T(p) *node;                                \
                 hits &= hits - 1u;                                            \
                 if (RIX_UNLIKELY(nidx == (u32)RIX_NIL))                       \
@@ -397,8 +397,8 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
                 if (RIX_UNLIKELY(cmp_fn(&entry->key, &node->key) == 0)) {     \
                     FLOW_STATS(owner).add_existing++;                         \
                     if ((unsigned)policy & 1u) {                              \
-                        ctx.bk[0]->idx[bit] = eidx;                           \
-                        ctx.bk[0]->extra[bit] =                               \
+                        ctx.bk_ex[0]->idx[bit] = eidx;                           \
+                        ctx.bk_ex[0]->extra[bit] =                               \
                             flow_extra_timestamp_encode(                      \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
@@ -411,7 +411,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
                     } else {                                                  \
                         /* touch: update bk->extra[slot] for existing node */ \
                         if ((now) != 0u)                                      \
-                            ctx.bk[0]->extra[bit] =                           \
+                            ctx.bk_ex[0]->extra[bit] =                           \
                                 flow_extra_timestamp_encode(                  \
                                     (now),                                    \
                                     FCORE_EXTRA_TIMESTAMP_SHIFT(owner));      \
@@ -428,7 +428,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
             u32 hits = ctx.fp_hits[1];                                        \
             while (RIX_UNLIKELY(hits != 0u)) {                                \
                 unsigned bit = (unsigned)__builtin_ctz(hits);                 \
-                u32 nidx = ctx.bk[1]->idx[bit];                               \
+                u32 nidx = ctx.bk_ex[1]->idx[bit];                               \
                 _FCORE_EXTRA_ENTRY_T(p) *node;                                \
                 hits &= hits - 1u;                                            \
                 if (RIX_UNLIKELY(nidx == (u32)RIX_NIL))                       \
@@ -438,8 +438,8 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
                 if (RIX_UNLIKELY(cmp_fn(&entry->key, &node->key) == 0)) {     \
                     FLOW_STATS(owner).add_existing++;                         \
                     if ((unsigned)policy & 1u) {                              \
-                        ctx.bk[1]->idx[bit] = eidx;                           \
-                        ctx.bk[1]->extra[bit] =                               \
+                        ctx.bk_ex[1]->idx[bit] = eidx;                           \
+                        ctx.bk_ex[1]->extra[bit] =                               \
                             flow_extra_timestamp_encode(                      \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
@@ -452,7 +452,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
                     } else {                                                  \
                         /* touch: update bk->extra[slot] for existing node */ \
                         if ((now) != 0u)                                      \
-                            ctx.bk[1]->extra[bit] =                           \
+                            ctx.bk_ex[1]->extra[bit] =                           \
                                 flow_extra_timestamp_encode(                  \
                                     (now),                                    \
                                     FCORE_EXTRA_TIMESTAMP_SHIFT(owner));      \
@@ -467,9 +467,9 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
         }                                                                     \
         if (RIX_LIKELY(ctx.empties[0] != 0u)) {                               \
             unsigned slot = (unsigned)__builtin_ctz(ctx.empties[0]);          \
-            ctx.bk[0]->hash[slot] = ctx.fp;                                   \
-            ctx.bk[0]->idx[slot] = eidx;                                      \
-            ctx.bk[0]->extra[slot] =                                          \
+            ctx.bk_ex[0]->hash[slot] = ctx.fp;                                   \
+            ctx.bk_ex[0]->idx[slot] = eidx;                                      \
+            ctx.bk_ex[0]->extra[slot] =                                          \
                 flow_extra_timestamp_encode((now),                            \
                                       FCORE_EXTRA_TIMESTAMP_SHIFT(owner));    \
             entry->meta.cur_hash = ctx.hash.val32[0];                         \
@@ -483,9 +483,9 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
         }                                                                     \
         if (RIX_LIKELY(ctx.empties[1] != 0u)) {                               \
             unsigned slot = (unsigned)__builtin_ctz(ctx.empties[1]);          \
-            ctx.bk[1]->hash[slot] = ctx.fp;                                   \
-            ctx.bk[1]->idx[slot] = eidx;                                      \
-            ctx.bk[1]->extra[slot] =                                          \
+            ctx.bk_ex[1]->hash[slot] = ctx.fp;                                   \
+            ctx.bk_ex[1]->idx[slot] = eidx;                                      \
+            ctx.bk_ex[1]->extra[slot] =                                          \
                 flow_extra_timestamp_encode((now),                            \
                                       FCORE_EXTRA_TIMESTAMP_SHIFT(owner));    \
             entry->meta.cur_hash = ctx.hash.val32[1];                         \
@@ -560,7 +560,7 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
             unsigned victim_slot = 0u;                                        \
             u32 victim_idx = 0u;                                              \
             for (unsigned bki = 0u; bki < 2u; bki++) {                        \
-                struct rix_hash_bucket_extra_s *vbk = ctx.bk[bki];            \
+                struct rix_hash_bucket_extra_s *vbk = ctx.bk_ex[bki];            \
                 for (unsigned s = 0u; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {    \
                     u32 nidx = vbk->idx[s];                                   \
                     u64 ts, elapsed;                                          \
@@ -582,9 +582,9 @@ _FCORE_EXTRA_INT(p, add_idx_small_)(_FCORE_EXTRA_OT(ot) *owner,               \
                 _FCORE_EXTRA_ENTRY_T(p) *victim =                             \
                     FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, victim_idx);          \
                 RIX_ASSUME_NONNULL(victim);                                   \
-                ctx.bk[victim_bki]->hash[victim_slot] = ctx.fp;               \
-                ctx.bk[victim_bki]->idx[victim_slot] = eidx;                  \
-                ctx.bk[victim_bki]->extra[victim_slot] =                      \
+                ctx.bk_ex[victim_bki]->hash[victim_slot] = ctx.fp;               \
+                ctx.bk_ex[victim_bki]->idx[victim_slot] = eidx;                  \
+                ctx.bk_ex[victim_bki]->extra[victim_slot] =                      \
                     flow_extra_timestamp_encode((now),                        \
                                          FCORE_EXTRA_TIMESTAMP_SHIFT(owner)); \
                 entry->meta.cur_hash = ctx.hash.val32[victim_bki];            \
@@ -623,7 +623,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
     unsigned step;                                                            \
     unsigned ahead;                                                           \
     unsigned total;                                                           \
-    struct rix_hash_find_ctx_extra_s ctx[_FCORE_EXTRA_ADD_CTX_COUNT];         \
+    struct rix_hash_find_ctx_s ctx[_FCORE_EXTRA_ADD_CTX_COUNT];         \
     unsigned free_count = 0u;                                                 \
     RIX_ASSERT(unused_idxv != NULL);                                          \
     if (nb_keys < 4u)                                                         \
@@ -667,7 +667,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
             for (unsigned j = 0; j < n; j++) {                                \
                 unsigned idx = base + j;                                      \
                 u32 eidx = entry_idxv[idx];                                   \
-                struct rix_hash_find_ctx_extra_s *ctxp =                      \
+                struct rix_hash_find_ctx_s *ctxp =                      \
                     &ctx[idx & ctx_mask];                                     \
                 _FCORE_EXTRA_ENTRY_T(p) *entry;                               \
                 unsigned bk0, bk1;                                            \
@@ -678,10 +678,10 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                 ctxp->fp = rix_hash_fp(ctxp->hash, head->rhh_mask,            \
                                        &bk0, &bk1);                           \
                 ctxp->key = (const void *)entry;                              \
-                ctxp->bk[0] = buckets + bk0;                                  \
-                ctxp->bk[1] = buckets + bk1;                                  \
-                rix_hash_prefetch_extra_bucket_full_of(ctxp->bk[0]);          \
-                rix_hash_prefetch_extra_bucket_full_of(ctxp->bk[1]);          \
+                ctxp->bk_ex[0] = buckets + bk0;                                  \
+                ctxp->bk_ex[1] = buckets + bk1;                                  \
+                rix_hash_prefetch_extra_bucket_full_of(ctxp->bk_ex[0]);          \
+                rix_hash_prefetch_extra_bucket_full_of(ctxp->bk_ex[1]);          \
             }                                                                 \
         }                                                                     \
         /* Stage 3: speculative fp scan of bk[0], prefetch first match */     \
@@ -691,12 +691,12 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                                                   : (nb_keys - base);         \
             for (unsigned j = 0; j < n; j++) {                                \
                 unsigned idx = base + j;                                      \
-                struct rix_hash_find_ctx_extra_s *ctxp =                      \
+                struct rix_hash_find_ctx_s *ctxp =                      \
                     &ctx[idx & ctx_mask];                                     \
-                u32 h0 = RIX_HASH_FIND_U32X16(ctxp->bk[0]->hash, ctxp->fp);   \
+                u32 h0 = RIX_HASH_FIND_U32X16(ctxp->bk_ex[0]->hash, ctxp->fp);   \
                 if (h0) {                                                     \
                     unsigned bit = (unsigned)__builtin_ctz(h0);               \
-                    u32 nidx = ctxp->bk[0]->idx[bit];                         \
+                    u32 nidx = ctxp->bk_ex[0]->idx[bit];                         \
                     if (nidx != (u32)RIX_NIL)                                 \
                         rix_hash_prefetch_entry_of(                           \
                             FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, nidx));       \
@@ -711,7 +711,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
             for (unsigned j = 0; j < n; j++) {                                \
                 unsigned idx = base + j;                                      \
                 u32 eidx = entry_idxv[idx];                                   \
-                struct rix_hash_find_ctx_extra_s *ctxp =                      \
+                struct rix_hash_find_ctx_s *ctxp =                      \
                     &ctx[idx & ctx_mask];                                     \
                 _FCORE_EXTRA_ENTRY_T(p) *entry =                              \
                     (_FCORE_EXTRA_ENTRY_T(p) *)(uintptr_t)ctxp->key;          \
@@ -724,7 +724,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                     u32 hits = ctxp->fp_hits[0];                              \
                     while (RIX_UNLIKELY(hits != 0u)) {                        \
                         unsigned bit = (unsigned)__builtin_ctz(hits);         \
-                        u32 nidx = ctxp->bk[0]->idx[bit];                     \
+                        u32 nidx = ctxp->bk_ex[0]->idx[bit];                     \
                         _FCORE_EXTRA_ENTRY_T(p) *node;                        \
                         hits &= hits - 1u;                                    \
                         if (RIX_UNLIKELY(nidx == (u32)RIX_NIL))               \
@@ -735,8 +735,8 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                                          == 0)) {                             \
                             FLOW_STATS(owner).add_existing++;                 \
                             if ((unsigned)policy & 1u) {                      \
-                                ctxp->bk[0]->idx[bit] = eidx;                 \
-                                ctxp->bk[0]->extra[bit] =                     \
+                                ctxp->bk_ex[0]->idx[bit] = eidx;                 \
+                                ctxp->bk_ex[0]->extra[bit] =                     \
                                     flow_extra_timestamp_encode(              \
                                         (now),                                \
                                         FCORE_EXTRA_TIMESTAMP_SHIFT(owner));  \
@@ -750,7 +750,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                             } else {                                          \
                                 /* touch existing via bk[0] */                \
                                 if ((now) != 0u)                              \
-                                    ctxp->bk[0]->extra[bit] =                 \
+                                    ctxp->bk_ex[0]->extra[bit] =                 \
                                         flow_extra_timestamp_encode(          \
                                             (now),                            \
                                             FCORE_EXTRA_TIMESTAMP_SHIFT(      \
@@ -768,7 +768,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                     u32 hits = ctxp->fp_hits[1];                              \
                     while (RIX_UNLIKELY(hits != 0u)) {                        \
                         unsigned bit = (unsigned)__builtin_ctz(hits);         \
-                        u32 nidx = ctxp->bk[1]->idx[bit];                     \
+                        u32 nidx = ctxp->bk_ex[1]->idx[bit];                     \
                         _FCORE_EXTRA_ENTRY_T(p) *node;                        \
                         hits &= hits - 1u;                                    \
                         if (RIX_UNLIKELY(nidx == (u32)RIX_NIL))               \
@@ -779,8 +779,8 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                                          == 0)) {                             \
                             FLOW_STATS(owner).add_existing++;                 \
                             if ((unsigned)policy & 1u) {                      \
-                                ctxp->bk[1]->idx[bit] = eidx;                 \
-                                ctxp->bk[1]->extra[bit] =                     \
+                                ctxp->bk_ex[1]->idx[bit] = eidx;                 \
+                                ctxp->bk_ex[1]->extra[bit] =                     \
                                     flow_extra_timestamp_encode(              \
                                         (now),                                \
                                         FCORE_EXTRA_TIMESTAMP_SHIFT(owner));  \
@@ -794,7 +794,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                             } else {                                          \
                                 /* touch existing via bk[1] */                \
                                 if ((now) != 0u)                              \
-                                    ctxp->bk[1]->extra[bit] =                 \
+                                    ctxp->bk_ex[1]->extra[bit] =                 \
                                         flow_extra_timestamp_encode(          \
                                             (now),                            \
                                             FCORE_EXTRA_TIMESTAMP_SHIFT(      \
@@ -811,9 +811,9 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                 if (RIX_LIKELY(ctxp->empties[0] != 0u)) {                     \
                     unsigned slot =                                           \
                         (unsigned)__builtin_ctz(ctxp->empties[0]);            \
-                    ctxp->bk[0]->hash[slot] = ctxp->fp;                       \
-                    ctxp->bk[0]->idx[slot] = eidx;                            \
-                    ctxp->bk[0]->extra[slot] =                                \
+                    ctxp->bk_ex[0]->hash[slot] = ctxp->fp;                       \
+                    ctxp->bk_ex[0]->idx[slot] = eidx;                            \
+                    ctxp->bk_ex[0]->extra[slot] =                                \
                         flow_extra_timestamp_encode((now),                    \
                                               FCORE_EXTRA_TIMESTAMP_SHIFT(    \
                                                   owner));                    \
@@ -830,9 +830,9 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                 if (RIX_LIKELY(ctxp->empties[1] != 0u)) {                     \
                     unsigned slot =                                           \
                         (unsigned)__builtin_ctz(ctxp->empties[1]);            \
-                    ctxp->bk[1]->hash[slot] = ctxp->fp;                       \
-                    ctxp->bk[1]->idx[slot] = eidx;                            \
-                    ctxp->bk[1]->extra[slot] =                                \
+                    ctxp->bk_ex[1]->hash[slot] = ctxp->fp;                       \
+                    ctxp->bk_ex[1]->idx[slot] = eidx;                            \
+                    ctxp->bk_ex[1]->extra[slot] =                                \
                         flow_extra_timestamp_encode((now),                    \
                                               FCORE_EXTRA_TIMESTAMP_SHIFT(    \
                                                   owner));                    \
@@ -911,7 +911,7 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                     unsigned victim_slot = 0u;                                \
                     u32 victim_idx = 0u;                                      \
                     for (unsigned bki = 0u; bki < 2u; bki++) {                \
-                        struct rix_hash_bucket_extra_s *vbk = ctxp->bk[bki];  \
+                        struct rix_hash_bucket_extra_s *vbk = ctxp->bk_ex[bki];  \
                         for (unsigned s = 0u; s < RIX_HASH_BUCKET_ENTRY_SZ;   \
                              s++) {                                           \
                             u32 nidx = vbk->idx[s];                           \
@@ -934,11 +934,11 @@ _FCORE_EXTRA_INT(p, add_idx_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
                         _FCORE_EXTRA_ENTRY_T(p) *victim =                     \
                             FCORE_EXTRA_LAYOUT_ENTRY_PTR(owner, victim_idx);  \
                         RIX_ASSUME_NONNULL(victim);                           \
-                        ctxp->bk[victim_bki]->hash[victim_slot] =             \
+                        ctxp->bk_ex[victim_bki]->hash[victim_slot] =             \
                             ctxp->fp;                                         \
-                        ctxp->bk[victim_bki]->idx[victim_slot] =              \
+                        ctxp->bk_ex[victim_bki]->idx[victim_slot] =              \
                             eidx;                                             \
-                        ctxp->bk[victim_bki]->extra[victim_slot] =            \
+                        ctxp->bk_ex[victim_bki]->extra[victim_slot] =            \
                             flow_extra_timestamp_encode(                      \
                                 (now),                                        \
                                 FCORE_EXTRA_TIMESTAMP_SHIFT(owner));          \
@@ -1076,7 +1076,7 @@ _FCORE_EXTRA_INT(p, del_key_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
     _FCORE_EXTRA_ENTRY_T(p) *hash_base =                                      \
         FCORE_EXTRA_LAYOUT_HASH_BASE(owner);                                  \
     const u32 hash_mask = FCORE_EXTRA_HASH_MASK(owner, ht);                   \
-    struct rix_hash_find_ctx_extra_s ctx[_FCORE_EXTRA_DEL_CTX_COUNT];         \
+    struct rix_hash_find_ctx_s ctx[_FCORE_EXTRA_DEL_CTX_COUNT];         \
     unsigned count = 0u;                                                      \
     u64 del_miss = 0u;                                                        \
     u64 dels = 0u;                                                            \
@@ -1119,7 +1119,7 @@ _FCORE_EXTRA_INT(p, del_key_bulk_)(_FCORE_EXTRA_OT(ot) *owner,                \
             unsigned n = (base + step <= nb_keys) ? step                      \
                                                   : (nb_keys - base);         \
             for (unsigned j = 0; j < n; j++) {                                \
-                struct rix_hash_find_ctx_extra_s *ctxp =                      \
+                struct rix_hash_find_ctx_s *ctxp =                      \
                     &ctx[(base + j) & ctx_mask];                              \
                 _FCORE_EXTRA_HT(ht, scan_bk)(ctxp, head, buckets);            \
                 _FCORE_EXTRA_HT(ht, prefetch_node)(ctxp, hash_base);          \

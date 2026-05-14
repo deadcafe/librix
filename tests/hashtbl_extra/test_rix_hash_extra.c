@@ -221,7 +221,7 @@ test_staged_find_x1(void)
         eht_insert(&e_head, e_bk, e_basic, &e_basic[i], 0xE1E1u + i);
 
     for (unsigned i = 0; i < NB_BASIC; i++) {
-        struct rix_hash_find_ctx_extra_s ctx;
+        struct rix_hash_find_ctx_s ctx;
         RIX_HASH_HASH_KEY(eht, &ctx, &e_head, e_bk, &e_basic[i].key);
         RIX_HASH_SCAN_BK (eht, &ctx, &e_head, e_bk);
         RIX_HASH_PREFETCH_NODE(eht, &ctx, e_basic);
@@ -241,7 +241,7 @@ test_staged_find_xN(void)
         eht_insert(&e_head, e_bk, e_basic, &e_basic[i], 0xFEFEu + i);
 
     enum { N = 4 };
-    struct rix_hash_find_ctx_extra_s ctx[N];
+    struct rix_hash_find_ctx_s ctx[N];
     const struct ek *keys[N];
     struct enode    *res[N];
 

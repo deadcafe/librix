@@ -15,17 +15,11 @@
  * Slot 15 of hash[] / idx[] aliases ctrl / reserved (same as the other
  * MRSW variants); extra[0..14] holds caller-defined u32 values that the
  * writer maintains across kickout.  Slot 15 of extra[] is unused. */
-struct rix_hash_mrsw_extra_find_ctx_s {
-    union rix_hash_hash_u            hash;
-    struct rix_hash_bucket_extra_s  *bk[2];
-    struct rix_hash_bucket_extra_s  *buckets;
-    const void                      *key;
-    u32                              ctrl[2];
-    unsigned                         hash_mask;
-    unsigned                         bk_mask;
-    u32                              fp;
-    u32                              fp_hits[2];
-};
+/*
+ * MRSW/MRMW SLOT_EXTRA reuses the shared rix_hash_mrsw_find_ctx_s
+ * (rix_hash_fp_mr.h).  Generators access bk_ex[2] and buckets_ex, which
+ * alias bk[2] / buckets in that struct.
+ */
 
 /* SLOT_EXTRA bucket ctrl helpers (operate on rix_hash_bucket_extra_s).      */
 static RIX_FORCE_INLINE u32
@@ -206,7 +200,7 @@ name##_find_empty(struct rix_hash_bucket_extra_s *buckets, unsigned bk_idx)   \
     return empty ? (int)__builtin_ctz(empty) : -1;                            \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
+name##_hash_key_masked(struct rix_hash_mrsw_find_ctx_s *ctx,            \
                        struct name *head __attribute__((unused)),             \
                        struct rix_hash_bucket_extra_s *buckets,               \
                        const RIX_HASH_KEY_TYPE(type, key_field) *key,         \
@@ -218,16 +212,16 @@ name##_hash_key_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
     ctx->hash = h;                                                            \
     ctx->fp = fp;                                                             \
     ctx->key = (const void *)key;                                             \
-    ctx->buckets = buckets;                                                   \
+    ctx->buckets_ex = buckets;                                                \
     ctx->hash_mask = hash_mask;                                               \
     ctx->bk_mask = bk_mask;                                                   \
-    ctx->bk[0] = buckets + bk0;                                               \
-    ctx->bk[1] = buckets + bk1;                                               \
-    __builtin_prefetch(ctx->bk[0], 0, 1);                                     \
-    __builtin_prefetch(ctx->bk[1], 0, 1);                                     \
+    ctx->bk_ex[0] = buckets + bk0;                                               \
+    ctx->bk_ex[1] = buckets + bk1;                                               \
+    __builtin_prefetch(ctx->bk_ex[0], 0, 1);                                     \
+    __builtin_prefetch(ctx->bk_ex[1], 0, 1);                                     \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx,                   \
+name##_hash_key(struct rix_hash_mrsw_find_ctx_s *ctx,                   \
                 struct name *head,                                            \
                 struct rix_hash_bucket_extra_s *buckets,                      \
                 const RIX_HASH_KEY_TYPE(type, key_field) *key)                \
@@ -236,19 +230,19 @@ name##_hash_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx,                   \
     name##_hash_key_masked(ctx, head, buckets, key, mask, mask);              \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk(struct rix_hash_mrsw_extra_find_ctx_s *ctx,                    \
+name##_scan_bk(struct rix_hash_mrsw_find_ctx_s *ctx,                    \
                struct name *head __attribute__((unused)),                     \
                struct rix_hash_bucket_extra_s *buckets __attribute__((unused))) \
 {                                                                             \
-    ctx->ctrl[0] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk[0]);         \
-    ctx->fp_hits[0] = name##_scan_bucket_hashes(ctx->bk[0], ctx->fp,          \
+    ctx->ctrl[0] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk_ex[0]);         \
+    ctx->fp_hits[0] = name##_scan_bucket_hashes(ctx->bk_ex[0], ctx->fp,          \
                                                 rix_hash_mrsw_ctrl_valid(     \
                                                     ctx->ctrl[0]));           \
     ctx->ctrl[1] = 0u;                                                        \
     ctx->fp_hits[1] = 0u;                                                     \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD void                \
-name##_prefetch_node(struct rix_hash_mrsw_extra_find_ctx_s *ctx,              \
+name##_prefetch_node(struct rix_hash_mrsw_find_ctx_s *ctx,              \
                      struct type *base)                                       \
 {                                                                             \
     for (int i = 0; i < 2; i++) {                                             \
@@ -256,7 +250,7 @@ name##_prefetch_node(struct rix_hash_mrsw_extra_find_ctx_s *ctx,              \
         while (hits) {                                                        \
             unsigned bit = (unsigned)__builtin_ctz(hits);                     \
             hits &= hits - 1u;                                                \
-            u32 idx = ctx->bk[i]->idx[bit];                                   \
+            u32 idx = ctx->bk_ex[i]->idx[bit];                                   \
             if (idx != (u32)RIX_NIL) {                                        \
                 struct type *node = name##_hptr(base, idx);                   \
                 if (node)                                                     \
@@ -266,14 +260,14 @@ name##_prefetch_node(struct rix_hash_mrsw_extra_find_ctx_s *ctx,              \
     }                                                                         \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD struct type *       \
-name##_cmp_key_bk_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
+name##_cmp_key_bk_once(struct rix_hash_mrsw_find_ctx_s *ctx,            \
                        struct type *base, unsigned which)                     \
 {                                                                             \
     u32 hits = ctx->fp_hits[which];                                           \
     while (hits) {                                                            \
         unsigned bit = (unsigned)__builtin_ctz(hits);                         \
         hits &= hits - 1u;                                                    \
-        u32 idx = ctx->bk[which]->idx[bit];                                   \
+        u32 idx = ctx->bk_ex[which]->idx[bit];                                   \
         if (idx == (u32)RIX_NIL)                                              \
             continue;                                                         \
         struct type *node = name##_hptr(base, idx);                           \
@@ -284,15 +278,15 @@ name##_cmp_key_bk_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
     return NULL;                                                              \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk1(struct rix_hash_mrsw_extra_find_ctx_s *ctx)                   \
+name##_scan_bk1(struct rix_hash_mrsw_find_ctx_s *ctx)                   \
 {                                                                             \
-    ctx->ctrl[1] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk[1]);         \
-    ctx->fp_hits[1] = name##_scan_bucket_hashes(ctx->bk[1], ctx->fp,          \
+    ctx->ctrl[1] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk_ex[1]);         \
+    ctx->fp_hits[1] = name##_scan_bucket_hashes(ctx->bk_ex[1], ctx->fp,          \
                                                 rix_hash_mrsw_ctrl_valid(     \
                                                     ctx->ctrl[1]));           \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_cmp_key_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,               \
+name##_cmp_key_once(struct rix_hash_mrsw_find_ctx_s *ctx,               \
                     struct type *base)                                        \
 {                                                                             \
     struct type *r = name##_cmp_key_bk_once(ctx, base, 0u);                   \
@@ -302,15 +296,15 @@ name##_cmp_key_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,               \
     return name##_cmp_key_bk_once(ctx, base, 1u);                             \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_cmp_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx, struct type *base) \
+name##_cmp_key(struct rix_hash_mrsw_find_ctx_s *ctx, struct type *base) \
 {                                                                             \
     for (;;) {                                                                \
         struct type *r = name##_cmp_key_once(ctx, base);                      \
         if (r != NULL)                                                        \
             return r;                                                         \
-        int retry0 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk[0],        \
+        int retry0 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk_ex[0],        \
                                                            ctx->ctrl[0]);     \
-        int retry1 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk[1],        \
+        int retry1 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk_ex[1],        \
                                                            ctx->ctrl[1]);     \
         if (!retry0 && !retry1)                                               \
             return NULL;                                                      \
@@ -318,7 +312,7 @@ name##_cmp_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx, struct type *base) \
     }                                                                         \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key_n_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,          \
+name##_hash_key_n_masked(struct rix_hash_mrsw_find_ctx_s *ctx,          \
                          unsigned n, struct name *head,                       \
                          struct rix_hash_bucket_extra_s *buckets,             \
                          const RIX_HASH_KEY_TYPE(type, key_field) * const *keys, \
@@ -329,7 +323,7 @@ name##_hash_key_n_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,          \
                                hash_mask, bk_mask);                           \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,     \
+name##_hash_key_n(struct rix_hash_mrsw_find_ctx_s *ctx, unsigned n,     \
                   struct name *head, struct rix_hash_bucket_extra_s *buckets, \
                   const RIX_HASH_KEY_TYPE(type, key_field) * const *keys)     \
 {                                                                             \
@@ -337,21 +331,21 @@ name##_hash_key_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,     \
     name##_hash_key_n_masked(ctx, n, head, buckets, keys, mask, mask);        \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,      \
+name##_scan_bk_n(struct rix_hash_mrsw_find_ctx_s *ctx, unsigned n,      \
                  struct name *head, struct rix_hash_bucket_extra_s *buckets)  \
 {                                                                             \
     for (unsigned i = 0u; i < n; i++)                                         \
         name##_scan_bk(&ctx[i], head, buckets);                               \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_prefetch_node_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
+name##_prefetch_node_n(struct rix_hash_mrsw_find_ctx_s *ctx,            \
                        unsigned n, struct type *base)                         \
 {                                                                             \
     for (unsigned i = 0u; i < n; i++)                                         \
         name##_prefetch_node(&ctx[i], base);                                  \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_cmp_key_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,      \
+name##_cmp_key_n(struct rix_hash_mrsw_find_ctx_s *ctx, unsigned n,      \
                  struct type *base, struct type **results)                   \
 {                                                                             \
     for (unsigned i = 0u; i < n; i++)                                         \
@@ -362,7 +356,7 @@ name##_find(struct name *head, struct rix_hash_bucket_extra_s *buckets,       \
             struct type *base,                                                \
             const RIX_HASH_KEY_TYPE(type, key_field) *key)                    \
 {                                                                             \
-    struct rix_hash_mrsw_extra_find_ctx_s ctx;                                \
+    struct rix_hash_mrsw_find_ctx_s ctx;                                \
     name##_hash_key(&ctx, head, buckets, key);                                \
     name##_scan_bk(&ctx, head, buckets);                                      \
     return name##_cmp_key(&ctx, base);                                        \
@@ -778,7 +772,7 @@ name##_scan_bucket_hashes(struct rix_hash_bucket_extra_s *bk, u32 fp,         \
     return hits & valid;                                                      \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
+name##_hash_key_masked(struct rix_hash_mrsw_find_ctx_s *ctx,            \
                        struct name *head __attribute__((unused)),             \
                        struct rix_hash_bucket_extra_s *buckets,               \
                        const RIX_HASH_KEY_TYPE(type, key_field) *key,         \
@@ -790,16 +784,16 @@ name##_hash_key_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
     ctx->hash = h;                                                            \
     ctx->fp = fp;                                                             \
     ctx->key = (const void *)key;                                             \
-    ctx->buckets = buckets;                                                   \
+    ctx->buckets_ex = buckets;                                                \
     ctx->hash_mask = hash_mask;                                               \
     ctx->bk_mask = bk_mask;                                                   \
-    ctx->bk[0] = buckets + bk0;                                               \
-    ctx->bk[1] = buckets + bk1;                                               \
-    __builtin_prefetch(ctx->bk[0], 0, 1);                                     \
-    __builtin_prefetch(ctx->bk[1], 0, 1);                                     \
+    ctx->bk_ex[0] = buckets + bk0;                                               \
+    ctx->bk_ex[1] = buckets + bk1;                                               \
+    __builtin_prefetch(ctx->bk_ex[0], 0, 1);                                     \
+    __builtin_prefetch(ctx->bk_ex[1], 0, 1);                                     \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx,                   \
+name##_hash_key(struct rix_hash_mrsw_find_ctx_s *ctx,                   \
                 struct name *head,                                            \
                 struct rix_hash_bucket_extra_s *buckets,                      \
                 const RIX_HASH_KEY_TYPE(type, key_field) *key)                \
@@ -808,19 +802,19 @@ name##_hash_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx,                   \
     name##_hash_key_masked(ctx, head, buckets, key, mask, mask);              \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk(struct rix_hash_mrsw_extra_find_ctx_s *ctx,                    \
+name##_scan_bk(struct rix_hash_mrsw_find_ctx_s *ctx,                    \
                struct name *head __attribute__((unused)),                     \
                struct rix_hash_bucket_extra_s *buckets __attribute__((unused))) \
 {                                                                             \
-    ctx->ctrl[0] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk[0]);         \
-    ctx->fp_hits[0] = name##_scan_bucket_hashes(ctx->bk[0], ctx->fp,          \
+    ctx->ctrl[0] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk_ex[0]);         \
+    ctx->fp_hits[0] = name##_scan_bucket_hashes(ctx->bk_ex[0], ctx->fp,          \
                                                 rix_hash_mrsw_ctrl_valid(     \
                                                     ctx->ctrl[0]));           \
     ctx->ctrl[1] = 0u;                                                        \
     ctx->fp_hits[1] = 0u;                                                     \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD void                \
-name##_prefetch_node(struct rix_hash_mrsw_extra_find_ctx_s *ctx,              \
+name##_prefetch_node(struct rix_hash_mrsw_find_ctx_s *ctx,              \
                      struct type *base)                                       \
 {                                                                             \
     for (int i = 0; i < 2; i++) {                                             \
@@ -828,7 +822,7 @@ name##_prefetch_node(struct rix_hash_mrsw_extra_find_ctx_s *ctx,              \
         while (hits) {                                                        \
             unsigned bit = (unsigned)__builtin_ctz(hits);                     \
             hits &= hits - 1u;                                                \
-            u32 idx = ctx->bk[i]->idx[bit];                                   \
+            u32 idx = ctx->bk_ex[i]->idx[bit];                                   \
             if (idx != (u32)RIX_NIL) {                                        \
                 struct type *node = name##_hptr(base, idx);                   \
                 if (node)                                                     \
@@ -838,14 +832,14 @@ name##_prefetch_node(struct rix_hash_mrsw_extra_find_ctx_s *ctx,              \
     }                                                                         \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE RIX_NO_SANITIZE_THREAD struct type *       \
-name##_cmp_key_bk_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
+name##_cmp_key_bk_once(struct rix_hash_mrsw_find_ctx_s *ctx,            \
                        struct type *base, unsigned which)                     \
 {                                                                             \
     u32 hits = ctx->fp_hits[which];                                           \
     while (hits) {                                                            \
         unsigned bit = (unsigned)__builtin_ctz(hits);                         \
         hits &= hits - 1u;                                                    \
-        u32 idx = ctx->bk[which]->idx[bit];                                   \
+        u32 idx = ctx->bk_ex[which]->idx[bit];                                   \
         if (idx == (u32)RIX_NIL)                                              \
             continue;                                                         \
         struct type *node = name##_hptr(base, idx);                           \
@@ -856,15 +850,15 @@ name##_cmp_key_bk_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
     return NULL;                                                              \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk1(struct rix_hash_mrsw_extra_find_ctx_s *ctx)                   \
+name##_scan_bk1(struct rix_hash_mrsw_find_ctx_s *ctx)                   \
 {                                                                             \
-    ctx->ctrl[1] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk[1]);         \
-    ctx->fp_hits[1] = name##_scan_bucket_hashes(ctx->bk[1], ctx->fp,          \
+    ctx->ctrl[1] = rix_hash_mrsw_extra_bucket_read_begin(ctx->bk_ex[1]);         \
+    ctx->fp_hits[1] = name##_scan_bucket_hashes(ctx->bk_ex[1], ctx->fp,          \
                                                 rix_hash_mrsw_ctrl_valid(     \
                                                     ctx->ctrl[1]));           \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_cmp_key_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,               \
+name##_cmp_key_once(struct rix_hash_mrsw_find_ctx_s *ctx,               \
                     struct type *base)                                        \
 {                                                                             \
     struct type *r = name##_cmp_key_bk_once(ctx, base, 0u);                   \
@@ -874,15 +868,15 @@ name##_cmp_key_once(struct rix_hash_mrsw_extra_find_ctx_s *ctx,               \
     return name##_cmp_key_bk_once(ctx, base, 1u);                             \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE struct type *                              \
-name##_cmp_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx, struct type *base) \
+name##_cmp_key(struct rix_hash_mrsw_find_ctx_s *ctx, struct type *base) \
 {                                                                             \
     for (;;) {                                                                \
         struct type *r = name##_cmp_key_once(ctx, base);                      \
         if (r != NULL)                                                        \
             return r;                                                         \
-        int retry0 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk[0],        \
+        int retry0 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk_ex[0],        \
                                                            ctx->ctrl[0]);     \
-        int retry1 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk[1],        \
+        int retry1 = rix_hash_mrsw_extra_bucket_read_retry(ctx->bk_ex[1],        \
                                                            ctx->ctrl[1]);     \
         if (!retry0 && !retry1)                                               \
             return NULL;                                                      \
@@ -890,7 +884,7 @@ name##_cmp_key(struct rix_hash_mrsw_extra_find_ctx_s *ctx, struct type *base) \
     }                                                                         \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key_n_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,          \
+name##_hash_key_n_masked(struct rix_hash_mrsw_find_ctx_s *ctx,          \
                          unsigned n, struct name *head,                       \
                          struct rix_hash_bucket_extra_s *buckets,             \
                          const RIX_HASH_KEY_TYPE(type, key_field) * const *keys, \
@@ -901,7 +895,7 @@ name##_hash_key_n_masked(struct rix_hash_mrsw_extra_find_ctx_s *ctx,          \
                                hash_mask, bk_mask);                           \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,     \
+name##_hash_key_n(struct rix_hash_mrsw_find_ctx_s *ctx, unsigned n,     \
                   struct name *head, struct rix_hash_bucket_extra_s *buckets, \
                   const RIX_HASH_KEY_TYPE(type, key_field) * const *keys)     \
 {                                                                             \
@@ -909,21 +903,21 @@ name##_hash_key_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,     \
     name##_hash_key_n_masked(ctx, n, head, buckets, keys, mask, mask);        \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,      \
+name##_scan_bk_n(struct rix_hash_mrsw_find_ctx_s *ctx, unsigned n,      \
                  struct name *head, struct rix_hash_bucket_extra_s *buckets)  \
 {                                                                             \
     for (unsigned i = 0u; i < n; i++)                                         \
         name##_scan_bk(&ctx[i], head, buckets);                               \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_prefetch_node_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx,            \
+name##_prefetch_node_n(struct rix_hash_mrsw_find_ctx_s *ctx,            \
                        unsigned n, struct type *base)                         \
 {                                                                             \
     for (unsigned i = 0u; i < n; i++)                                         \
         name##_prefetch_node(&ctx[i], base);                                  \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_cmp_key_n(struct rix_hash_mrsw_extra_find_ctx_s *ctx, unsigned n,      \
+name##_cmp_key_n(struct rix_hash_mrsw_find_ctx_s *ctx, unsigned n,      \
                  struct type *base, struct type **results)                   \
 {                                                                             \
     for (unsigned i = 0u; i < n; i++)                                         \
@@ -934,7 +928,7 @@ name##_find(struct name *head, struct rix_hash_bucket_extra_s *buckets,       \
             struct type *base,                                                \
             const RIX_HASH_KEY_TYPE(type, key_field) *key)                    \
 {                                                                             \
-    struct rix_hash_mrsw_extra_find_ctx_s ctx;                                \
+    struct rix_hash_mrsw_find_ctx_s ctx;                                \
     name##_hash_key(&ctx, head, buckets, key);                                \
     name##_scan_bk(&ctx, head, buckets);                                      \
     return name##_cmp_key(&ctx, base);                                        \

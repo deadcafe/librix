@@ -10,10 +10,23 @@
 
 #  include "rix_hash_mr_core.h"
 
+/*
+ * Shared MRSW/MRMW find context.
+ *
+ * FP / SLOT / KEYONLY MR variants access bk[2] / buckets (rix_hash_bucket_s
+ * pointers); SLOT_EXTRA MR variants access bk_ex[2] / buckets_ex
+ * (rix_hash_bucket_extra_s pointers).  Each pair aliases the same storage.
+ */
 struct rix_hash_mrsw_find_ctx_s {
     union rix_hash_hash_u          hash;
-    struct rix_hash_bucket_s *bk[2];
-    struct rix_hash_bucket_s *buckets;
+    union {
+        struct rix_hash_bucket_s       *bk[2];     /* FP / SLOT / KEYONLY */
+        struct rix_hash_bucket_extra_s *bk_ex[2];  /* SLOT_EXTRA          */
+    };
+    union {
+        struct rix_hash_bucket_s       *buckets;
+        struct rix_hash_bucket_extra_s *buckets_ex;
+    };
     const void                    *key;
     u32                            ctrl[2];
     unsigned                       hash_mask;
