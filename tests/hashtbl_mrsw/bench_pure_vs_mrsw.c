@@ -708,7 +708,7 @@ DEFINE_PTR_BENCH("pure SLOT_EXTRA", ht_pure_extra, struct n_pure_extra,
                  RIX_HASH_BUCKET_ENTRY_SZ)
 
 DEFINE_U32_BENCH("pure U32", ht_pure_u32, struct n_pure_u32,
-                 struct rix_hash32_find_ctx_s, struct rix_hash32_bucket_s,
+                 struct rix_hash32_find_ctx_s, struct rix_hash_bucket_s,
                  ht_pure_u32_init(&head, bk, nb_bk),
                  if (ht_pure_u32_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
                  ht_pure_u32_remove(&head, bk, nodes, &nodes[i]),

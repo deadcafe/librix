@@ -853,7 +853,7 @@ RIX_HASH32_GENERATE(ht32, entry32, key)
 
 rix_hash_arch_init(RIX_HASH_ARCH_AUTO);
 
-struct rix_hash32_bucket_s *buckets =
+struct rix_hash_bucket_s *buckets =
     aligned_alloc(64, NB_BK * sizeof(*buckets));
 memset(buckets, 0, NB_BK * sizeof(*buckets));
 entry32 *pool = calloc(N, sizeof(*pool));

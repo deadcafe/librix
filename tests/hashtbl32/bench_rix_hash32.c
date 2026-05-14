@@ -152,7 +152,7 @@ find_idx_from_ctx(struct rix_hash32_find_ctx_s *ctx)
         unsigned bit = (unsigned)__builtin_ctz(hits);
         return ctx->bk[0]->idx[bit];
     }
-    hits = rix_hash_arch->find_u32x16(ctx->bk[1]->key, ctx->key);
+    hits = rix_hash_arch->find_u32x16(ctx->bk[1]->hash, ctx->key);
     if (hits) {
         unsigned bit = (unsigned)__builtin_ctz(hits);
         return ctx->bk[1]->idx[bit];
@@ -168,7 +168,7 @@ find_idx_from_ctx_n(struct rix_hash32_find_ctx_s *ctx, int n, unsigned *results)
 }
 
 static RIX_FORCE_INLINE unsigned
-find_idx_single(struct myht32 *head, struct rix_hash32_bucket_s *bk, u32 key)
+find_idx_single(struct myht32 *head, struct rix_hash_bucket_s *bk, u32 key)
 {
     struct rix_hash32_find_ctx_s ctx;
     RIX_HASH_U32_HASH_KEY(myht32, &ctx, head, bk, key);
@@ -256,7 +256,7 @@ free_results(struct bench_result_s *result, unsigned n)
 
 static void
 measure_find_patterns(struct myht32 *head,
-                      struct rix_hash32_bucket_s *bk,
+                      struct rix_hash_bucket_s *bk,
                       mynode_t *nodes,
                       const u32 keys[BENCH_N],
                       unsigned repeat,
@@ -563,7 +563,7 @@ measure_find_patterns(struct myht32 *head,
 
 static void
 measure_update_patterns(struct myht32 *head,
-                        struct rix_hash32_bucket_s *bk,
+                        struct rix_hash_bucket_s *bk,
                         mynode_t *nodes,
                         unsigned repeat,
                         struct bench_result_s result[2])
@@ -632,7 +632,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
     u64 bk0_hits = 0, bk1_hits = 0;
     /* ---- Memory estimate --------------------------------------------- */
     size_t node_mem = (size_t)table_n * sizeof(mynode_t);
-    size_t bk_mem   = (size_t)nb_bk   * sizeof(struct rix_hash32_bucket_s);
+    size_t bk_mem   = (size_t)nb_bk   * sizeof(struct rix_hash_bucket_s);
     size_t lookup_mem = (size_t)BENCH_N * sizeof(u32);
     printf("[BENCH] table_n=%u  nb_bk=%u  slots=%u\n",
            table_n, nb_bk, nb_bk * RIX_HASH_BUCKET_ENTRY_SZ);
@@ -665,8 +665,8 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
     }
 
     /* ---- Bucket allocation ------------------------------------------- */
-    struct rix_hash32_bucket_s *bk =
-        (struct rix_hash32_bucket_s *)mmap(NULL, bk_mem,
+    struct rix_hash_bucket_s *bk =
+        (struct rix_hash_bucket_s *)mmap(NULL, bk_mem,
                                            PROT_READ | PROT_WRITE,
                                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (bk == MAP_FAILED) { perror("mmap bk"); exit(1); }
@@ -695,9 +695,9 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
             rix_hash_arch->hash_u32((u32)nodes[i].key, head.rhh_mask);
         unsigned _b0 = _h.val32[0] & head.rhh_mask;
         unsigned _b1 = _h.val32[1] & head.rhh_mask;
-        u32 _nilm0 = rix_hash_arch->find_u32x16(bk[_b0].key,
+        u32 _nilm0 = rix_hash_arch->find_u32x16(bk[_b0].hash,
                                                       BENCH_INVALID_KEY);
-        u32 _nilm1 = rix_hash_arch->find_u32x16(bk[_b1].key,
+        u32 _nilm1 = rix_hash_arch->find_u32x16(bk[_b1].hash,
                                                       BENCH_INVALID_KEY);
         if      (_nilm0) ins_bk0_fast++;
         else if (_nilm1) ins_bk1_fast++;
@@ -733,7 +733,7 @@ bench_find(unsigned table_n, unsigned nb_bk, unsigned repeat)
                 u32 nidx = bk[b].idx[s];
                 if (nidx == (u32)RIX_NIL)
                     continue;
-                u32 key = bk[b].key[s];
+                u32 key = bk[b].hash[s];
                 union rix_hash_hash_u h = rix_hash_arch->hash_u32(key, mask);
                 if (b == (h.val32[0] & mask))
                     bk0_hits++;

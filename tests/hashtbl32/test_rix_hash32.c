@@ -34,7 +34,7 @@ RIX_HASH_U32_HEAD(myht32);
 RIX_HASH_U32_GENERATE(myht32, mynode_t, key, INVALID_KEY)
 
 static struct myht32              head;
-static struct rix_hash32_bucket_s buckets[NB_BUCKETS];
+static struct rix_hash_bucket_s buckets[NB_BUCKETS];
 static mynode_t                   nodes[NB_NODES];
 
 static void
@@ -183,7 +183,7 @@ test_init_invalid_key(void)
     unsigned bad_key = 0, bad_idx = 0;
     for (unsigned b = 0; b < NB_BUCKETS; b++) {
         for (unsigned s = 0; s < RIX_HASH_BUCKET_ENTRY_SZ; s++) {
-            if (buckets[b].key[s] != INVALID_KEY) bad_key++;
+            if (buckets[b].hash[s] != INVALID_KEY) bad_key++;
             if (buckets[b].idx[s] != (u32)RIX_NIL) bad_idx++;
         }
     }
@@ -213,7 +213,7 @@ test_remove_restores_invalid_key(void)
     for (unsigned b = 0; b < NB_BUCKETS; b++)
         for (unsigned s = 0; s < RIX_HASH_BUCKET_ENTRY_SZ; s++)
             if (buckets[b].idx[s] == (u32)RIX_NIL &&
-                buckets[b].key[s] != INVALID_KEY)
+                buckets[b].hash[s] != INVALID_KEY)
                 bad++;
     if (bad)
         FAIL("remove: %u empty slots still have non-invalid key", bad);
@@ -420,8 +420,8 @@ test_high_fill(void)
     const unsigned HF_N     = 960u;
 
     mynode_t *hf_nodes = (mynode_t *)calloc(HF_N, sizeof(mynode_t));
-    struct rix_hash32_bucket_s *hf_bk =
-        (struct rix_hash32_bucket_s *)aligned_alloc(64, HF_NB_BK * sizeof(*hf_bk));
+    struct rix_hash_bucket_s *hf_bk =
+        (struct rix_hash_bucket_s *)aligned_alloc(64, HF_NB_BK * sizeof(*hf_bk));
     if (!hf_nodes || !hf_bk) { perror("alloc"); abort(); }
 
     for (unsigned i = 0; i < HF_N; i++) {
@@ -494,8 +494,8 @@ test_max_fill(void)
     const unsigned MF_N     = MF_SLOTS + 64u;  /* try beyond capacity */
 
     mynode_t *mf_nodes = (mynode_t *)calloc(MF_N, sizeof(mynode_t));
-    struct rix_hash32_bucket_s *mf_bk =
-        (struct rix_hash32_bucket_s *)aligned_alloc(64, MF_NB_BK * sizeof(*mf_bk));
+    struct rix_hash_bucket_s *mf_bk =
+        (struct rix_hash_bucket_s *)aligned_alloc(64, MF_NB_BK * sizeof(*mf_bk));
     if (!mf_nodes || !mf_bk) { perror("alloc"); abort(); }
 
     for (unsigned i = 0; i < MF_N; i++) {
@@ -547,8 +547,8 @@ test_kickout_safety(void)
     const unsigned KC_N     = KC_CAP + 64u;
 
     mynode_t *kc_nodes = (mynode_t *)calloc(KC_N, sizeof(mynode_t));
-    struct rix_hash32_bucket_s *kc_bk =
-        (struct rix_hash32_bucket_s *)aligned_alloc(64, KC_NB_BK * sizeof(*kc_bk));
+    struct rix_hash_bucket_s *kc_bk =
+        (struct rix_hash_bucket_s *)aligned_alloc(64, KC_NB_BK * sizeof(*kc_bk));
     if (!kc_nodes || !kc_bk) { perror("alloc"); abort(); }
 
     for (unsigned i = 0; i < KC_N; i++) {
@@ -620,8 +620,8 @@ test_fuzz(unsigned seed, unsigned N, unsigned nb_bk, unsigned ops)
     xr_fuzz = seed ? seed : 0xC0FFEE11u;
 
     mynode_t *fz_nodes = (mynode_t *)calloc(N, sizeof(mynode_t));
-    struct rix_hash32_bucket_s *fz_bk =
-        (struct rix_hash32_bucket_s *)aligned_alloc(64, nb_bk * sizeof(*fz_bk));
+    struct rix_hash_bucket_s *fz_bk =
+        (struct rix_hash_bucket_s *)aligned_alloc(64, nb_bk * sizeof(*fz_bk));
     int *in_tbl = (int *)calloc(N, sizeof(int));
     if (!fz_nodes || !fz_bk || !in_tbl) { perror("alloc"); abort(); }
 
