@@ -69,6 +69,12 @@ rix_hash_mrsw_u64_bucket_read_retry(struct rix_hash64_bucket_s *bk, u32 ctrl)
     return now != ctrl;
 }
 
+/*
+ * Only ctrl (with wlock/reserved aliased at idx[15]) needs to be cleared.
+ * key[] and idx[] are read only under a matching valid bit, so uninitialised
+ * payload of valid=0 slots is never observed.  See the commentary on
+ * rix_hash_mrsw_buckets_init().
+ */
 static RIX_FORCE_INLINE void
 rix_hash_mrsw_u64_buckets_init(struct rix_hash64_bucket_s *buckets,
                                unsigned nb_bk)
@@ -76,11 +82,7 @@ rix_hash_mrsw_u64_buckets_init(struct rix_hash64_bucket_s *buckets,
     for (unsigned b = 0u; b < nb_bk; b++) {
         struct rix_hash64_bucket_s *bk = buckets + b;
         atomic_init(&bk->ctrl, 0u);
-        bk->reserved = 0u;
-        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
-            bk->key[s] = 0u;
-            bk->idx[s] = (u32)RIX_NIL;
-        }
+        atomic_init(&bk->wlock, 0u);
     }
 }
 

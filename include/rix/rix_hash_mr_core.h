@@ -383,6 +383,18 @@ rix_hash_mrsw_bucket_read_retry(struct rix_hash_bucket_s *bk,
     return now != ctrl;
 }
 
+/*
+ * MR bucket initialisation.
+ *
+ * Only ctrl (and the wlock alias at idx[15]) need to be cleared.  All hash[]
+ * and idx[] reads in the MRSW/MRMW protocol are filtered by the valid bits
+ * in ctrl (see scan_bucket_hashes / find_empty / kickout): a slot with
+ * valid=0 is never inspected, so its payload can remain at whatever value
+ * the allocator left it at.  Skipping the per-slot zero-fill cuts init from
+ * O(nb_bk * 16) stores to O(nb_bk) — material for tables in the millions of
+ * buckets, especially on hugepage-backed memory where the allocator already
+ * delivered zeroed pages.
+ */
 static RIX_FORCE_INLINE void
 rix_hash_mrsw_buckets_init(struct rix_hash_bucket_s *buckets,
                            unsigned nb_bk)
@@ -391,10 +403,6 @@ rix_hash_mrsw_buckets_init(struct rix_hash_bucket_s *buckets,
         struct rix_hash_bucket_s *bk = buckets + b;
         atomic_init(&bk->ctrl, 0u);
         atomic_init(&bk->wlock, 0u);
-        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
-            bk->hash[s] = 0u;
-            bk->idx [s] = (u32)RIX_NIL;
-        }
     }
 }
 

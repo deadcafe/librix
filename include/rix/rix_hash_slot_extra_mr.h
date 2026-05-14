@@ -73,6 +73,12 @@ rix_hash_mrsw_extra_bucket_read_retry(struct rix_hash_bucket_extra_s *bk,
     return now != ctrl;
 }
 
+/*
+ * Only ctrl (with wlock/reserved aliased at idx[15]) needs to be cleared.
+ * hash[], idx[], and extra[] are read only under a matching valid bit, so
+ * uninitialised payload of valid=0 slots is never observed.  See the
+ * commentary on rix_hash_mrsw_buckets_init().
+ */
 static RIX_FORCE_INLINE void
 rix_hash_mrsw_extra_buckets_init(struct rix_hash_bucket_extra_s *buckets,
                                  unsigned nb_bk)
@@ -80,12 +86,7 @@ rix_hash_mrsw_extra_buckets_init(struct rix_hash_bucket_extra_s *buckets,
     for (unsigned b = 0u; b < nb_bk; b++) {
         struct rix_hash_bucket_extra_s *bk = buckets + b;
         atomic_init(&bk->ctrl, 0u);
-        bk->reserved = 0u;
-        for (unsigned s = 0u; s < RIX_HASH_MRSW_BUCKET_ENTRY_SZ; s++) {
-            bk->hash[s] = 0u;
-            bk->idx[s] = (u32)RIX_NIL;
-            bk->extra[s] = 0u;
-        }
+        atomic_init(&bk->wlock, 0u);
     }
 }
 
