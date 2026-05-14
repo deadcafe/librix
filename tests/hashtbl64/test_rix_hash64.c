@@ -143,7 +143,7 @@ test_staged_find(void)
 
     /* x1 staged */
     {
-        struct rix_hash64_find_ctx_s ctx;
+        struct rix_hash_keyed_find_ctx_s ctx;
         RIX_HASH_U64_HASH_KEY(myht64, &ctx, &g_head, g_bk, g_basic[3].key);
         RIX_HASH_U64_SCAN_BK (myht64, &ctx, &g_head, g_bk);
         mynode_t *r = RIX_HASH_U64_CMP_KEY(myht64, &ctx, g_basic);
@@ -152,7 +152,7 @@ test_staged_find(void)
 
     /* x2 staged */
     {
-        struct rix_hash64_find_ctx_s ctx2[2];
+        struct rix_hash_keyed_find_ctx_s ctx2[2];
         u64 keys2[2] = { g_basic[0].key, g_basic[1].key };
         mynode_t *res2[2];
         RIX_HASH_U64_HASH_KEY_N(myht64, ctx2, 2, &g_head, g_bk, keys2);
@@ -165,7 +165,7 @@ test_staged_find(void)
 
     /* x4 staged */
     {
-        struct rix_hash64_find_ctx_s ctx4[4];
+        struct rix_hash_keyed_find_ctx_s ctx4[4];
         u64 keys4[4] = {
             g_basic[4].key, g_basic[5].key, g_basic[6].key, g_basic[7].key
         };

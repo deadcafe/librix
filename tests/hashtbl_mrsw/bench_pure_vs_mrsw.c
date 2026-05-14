@@ -708,14 +708,14 @@ DEFINE_PTR_BENCH("pure SLOT_EXTRA", ht_pure_extra, struct n_pure_extra,
                  RIX_HASH_BUCKET_ENTRY_SZ)
 
 DEFINE_U32_BENCH("pure U32", ht_pure_u32, struct n_pure_u32,
-                 struct rix_hash32_find_ctx_s, struct rix_hash_bucket_s,
+                 struct rix_hash_keyed_find_ctx_s, struct rix_hash_bucket_s,
                  ht_pure_u32_init(&head, bk, nb_bk),
                  if (ht_pure_u32_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
                  ht_pure_u32_remove(&head, bk, nodes, &nodes[i]),
                  rix_hash_nb_bk_hint, RIX_HASH_BUCKET_ENTRY_SZ)
 
 DEFINE_U64_BENCH("pure U64", ht_pure_u64, struct n_pure_u64,
-                 struct rix_hash64_find_ctx_s, struct rix_hash64_bucket_s,
+                 struct rix_hash_keyed_find_ctx_s, struct rix_hash64_bucket_s,
                  ht_pure_u64_init(&head, bk, nb_bk),
                  if (ht_pure_u64_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
                  ht_pure_u64_remove(&head, bk, nodes, &nodes[i]),
@@ -800,7 +800,7 @@ DEFINE_MRSW_PTR_BENCH("MRMW SLOT_EXTRA", ht_mrmw_extra, struct n_mrmw_extra,
                       RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
 DEFINE_U32_BENCH("MRSW U32", ht_mrsw_u32, struct n_mrsw_u32,
-                 struct rix_hash_mrsw_u32_find_ctx_s,
+                 struct rix_hash_mrsw_keyed_find_ctx_s,
                  struct rix_hash_bucket_s,
                  ht_mrsw_u32_init(&head, bk, nb_bk),
                  if (ht_mrsw_u32_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
@@ -808,7 +808,7 @@ DEFINE_U32_BENCH("MRSW U32", ht_mrsw_u32, struct n_mrsw_u32,
                  rix_hash_mrsw_nb_bk_hint, RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
 DEFINE_U32_BENCH("MRMW U32", ht_mrmw_u32, struct n_mrmw_u32,
-                 struct rix_hash_mrsw_u32_find_ctx_s,
+                 struct rix_hash_mrsw_keyed_find_ctx_s,
                  struct rix_hash_bucket_s,
                  (ht_mrmw_u32_init(&head, bk, nb_bk),
                   ht_mrmw_u32_attach_kickout_scratch(&head,
@@ -819,7 +819,7 @@ DEFINE_U32_BENCH("MRMW U32", ht_mrmw_u32, struct n_mrmw_u32,
                  rix_hash_mrsw_nb_bk_hint, RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
 DEFINE_U64_BENCH("MRSW U64", ht_mrsw_u64, struct n_mrsw_u64,
-                 struct rix_hash_mrsw_u64_find_ctx_s,
+                 struct rix_hash_mrsw_keyed_find_ctx_s,
                  struct rix_hash64_bucket_s,
                  ht_mrsw_u64_init(&head, bk, nb_bk),
                  if (ht_mrsw_u64_insert(&head, bk, nodes, &nodes[i]) != NULL) exit(2),
@@ -827,7 +827,7 @@ DEFINE_U64_BENCH("MRSW U64", ht_mrsw_u64, struct n_mrsw_u64,
                  rix_hash_mrsw_nb_bk_hint, RIX_HASH_MRSW_BUCKET_ENTRY_SZ)
 
 DEFINE_U64_BENCH("MRMW U64", ht_mrmw_u64, struct n_mrmw_u64,
-                 struct rix_hash_mrsw_u64_find_ctx_s,
+                 struct rix_hash_mrsw_keyed_find_ctx_s,
                  struct rix_hash64_bucket_s,
                  (ht_mrmw_u64_init(&head, bk, nb_bk),
                   ht_mrmw_u64_attach_kickout_scratch(&head,

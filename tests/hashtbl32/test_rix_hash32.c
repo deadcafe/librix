@@ -350,7 +350,7 @@ test_staged_x4(void)
     }
 
     /* Staged x4 find */
-    struct rix_hash32_find_ctx_s ctx[4];
+    struct rix_hash_keyed_find_ctx_s ctx[4];
     u32 keys[4] = { 200, 201, 202, 203 };
     mynode_t *results[4];
 

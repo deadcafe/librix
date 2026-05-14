@@ -35,6 +35,31 @@ struct rix_hash_mrsw_find_ctx_s {
     u32                            fp_hits[2];
 };
 
+/*
+ * Shared MRSW/MRMW keyed find context (U32 / U64).
+ *
+ * U32 MR variants access bk[2] / buckets / key (rix_hash_bucket_s* / u32);
+ * U64 MR variants access bk_u64[2] / buckets_u64 / key_u64
+ * (rix_hash64_bucket_s* / u64).  Each pair aliases the same storage.
+ */
+struct rix_hash_mrsw_keyed_find_ctx_s {
+    union {
+        struct rix_hash_bucket_s   *bk[2];      /* U32 */
+        struct rix_hash64_bucket_s *bk_u64[2];  /* U64 */
+    };
+    union {
+        struct rix_hash_bucket_s   *buckets;     /* U32 */
+        struct rix_hash64_bucket_s *buckets_u64; /* U64 */
+    };
+    u32 ctrl[2];
+    u32 hits[2];
+    union {
+        u32 key;        /* U32 32-bit key */
+        u64 key_u64;    /* U64 64-bit key */
+    };
+    unsigned bk_mask;
+};
+
 #  define RIX_HASH_MRSW_PROTOTYPE_INTERNAL(name, type, key_field, hash_field, cmp_fn, attr) \
     attr void name##_init(struct name *head,                                  \
                           struct rix_hash_bucket_s *buckets,            \

@@ -90,7 +90,7 @@ now_sec(void)
 #define KPD8  8   /* x8 pipeline: 8 batches x 8 keys = 64 keys ahead */
 #define KPD6 11   /* x6 pipeline: 11 batches x 6 keys = 66 keys ahead */
 
-static struct rix_hash64_find_ctx_s g_ctx[BENCH_N];
+static struct rix_hash_keyed_find_ctx_s g_ctx[BENCH_N];
 static mynode_t                    *g_res[BENCH_N];
 static unsigned                     g_idx[BENCH_N];
 static volatile u64            g_thrash_sink;
@@ -149,23 +149,23 @@ result_median_op(struct bench_result_s *result)
 }
 
 static RIX_FORCE_INLINE unsigned
-find_idx_from_ctx(struct rix_hash64_find_ctx_s *ctx)
+find_idx_from_ctx(struct rix_hash_keyed_find_ctx_s *ctx)
 {
     u32 hits = ctx->hits[0];
     if (hits) {
         unsigned bit = (unsigned)__builtin_ctz(hits);
-        return ctx->bk[0]->idx[bit];
+        return ctx->bk_u64[0]->idx[bit];
     }
-    hits = rix_hash_arch->find_u64x16(ctx->bk[1]->key, ctx->key);
+    hits = rix_hash_arch->find_u64x16(ctx->bk_u64[1]->key, ctx->key_u64);
     if (hits) {
         unsigned bit = (unsigned)__builtin_ctz(hits);
-        return ctx->bk[1]->idx[bit];
+        return ctx->bk_u64[1]->idx[bit];
     }
     return 0u;
 }
 
 static RIX_FORCE_INLINE void
-find_idx_from_ctx_n(struct rix_hash64_find_ctx_s *ctx, int n, unsigned *results)
+find_idx_from_ctx_n(struct rix_hash_keyed_find_ctx_s *ctx, int n, unsigned *results)
 {
     for (int j = 0; j < n; j++)
         results[j] = find_idx_from_ctx(&ctx[j]);
@@ -174,7 +174,7 @@ find_idx_from_ctx_n(struct rix_hash64_find_ctx_s *ctx, int n, unsigned *results)
 static RIX_FORCE_INLINE unsigned
 find_idx_single(struct myht64 *head, struct rix_hash64_bucket_s *bk, u64 key)
 {
-    struct rix_hash64_find_ctx_s ctx;
+    struct rix_hash_keyed_find_ctx_s ctx;
     RIX_HASH_U64_HASH_KEY(myht64, &ctx, head, bk, key);
     RIX_HASH_U64_SCAN_BK(myht64, &ctx, head, bk);
     return find_idx_from_ctx(&ctx);

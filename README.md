@@ -871,7 +871,7 @@ entry32 *ht32_remove(&head, buckets, pool, key_value);
 int      ht32_walk  (&head, buckets, pool, cb, arg);
 
 /* Pipelined find (same stage pattern as rix_hash) */
-struct rix_hash32_find_ctx_s ctx[4];
+struct rix_hash_keyed_find_ctx_s ctx[4];
 u32 keys[4] = { k0, k1, k2, k3 };
 entry32 *results[4];
 

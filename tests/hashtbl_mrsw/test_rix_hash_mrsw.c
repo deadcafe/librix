@@ -1669,7 +1669,7 @@ test_u32_staged_remove_at(void)
             FAILF("u32 staged setup insert[%u] failed", i);
     }
 
-    struct rix_hash_mrsw_u32_find_ctx_s ctx[4];
+    struct rix_hash_mrsw_keyed_find_ctx_s ctx[4];
     u32 keys[4] = {
         g_u32[1].key, g_u32[7].key, 999999u, g_u32[13].key
     };
@@ -1870,7 +1870,7 @@ test_u64_staged_remove_at(void)
             FAILF("u64 staged setup insert[%u] failed", i);
     }
 
-    struct rix_hash_mrsw_u64_find_ctx_s ctx[4];
+    struct rix_hash_mrsw_keyed_find_ctx_s ctx[4];
     u64 keys[4] = {
         g_u64[1].key, g_u64[7].key, UINT64_C(0xC0FFEE), g_u64[13].key
     };
@@ -2549,7 +2549,7 @@ test_mrmw_u32_insert_find_remove(void)
                           g_mrmw_u32, &g_mrmw_u32[7]) != &g_mrmw_u32[7])
         FAIL("mrmw u32 duplicate did not return existing");
 
-    struct rix_hash_mrsw_u32_find_ctx_s ctx[4];
+    struct rix_hash_mrsw_keyed_find_ctx_s ctx[4];
     u32 keys[4] = {
         g_mrmw_u32[1].key, g_mrmw_u32[3].key, 999999u, g_mrmw_u32[7].key
     };
@@ -2592,7 +2592,7 @@ test_mrmw_u64_insert_find_remove(void)
                           g_mrmw_u64, &g_mrmw_u64[7]) != &g_mrmw_u64[7])
         FAIL("mrmw u64 duplicate did not return existing");
 
-    struct rix_hash_mrsw_u64_find_ctx_s ctx[4];
+    struct rix_hash_mrsw_keyed_find_ctx_s ctx[4];
     u64 keys[4] = {
         g_mrmw_u64[1].key, g_mrmw_u64[3].key,
         UINT64_C(0xFACE000000000000), g_mrmw_u64[7].key

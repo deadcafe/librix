@@ -137,6 +137,32 @@ RIX_STATIC_ASSERT(offsetof(struct rix_hash_find_ctx_s, fp_hits) == 36u,
 RIX_STATIC_ASSERT(offsetof(struct rix_hash_find_ctx_s, empties) == 44u,
                   "rix_hash_find_ctx_s.empties offset changed");
 
+/*===========================================================================
+ * Find context (staged pipeline) - U32 / U64 variants
+ *
+ * U32 generators access bk[2] / key (rix_hash_bucket_s* / u32); U64
+ * generators access bk_u64[2] / key_u64 (rix_hash64_bucket_s* / u64).
+ * Each pair aliases the same storage.
+ *===========================================================================*/
+struct rix_hash64_bucket_s;        /* fwd decl: see rix_hash_u64.h */
+
+struct rix_hash_keyed_find_ctx_s {
+    union {
+        struct rix_hash_bucket_s   *bk[2];      /* U32 */
+        struct rix_hash64_bucket_s *bk_u64[2];  /* U64 */
+    };                                          /* 16B offset 0  */
+    union {
+        u32 key;                                /* U32 32-bit key */
+        u64 key_u64;                            /* U64 64-bit key */
+    };                                          /*  8B offset 16 */
+    u32 hits[2];                                /*  8B offset 24 */
+};                                              /* total 32 B    */
+
+RIX_STATIC_ASSERT(sizeof(struct rix_hash_keyed_find_ctx_s) == 32u,
+                  "rix_hash_keyed_find_ctx_s must be 32 bytes");
+RIX_STATIC_ASSERT(_Alignof(struct rix_hash_keyed_find_ctx_s) == _Alignof(void *),
+                  "rix_hash_keyed_find_ctx_s must keep pointer alignment");
+
 /*---------------------------------------------------------------------------
  * rix_hash_prefetch_key - prefetch key data into L1/L2 before name_hash_key.
  *

@@ -141,19 +141,10 @@ RIX_STATIC_ASSERT(offsetof(struct rix_hash64_bucket_s, reserved) == 188u,
         unsigned rhh_nb;                                                      \
     }
 
-/*===========================================================================
- * Find context (staged pipeline)
- *===========================================================================*/
-struct rix_hash64_find_ctx_s {
-    struct rix_hash64_bucket_s *bk[2];
-    u64                    key;        /* 64-bit search key             */
-    u32                    hits[2];    /* bitmask: key match in bk[i]   */
-};
-
-RIX_STATIC_ASSERT(sizeof(struct rix_hash64_find_ctx_s) == 32u,
-                  "rix_hash64_find_ctx_s must be 32 bytes");
-RIX_STATIC_ASSERT(_Alignof(struct rix_hash64_find_ctx_s) == _Alignof(void *),
-                  "rix_hash64_find_ctx_s must keep pointer alignment");
+/*
+ * Find context: reuse the shared rix_hash_keyed_find_ctx_s defined in
+ * rix_hash_common.h.  U64 accesses bk_u64[] and key_u64.
+ */
 
 /*===========================================================================
  * RIX_HASH_U64_GENERATE(name, type, key_field, invalid_key)
@@ -282,33 +273,34 @@ name##_hptr(type *base, unsigned i) {                                         \
 /* miss (moderate fill -> most hits land in bk[0]).                      */   \
 /* key is passed by value (u64), not as a pointer.                       */   \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key(struct rix_hash64_find_ctx_s *ctx,                            \
+name##_hash_key(struct rix_hash_keyed_find_ctx_s *ctx,                            \
                 struct name *head,                                            \
                 struct rix_hash64_bucket_s *buckets,                          \
                 u64 key)                                                      \
 {                                                                             \
     unsigned mask = head->rhh_mask;                                           \
     union rix_hash_hash_u _h = rix_hash_arch->hash_u64(key, mask);            \
-    ctx->key   = key;                                                         \
-    ctx->bk[0] = buckets + (_h.val32[0] & mask);                              \
-    ctx->bk[1] = buckets + (_h.val32[1] & mask);                              \
-    __builtin_prefetch((const char *)ctx->bk[0] +   0, 0, 1); /* CL0: key lo */ \
-    __builtin_prefetch((const char *)ctx->bk[0] +  64, 0, 1); /* CL1: key hi */ \
-    __builtin_prefetch((const char *)ctx->bk[0] + 128, 0, 1); /* CL2: idx    */ \
+    ctx->key_u64 = key;                                                       \
+    ctx->bk_u64[0] = buckets + (_h.val32[0] & mask);                              \
+    ctx->bk_u64[1] = buckets + (_h.val32[1] & mask);                              \
+    __builtin_prefetch((const char *)ctx->bk_u64[0] +   0, 0, 1); /* CL0: key lo */ \
+    __builtin_prefetch((const char *)ctx->bk_u64[0] +  64, 0, 1); /* CL1: key hi */ \
+    __builtin_prefetch((const char *)ctx->bk_u64[0] + 128, 0, 1); /* CL2: idx    */ \
 }                                                                             \
-/* Stage 2: scan bk[0]->key[] for ctx->key using find_u64x16. */              \
+/* Stage 2: scan bk[0]->key[] for ctx->key_u64 using find_u64x16. */          \
 /* hits[1] = 0; bk[1] is scanned lazily in cmp_key on bk[0] miss. */          \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk(struct rix_hash64_find_ctx_s *ctx,                             \
+name##_scan_bk(struct rix_hash_keyed_find_ctx_s *ctx,                             \
                struct name *head __attribute__((unused)),                     \
                struct rix_hash64_bucket_s *buckets __attribute__((unused)))   \
 {                                                                             \
-    ctx->hits[0] = rix_hash_arch->find_u64x16(ctx->bk[0]->key, ctx->key);     \
+    ctx->hits[0] = rix_hash_arch->find_u64x16(ctx->bk_u64[0]->key,            \
+                                              ctx->key_u64);                  \
     ctx->hits[1] = 0u;                                                        \
 }                                                                             \
 /* Stage 3: prefetch node data for all hits[0] positions. */                  \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_prefetch_node(struct rix_hash64_find_ctx_s *ctx,                       \
+name##_prefetch_node(struct rix_hash_keyed_find_ctx_s *ctx,                       \
                      type *base)                                              \
 {                                                                             \
     u32 _hits = ctx->hits[0];                                                 \
@@ -316,26 +308,27 @@ name##_prefetch_node(struct rix_hash64_find_ctx_s *ctx,                       \
         unsigned _bit = (unsigned)__builtin_ctz(_hits);                       \
         _hits &= _hits - 1u;                                                  \
         __builtin_prefetch(                                                   \
-            name##_hptr(base, ctx->bk[0]->idx[_bit]), 0, 0);                  \
+            name##_hptr(base, ctx->bk_u64[0]->idx[_bit]), 0, 0);                  \
     }                                                                         \
 }                                                                             \
 /* Stage 4: return the node for the hit; lazily scan bk[1] on miss. */        \
 static RIX_UNUSED RIX_FORCE_INLINE type *                                     \
-name##_cmp_key(struct rix_hash64_find_ctx_s *ctx,                             \
+name##_cmp_key(struct rix_hash_keyed_find_ctx_s *ctx,                             \
                type *base)                                                    \
 {                                                                             \
     /* Fast path: bk[0] */                                                    \
     u32 _hits = ctx->hits[0];                                                 \
     if (_hits) {                                                              \
         unsigned _bit = (unsigned)__builtin_ctz(_hits);                       \
-        return name##_hptr(base, ctx->bk[0]->idx[_bit]);                      \
+        return name##_hptr(base, ctx->bk_u64[0]->idx[_bit]);                      \
     }                                                                         \
     /* Slow path: bk[0] miss - lazily fetch and scan bk[1] */                 \
     {                                                                         \
-        _hits = rix_hash_arch->find_u64x16(ctx->bk[1]->key, ctx->key);        \
+        _hits = rix_hash_arch->find_u64x16(ctx->bk_u64[1]->key,               \
+                                           ctx->key_u64);                     \
         if (_hits) {                                                          \
             unsigned _bit = (unsigned)__builtin_ctz(_hits);                   \
-            return name##_hptr(base, ctx->bk[1]->idx[_bit]);                  \
+            return name##_hptr(base, ctx->bk_u64[1]->idx[_bit]);                  \
         }                                                                     \
     }                                                                         \
     return NULL;                                                              \
@@ -345,7 +338,7 @@ name##_cmp_key(struct rix_hash64_find_ctx_s *ctx,                             \
 /* FORCE_INLINE + constant n -> compiler unrolls identically to xN.   */      \
 /* ================================================================== */      \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_hash_key_n(struct rix_hash64_find_ctx_s *ctx,                          \
+name##_hash_key_n(struct rix_hash_keyed_find_ctx_s *ctx,                          \
                   int n,                                                      \
                   struct name *head,                                          \
                   struct rix_hash64_bucket_s *buckets,                        \
@@ -355,7 +348,7 @@ name##_hash_key_n(struct rix_hash64_find_ctx_s *ctx,                          \
         name##_hash_key(&ctx[_j], head, buckets, keys[_j]);                   \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_scan_bk_n(struct rix_hash64_find_ctx_s *ctx,                           \
+name##_scan_bk_n(struct rix_hash_keyed_find_ctx_s *ctx,                           \
                  int n,                                                       \
                  struct name *head,                                           \
                  struct rix_hash64_bucket_s *buckets)                         \
@@ -364,7 +357,7 @@ name##_scan_bk_n(struct rix_hash64_find_ctx_s *ctx,                           \
         name##_scan_bk(&ctx[_j], head, buckets);                              \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_prefetch_node_n(struct rix_hash64_find_ctx_s *ctx,                     \
+name##_prefetch_node_n(struct rix_hash_keyed_find_ctx_s *ctx,                     \
                        int n,                                                 \
                        type *base)                                            \
 {                                                                             \
@@ -372,7 +365,7 @@ name##_prefetch_node_n(struct rix_hash64_find_ctx_s *ctx,                     \
         name##_prefetch_node(&ctx[_j], base);                                 \
 }                                                                             \
 static RIX_UNUSED RIX_FORCE_INLINE void                                       \
-name##_cmp_key_n(struct rix_hash64_find_ctx_s *ctx,                           \
+name##_cmp_key_n(struct rix_hash_keyed_find_ctx_s *ctx,                           \
                  int n,                                                       \
                  type *base,                                                  \
                  type **results)                                              \
@@ -389,7 +382,7 @@ name##_find(struct name *head,                                                \
             type *base,                                                       \
             u64 key)                                                          \
 {                                                                             \
-    struct rix_hash64_find_ctx_s _ctx;                                        \
+    struct rix_hash_keyed_find_ctx_s _ctx;                                        \
     name##_hash_key(&_ctx, head, buckets, key);                               \
     name##_scan_bk (&_ctx, head, buckets);                                    \
     return name##_cmp_key(&_ctx, base);                                       \
